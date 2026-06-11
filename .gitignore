@@ -1,0 +1,60 @@
+# Environment
+.env
+.env.local
+.env.*.local
+.env.production
+
+# Logs
+*.log
+logs/
+
+# Database
+*.db
+*.db.vazio
+
+# Tokens & Credentials
+olist_token.json
+credentials.json
+
+# Backend
+backend/venv/
+backend/__pycache__/
+backend/.pytest_cache/
+backend/uploads/*
+!backend/uploads/.gitkeep
+backend/app/__pycache__/
+
+# Frontend
+frontend/node_modules/
+frontend/dist/
+frontend/.DS_Store
+frontend/coverage/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+*.iml
+.project
+
+# OS
+.DS_Store
+Thumbs.db
+.env
+
+# Testing
+.coverage
+htmlcov/
+
+# Cache
+*.pyc
+__pycache__/
+.pytest_cache/
+
+# Vercel
+.vercel
+
+# Railway
+.railway/
