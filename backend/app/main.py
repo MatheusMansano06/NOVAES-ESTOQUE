@@ -2469,6 +2469,94 @@ async def vincular_item_embale(request: Request):
         db.close()
 
 
+async def balancear_item_embale(request: Request):
+    """
+    POST /api/embaldes/{embale_id}/itens/{item_id}/balancear
+    Faz o balanço de estoque de um item: corrige estoque na Olist e aplica baixa do FULL.
+
+    Body: {"quantidade_real": N}  (quantidade conferida no físico)
+
+    Fluxo:
+    1. Atualiza Olist para quantidade_real (corrige erros passados)
+    2. Desconta a quantidade destinada ao FULL
+    3. Marca o item como "balanceado"
+
+    Retorna: estoque_olist_antes, estoque_olist_depois, qtd_full_desconta, saldo_disponivel
+    """
+    db = SessionLocal()
+    try:
+        embale_id = int(request.path_params.get("embale_id"))
+        item_id = int(request.path_params.get("item_id"))
+        data = await request.json()
+        quantidade_real = float(data.get("quantidade_real", 0))
+
+        if quantidade_real < 0:
+            return JSONResponse({"erro": "Quantidade não pode ser negativa"}, status_code=400)
+
+        embale = db.query(EmbaleFU).filter(EmbaleFU.id == embale_id).first()
+        if not embale:
+            return JSONResponse({"erro": "Inbound não encontrado"}, status_code=404)
+        if embale.status == "encerrado":
+            return JSONResponse({"erro": "Inbound já está encerrado"}, status_code=400)
+
+        item = next((i for i in embale.itens if i.id == item_id), None)
+        if not item:
+            return JSONResponse({"erro": "Item não encontrado neste inbound"}, status_code=404)
+
+        if not item.olist_produto_id:
+            return JSONResponse({"erro": "Item não está vinculado à Olist"}, status_code=400)
+
+        # Obter estoque ANTES
+        produto_id = item.olist_produto_id
+        estoque_antes = olist.obter_estoque_produto(produto_id) or 0
+
+        # Quantidade a descontar do FULL
+        qtd_full = item.quantidade_separada or 0
+
+        # 1. Atualizar Olist para quantidade_real (balanço completo)
+        sucesso = olist.atualizar_estoque(
+            produto_id=produto_id,
+            quantidade=quantidade_real - estoque_antes,  # diferença = entrada/saída
+            tipo="B",  # Balanço (não é entrada nem saída, é correção)
+            observacao=f"Balanço do Inbound #{embale.numero_inbound}: corrigido de {estoque_antes} para {quantidade_real}"
+        )
+
+        if not sucesso:
+            db.rollback()
+            return JSONResponse({"erro": "Falha ao atualizar estoque na Olist"}, status_code=500)
+
+        # 2. Aplicar baixa do FULL automaticamente
+        baixa_resultado = _aplicar_baixa_item(db, item, embale, qtd_override=qtd_full)
+
+        # 3. Atualizar o item como balanceado
+        item.saldo_disponivel = max(0, quantidade_real - qtd_full)
+        item.foi_balanceado = 1
+        item.data_balanceamento = datetime.utcnow()
+        db.add(item)
+        db.commit()
+
+        # Obter estoque DEPOIS
+        estoque_depois = olist.obter_estoque_produto(produto_id) or 0
+
+        return JSONResponse({
+            "item_id": item.id,
+            "titulo": item.titulo_anuncio,
+            "estoque_olist_antes": estoque_antes,
+            "estoque_olist_depois": estoque_depois,
+            "quantidade_real_conferida": quantidade_real,
+            "qtd_full_desconta": qtd_full,
+            "saldo_disponivel": item.saldo_disponivel,
+            "baixa_status": baixa_resultado.get("status"),
+            "mensagem": f"Balanço realizado. Olist: {estoque_antes} → {estoque_depois}. FULL desconta {qtd_full}, sobram {item.saldo_disponivel}."
+        })
+
+    except Exception as e:
+        db.rollback()
+        return JSONResponse({"erro": str(e)}, status_code=500)
+    finally:
+        db.close()
+
+
 async def encerrar_embale(request: Request):
     """
     POST /api/embaldes/{embale_id}/encerrar
@@ -2717,6 +2805,7 @@ routes = [
     Route("/api/embaldes/{embale_id}/confirmar-baixa", confirmar_baixa_embale, methods=["POST"]),
     Route("/api/embaldes/{embale_id}/itens/{item_id}/baixa", baixa_item_individual, methods=["POST"]),
     Route("/api/embaldes/{embale_id}/itens/{item_id}/vincular", vincular_item_embale, methods=["POST"]),
+    Route("/api/embaldes/{embale_id}/itens/{item_id}/balancear", balancear_item_embale, methods=["POST"]),
     Route("/api/embaldes/{embale_id}/encerrar", encerrar_embale, methods=["POST"]),
 ]
 

@@ -234,6 +234,11 @@ class ItemEmbaleFU(Base):
     baixa_aplicada = Column(Integer, default=0)  # 1 = baixa já aplicada na Olist
     data_baixa = Column(DateTime, nullable=True)
 
+    # Balanço de estoque (correção de erros passados)
+    foi_balanceado = Column(Integer, default=0)  # 1 = foi feito balanço
+    saldo_disponivel = Column(Float, nullable=True)  # Qtd real - FULL (após balanço)
+    data_balanceamento = Column(DateTime, nullable=True)
+
     criado_em = Column(DateTime, default=datetime.utcnow)
 
     embalde = relationship("EmbaleFU", back_populates="itens")

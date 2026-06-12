@@ -92,6 +92,10 @@ export function EmbaldesManager() {
   const [buscaResultados, setBuscaResultados] = useState<any[]>([])
   const [buscandoOlist, setBuscandoOlist] = useState(false)
   const [vinculandoProduto, setVinculandoProduto] = useState(false)
+  // Balanço de estoque
+  const [balanceandoItem, setBalanceandoItem] = useState<ItemRevisao | null>(null)
+  const [qtdRealConferida, setQtdRealConferida] = useState('')
+  const [balanceandoId, setBalanceandoId] = useState<number | null>(null)
 
   useEffect(() => {
     carregarInbounds()
@@ -256,6 +260,29 @@ export function EmbaldesManager() {
       setMessage('Erro ao deletar: ' + (erro.response?.data?.erro || String(erro)))
     } finally {
       setLoading(false)
+    }
+  }
+
+  const balancearItem = async (item: ItemRevisao, embaleId: number) => {
+    if (!qtdRealConferida || qtdRealConferida === '') {
+      setMessage('Digite a quantidade conferida no físico')
+      return
+    }
+
+    try {
+      setBalanceandoId(item.item_id)
+      const resultado = await api.post(`/embaldes/${embaleId}/itens/${item.item_id}/balancear`, {
+        quantidade_real: parseFloat(qtdRealConferida)
+      })
+
+      setMessage(`Balanço realizado! ${resultado.data.mensagem}`)
+      setBalanceandoItem(null)
+      setQtdRealConferida('')
+      await carregarRevisao(embaleId)
+    } catch (erro: any) {
+      setMessage('Erro: ' + (erro.response?.data?.erro || String(erro)))
+    } finally {
+      setBalanceandoId(null)
     }
   }
 
@@ -896,7 +923,7 @@ export function EmbaldesManager() {
                                   <span style={{ color: '#999', fontSize: '0.8rem' }}>—</span>
                                 )}
                               </div>
-                              <div style={{ textAlign: 'center' }}>
+                              <div style={{ textAlign: 'center', display: 'flex', gap: '0.3rem', justifyContent: 'center', flexWrap: 'wrap' }}>
                                 {jaBaixado ? (
                                   <span style={{ color: '#2e7d32', fontWeight: 'bold', fontSize: '0.8rem' }}>✓ Baixado</span>
                                 ) : naoAchado ? (
@@ -905,6 +932,13 @@ export function EmbaldesManager() {
                                     style={{ padding: '0.3rem 0.7rem', background: '#fff', color: '#ef6c00', border: '1px solid #ef6c00', borderRadius: '4px', cursor: 'pointer', fontSize: '0.8rem', fontWeight: 'bold' }}
                                   >
                                     Vincular
+                                  </button>
+                                ) : it.tem_falta ? (
+                                  <button
+                                    onClick={() => { setBalanceandoItem(it); setQtdRealConferida('') }}
+                                    style={{ padding: '0.3rem 0.7rem', background: '#fff', color: '#d32f2f', border: '1px solid #d32f2f', borderRadius: '4px', cursor: 'pointer', fontSize: '0.8rem', fontWeight: 'bold' }}
+                                  >
+                                    Balanço
                                   </button>
                                 ) : podeBaixar ? (
                                   <button
@@ -994,6 +1028,93 @@ export function EmbaldesManager() {
           </div>
         )}
       </div>
+      )}
+
+      {/* Modal de Balanço de Estoque */}
+      {balanceandoItem && (
+        <div
+          onClick={() => { setBalanceandoItem(null); setQtdRealConferida('') }}
+          style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{ background: '#fff', borderRadius: '8px', padding: '1.5rem', width: '520px', maxWidth: '92vw', maxHeight: '85vh', overflowY: 'auto', boxShadow: '0 10px 40px rgba(0,0,0,0.3)' }}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start', marginBottom: '1rem' }}>
+              <h3 style={{ margin: 0, color: '#d32f2f' }}>Balancear Estoque</h3>
+              <button onClick={() => { setBalanceandoItem(null); setQtdRealConferida('') }} style={{ background: 'none', border: 'none', fontSize: '1.4rem', cursor: 'pointer', color: '#999', lineHeight: 1 }}>×</button>
+            </div>
+
+            <div style={{ background: '#fff3e0', padding: '0.75rem', borderRadius: '4px', marginBottom: '1rem', borderLeft: '4px solid #d32f2f' }}>
+              <div style={{ fontSize: '0.9rem', fontWeight: 'bold', marginBottom: '0.5rem' }}>⚠ Produto com divergência</div>
+              <div style={{ fontSize: '0.85rem', color: '#666' }}>
+                <strong>{balanceandoItem.titulo}</strong>
+                <br />SKU: {balanceandoItem.sku_inbound || '—'}
+              </div>
+            </div>
+
+            <div style={{ display: 'grid', gap: '0.75rem', marginBottom: '1.5rem', fontSize: '0.9rem' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
+                <div>
+                  <label style={{ display: 'block', fontSize: '0.8rem', color: '#666', marginBottom: '0.3rem', fontWeight: 'bold' }}>Estoque na Olist (hoje)</label>
+                  <div style={{ padding: '0.6rem', background: '#f5f5f5', borderRadius: '4px', fontSize: '1.1rem', fontWeight: 'bold', color: '#1976D2' }}>
+                    {balanceandoItem.estoque_atual || 0} un
+                  </div>
+                </div>
+                <div>
+                  <label style={{ display: 'block', fontSize: '0.8rem', color: '#666', marginBottom: '0.3rem', fontWeight: 'bold' }}>Qtd FULL pendente</label>
+                  <div style={{ padding: '0.6rem', background: '#f5f5f5', borderRadius: '4px', fontSize: '1.1rem', fontWeight: 'bold', color: '#ef6c00' }}>
+                    {Math.round(balanceandoItem.quantidade_full)} un
+                  </div>
+                </div>
+              </div>
+
+              <div>
+                <label style={{ display: 'block', fontSize: '0.8rem', color: '#666', marginBottom: '0.3rem', fontWeight: 'bold' }}>
+                  Quantas unidades você conferiu no FÍSICO? *
+                </label>
+                <input
+                  type="number"
+                  min="0"
+                  step="1"
+                  value={qtdRealConferida}
+                  onChange={(e) => setQtdRealConferida(e.target.value)}
+                  autoFocus
+                  placeholder="0"
+                  style={{ width: '100%', padding: '0.7rem', borderRadius: '4px', border: '2px solid #d32f2f', fontSize: '1rem', fontWeight: 'bold' }}
+                />
+                <div style={{ fontSize: '0.75rem', color: '#999', marginTop: '0.3rem', fontStyle: 'italic' }}>
+                  Confira no estoque físico e digite a quantidade real que você encontrou
+                </div>
+              </div>
+            </div>
+
+            <div style={{ background: '#e8f5e9', padding: '0.75rem', borderRadius: '4px', marginBottom: '1rem', fontSize: '0.85rem' }}>
+              <strong>O que vai acontecer:</strong>
+              <ul style={{ margin: '0.5rem 0 0 0', paddingLeft: '1.2rem' }}>
+                <li>Olist será atualizada para {qtdRealConferida || '?'} un (corrigindo erros)</li>
+                <li>Será descontado {Math.round(balanceandoItem.quantidade_full)} un para o FULL</li>
+                <li>Sobra: {qtdRealConferida ? Math.max(0, parseInt(qtdRealConferida) - Math.round(balanceandoItem.quantidade_full)) : '?'} un disponível</li>
+              </ul>
+            </div>
+
+            <div style={{ display: 'flex', gap: '0.7rem' }}>
+              <button
+                onClick={() => balancearItem(balanceandoItem, revisandoId || 0)}
+                disabled={balanceandoId !== null || !qtdRealConferida}
+                style={{ flex: 1, padding: '0.7rem', background: '#d32f2f', color: '#fff', border: 'none', borderRadius: '4px', cursor: balanceandoId !== null || !qtdRealConferida ? 'not-allowed' : 'pointer', fontWeight: 'bold', opacity: balanceandoId !== null || !qtdRealConferida ? 0.6 : 1 }}
+              >
+                {balanceandoId !== null ? 'Processando...' : 'Confirmar Balanço'}
+              </button>
+              <button
+                onClick={() => { setBalanceandoItem(null); setQtdRealConferida('') }}
+                style={{ flex: 1, padding: '0.7rem', background: '#f5f5f5', color: '#666', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold' }}
+              >
+                Cancelar
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* Modal de vínculo manual (item não achado na Olist) */}
