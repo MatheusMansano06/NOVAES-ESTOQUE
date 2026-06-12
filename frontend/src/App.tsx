@@ -1150,21 +1150,13 @@ function App() {
     return (
       <div className="app">
         <header className="header">
-          <div
-            className="container"
-            style={{
-              display: 'flex',
-              justifyContent: 'space-between',
-              alignItems: 'center',
-              gap: '1.5rem',
-              flexWrap: 'wrap'
-            }}
-          >
-            <div>
+          <div className="container header-main-layout">
+            <div className="header-copy">
               <h1 style={{ marginBottom: '0.35rem' }}>NVS TECH</h1>
             <p>Sistema de Gestão Inteligente de Estoque para Operações de Logística e Marketplace</p>
             </div>
             <div
+              className="header-status"
               style={{
                 display: 'inline-flex',
                 alignItems: 'center',

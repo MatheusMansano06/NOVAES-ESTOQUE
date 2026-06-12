@@ -1,6 +1,19 @@
 import { useState, useEffect } from 'react'
 
 const API_BASE = import.meta.env.VITE_API_URL ?? 'http://127.0.0.1:8000'
+const SHARED_SYNC_INTERVAL_MS = 5000
+
+async function fetchJsonNoCache(url: string) {
+  const res = await fetch(url, {
+    cache: 'no-store',
+    headers: {
+      'Cache-Control': 'no-cache',
+      'Pragma': 'no-cache',
+    },
+  })
+  if (!res.ok) throw new Error(`Falha ao carregar ${url}: ${res.status}`)
+  return res.json()
+}
 
 interface NotaFiscal {
   id: number
@@ -70,19 +83,39 @@ export function FornecedoresManager({ onVoltar }: FornecedoresManagerProps) {
   const [showModalNome, setShowModalNome] = useState(false)
   const [fornecedorParaEditar, setFornecedorParaEditar] = useState<string | null>(null)
   const [novoNome, setNovoNome] = useState('')
+  const [salvandoNome, setSalvandoNome] = useState(false)
 
   // Carrega as notas fiscais na montagem
   useEffect(() => {
     loadNotas()
+    loadApelidos()
   }, [])
 
-  const loadNotas = async () => {
-    setCarregando(true)
-    try {
-      const res = await fetch(API_BASE + '/api/notas-fiscais')
-      if (!res.ok) throw new Error('Falha ao carregar notas')
+  useEffect(() => {
+    const sincronizar = async () => {
+      await Promise.allSettled([loadNotas(true), loadApelidos()])
+    }
 
-      const response = await res.json()
+    const aoVoltar = () => {
+      if (document.visibilityState === 'hidden') return
+      sincronizar()
+    }
+
+    const id = setInterval(sincronizar, SHARED_SYNC_INTERVAL_MS)
+    window.addEventListener('focus', aoVoltar)
+    document.addEventListener('visibilitychange', aoVoltar)
+
+    return () => {
+      clearInterval(id)
+      window.removeEventListener('focus', aoVoltar)
+      document.removeEventListener('visibilitychange', aoVoltar)
+    }
+  }, [])
+
+  const loadNotas = async (silencioso = false) => {
+    if (!silencioso) setCarregando(true)
+    try {
+      const response = await fetchJsonNoCache(API_BASE + '/api/notas-fiscais')
       // A API retorna um objeto paginado com { total, skip, limit, items }
       const data: NotaFiscal[] = response.items || response
       setNotas(data)
@@ -92,7 +125,43 @@ export function FornecedoresManager({ onVoltar }: FornecedoresManagerProps) {
     } catch (err) {
       console.error('Erro ao carregar notas:', err)
     } finally {
-      setCarregando(false)
+      if (!silencioso) setCarregando(false)
+    }
+  }
+
+  const loadApelidos = async () => {
+    try {
+      const response = await fetchJsonNoCache(API_BASE + '/api/apelidos-fornecedores')
+      setNomesFornecedores(response.apelidos || {})
+    } catch (err) {
+      console.error('Erro ao carregar apelidos dos fornecedores:', err)
+    }
+  }
+
+  const salvarNomeFornecedor = async () => {
+    if (!fornecedorParaEditar) return
+
+    setSalvandoNome(true)
+    try {
+      const res = await fetch(API_BASE + '/api/apelidos-fornecedores', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-cache', 'Pragma': 'no-cache' },
+        body: JSON.stringify({
+          nome_fornecedor: fornecedorParaEditar,
+          apelido: novoNome.trim(),
+        }),
+      })
+      const data = await res.json()
+      if (!res.ok || data.erro) throw new Error(data.erro || 'Falha ao salvar nome')
+
+      await loadApelidos()
+      setShowModalNome(false)
+      setFornecedorParaEditar(null)
+      setNovoNome('')
+    } catch (err) {
+      alert('Erro ao salvar nome do fornecedor')
+    } finally {
+      setSalvandoNome(false)
     }
   }
 
@@ -370,7 +439,7 @@ export function FornecedoresManager({ onVoltar }: FornecedoresManagerProps) {
                       onClick={(e) => {
                         e.stopPropagation()
                         setFornecedorParaEditar(fornecedor.nome)
-                        setNovoNome(nomesFornecedores[fornecedor.nome] || '')
+                        setNovoNome(nomesFornecedores[fornecedor.nome] || fornecedor.nome)
                         setShowModalNome(true)
                       }}
                       style={{
@@ -684,6 +753,7 @@ export function FornecedoresManager({ onVoltar }: FornecedoresManagerProps) {
             <div style={{ display: 'flex', gap: '1rem', justifyContent: 'flex-end' }}>
               <button
                 onClick={() => {
+                  if (salvandoNome) return
                   setShowModalNome(false)
                   setFornecedorParaEditar(null)
                   setNovoNome('')
@@ -701,29 +771,21 @@ export function FornecedoresManager({ onVoltar }: FornecedoresManagerProps) {
                 Cancelar
               </button>
               <button
-                onClick={() => {
-                  if (fornecedorParaEditar && novoNome.trim()) {
-                    setNomesFornecedores(prev => ({
-                      ...prev,
-                      [fornecedorParaEditar]: novoNome.trim()
-                    }))
-                  }
-                  setShowModalNome(false)
-                  setFornecedorParaEditar(null)
-                  setNovoNome('')
-                }}
+                onClick={salvarNomeFornecedor}
+                disabled={salvandoNome || !fornecedorParaEditar || !novoNome.trim()}
                 style={{
                   padding: '0.75rem 1.5rem',
                   background: '#007acc',
                   color: 'white',
                   border: 'none',
                   borderRadius: '4px',
-                  cursor: 'pointer',
+                  cursor: salvandoNome ? 'wait' : 'pointer',
                   fontWeight: 600,
-                  fontSize: '0.95rem'
+                  fontSize: '0.95rem',
+                  opacity: salvandoNome || !fornecedorParaEditar || !novoNome.trim() ? 0.7 : 1
                 }}
               >
-                Salvar
+                {salvandoNome ? 'Salvando...' : 'Salvar'}
               </button>
             </div>
           </div>

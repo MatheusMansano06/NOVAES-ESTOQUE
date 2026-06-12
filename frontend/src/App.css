@@ -130,6 +130,26 @@ body::after {
   font-weight: 500;
 }
 
+.header-main-layout {
+  grid-template-columns: 190px minmax(0, 1fr) auto !important;
+}
+
+.header-copy {
+  grid-column: 2;
+  align-self: center;
+}
+
+.header-copy h1,
+.header-copy p {
+  grid-column: auto;
+}
+
+.header-status {
+  grid-column: 3;
+  justify-self: end;
+  align-self: center;
+}
+
 .container {
   max-width: 1760px;
   margin: 0 auto;
@@ -569,6 +589,20 @@ select:focus {
     min-height: 74px;
     column-gap: 1rem;
     padding: 0 10px;
+  }
+
+  .header-main-layout {
+    grid-template-columns: 78px minmax(0, 1fr) !important;
+    row-gap: 0.75rem;
+  }
+
+  .header-copy {
+    grid-column: 2;
+  }
+
+  .header-status {
+    grid-column: 1 / -1;
+    justify-self: end;
   }
 
   .header .container::before {

@@ -87,7 +87,6 @@ def _extrair_items_shopee_pdf(pdf) -> dict:
     numero_inbound = None
     total_unidades = 0
     items = []
-    item_atual = None
 
     for page in pdf.pages:
         texto = page.extract_text() or ""
@@ -101,54 +100,8 @@ def _extrair_items_shopee_pdf(pdf) -> dict:
         if m_total:
             total_unidades = int(m_total.group(1))
 
-        for linha in _linhas_shopee(page):
-            texto_linha = " ".join(
-                parte for parte in [
-                    linha["vendor"],
-                    linha["shopee"],
-                    linha["name"],
-                    linha["warehouse"],
-                    linha["qty"],
-                ] if parte
-            ).strip()
-
-            if not texto_linha or _linha_shopee_ignorada(texto_linha):
-                continue
-
-            sku_shopee = _extrair_sku_shopee(linha["shopee"])
-            sku_vendor = _extrair_sku_vendor_shopee(linha["vendor"])
-            qty_linha = _extrair_quantidade_coluna_shopee(linha["qty"])
-
-            if sku_shopee or _linha_indica_novo_item_shopee(linha, sku_vendor, qty_linha):
-                sku_base = _limpar_campo_shopee(linha["vendor"]) or sku_vendor or sku_shopee
-                if item_atual:
-                    items.append(_normalizar_item_shopee(item_atual))
-
-                descricao_inicial = _limpar_campo_shopee(
-                    f"{_remover_sku_shopee_do_texto(linha['shopee'], sku_shopee or sku_base)} {linha['name']}"
-                )
-                item_atual = {
-                    "sku": sku_base,
-                    "codigo_ml": None,
-                    "titulo_anuncio": descricao_inicial,
-                    "qtd_partes": [str(qty_linha)] if qty_linha is not None else [],
-                }
-                continue
-
-            if not item_atual:
-                continue
-
-            vendor_extra = _limpar_campo_shopee(linha["vendor"])
-            if vendor_extra:
-                item_atual["sku"] = f"{item_atual['sku']} {vendor_extra}".strip()
-
-            descricao_extra = _limpar_campo_shopee(f"{linha['shopee']} {linha['name']}")
-            if descricao_extra and not _texto_warehouse_shopee(descricao_extra):
-                item_atual["titulo_anuncio"] = f"{item_atual['titulo_anuncio']} {descricao_extra}".strip()
-
-        if item_atual:
-            items.append(_normalizar_item_shopee(item_atual))
-            item_atual = None
+        items_pagina = _extrair_items_shopee_pagina_v2(page)
+        items.extend(items_pagina)
 
     items = [item for item in items if item.get("titulo_anuncio") and item.get("quantidade_separada", 0) > 0]
     if not items:
@@ -162,6 +115,120 @@ def _extrair_items_shopee_pdf(pdf) -> dict:
         "total_unidades": total_unidades,
         "items": items
     }
+
+
+def _extrair_items_shopee_pagina_v2(page) -> List[dict]:
+    """
+    Parser v2 para Shopee: agrupa linhas consecutivas para montar item completo.
+    Lida com nomes de produtos quebrados em múltiplas linhas.
+
+    Padrão esperado:
+    - SKU_vendor (coluna 1) | SKU_shopee padrão XXXXX_X (coluna 2) | Nome... | Item without/with | QTD
+    - Continuações de nome vêm em linhas seguintes
+    - GTIN marca fim do item (fica para a próxima)
+    """
+    words = page.extract_words(use_text_flow=True)
+    rows = {}
+    for word in words:
+        key = round(word["top"])
+        rows.setdefault(key, []).append(word)
+
+    linhas_brutos = []
+    for key in sorted(rows):
+        partes = {"vendor": [], "shopee": [], "name": [], "warehouse": [], "qty": []}
+        for word in sorted(rows[key], key=lambda x: x["x0"]):
+            texto = (word.get("text") or "").strip()
+            if not texto:
+                continue
+            x0 = word["x0"]
+            if x0 < 110:
+                partes["vendor"].append(texto)
+            elif x0 < 190:
+                partes["shopee"].append(texto)
+            elif x0 < 445:
+                partes["name"].append(texto)
+            elif x0 < 525:
+                partes["warehouse"].append(texto)
+            else:
+                partes["qty"].append(texto)
+
+        linhas_brutos.append({k: " ".join(v).strip() for k, v in partes.items()})
+
+    items = []
+    item_atual = None
+
+    for linha in linhas_brutos:
+        texto_linha = " ".join(
+            parte for parte in [
+                linha["vendor"],
+                linha["shopee"],
+                linha["name"],
+                linha["warehouse"],
+                linha["qty"],
+            ] if parte
+        ).strip()
+
+        if not texto_linha or _linha_shopee_ignorada(texto_linha):
+            continue
+
+        # Tentar extrair SKU Shopee (padrão: XXXXX_X)
+        sku_shopee = _extrair_sku_shopee(linha["shopee"])
+        sku_vendor = _extrair_sku_vendor_shopee(linha["vendor"])
+
+        # Se tem SKU Shopee, é um novo item
+        if sku_shopee:
+            if item_atual:
+                items.append(_normalizar_item_shopee(item_atual))
+
+            qty_linha = _extrair_quantidade_coluna_shopee(linha["qty"])
+            sku_base = sku_vendor or sku_shopee
+
+            # Nome = tudo que vem após remover o SKU Shopee
+            nome_sem_sku = _remover_sku_shopee_do_texto(linha['shopee'], sku_shopee)
+            nome_completo = f"{nome_sem_sku} {linha['name']}".strip()
+            nome_completo = _limpar_campo_shopee(nome_completo)
+
+            item_atual = {
+                "sku": sku_base,
+                "codigo_ml": sku_shopee,  # Guardar SKU Shopee como codigo_ml
+                "titulo_anuncio": nome_completo,
+                "qtd_partes": [str(qty_linha)] if qty_linha is not None else [],
+            }
+            continue
+
+        # Se não tem SKU Shopee mas tem vendor SKU, pode ser novo item
+        if sku_vendor and item_atual is None:
+            qty_linha = _extrair_quantidade_coluna_shopee(linha["qty"])
+            nome_completo = f"{linha['name']}".strip()
+            nome_completo = _limpar_campo_shopee(nome_completo)
+
+            item_atual = {
+                "sku": sku_vendor,
+                "codigo_ml": None,
+                "titulo_anuncio": nome_completo,
+                "qtd_partes": [str(qty_linha)] if qty_linha is not None else [],
+            }
+            continue
+
+        # Senão, é continuação do item atual (linha quebrada)
+        if item_atual:
+            # Adicionar à descrição
+            descricao_extra = _limpar_campo_shopee(
+                f"{linha['shopee']} {linha['name']} {linha['qty']}"
+            )
+
+            if descricao_extra and not _texto_warehouse_shopee(descricao_extra) and "gtin" not in descricao_extra.lower():
+                item_atual["titulo_anuncio"] = f"{item_atual['titulo_anuncio']} {descricao_extra}".strip()
+
+            # Tentar extrair quantidade se vem aqui
+            qty_linha = _extrair_quantidade_coluna_shopee(linha["qty"])
+            if qty_linha and not item_atual["qtd_partes"]:
+                item_atual["qtd_partes"] = [str(qty_linha)]
+
+    if item_atual:
+        items.append(_normalizar_item_shopee(item_atual))
+
+    return items
 
 
 def _linhas_shopee(page) -> List[dict]:
@@ -261,7 +328,15 @@ def _texto_warehouse_shopee(texto: str) -> bool:
 
 def _limpar_campo_shopee(texto: str) -> str:
     texto_limpo = re.sub(r'\s+', ' ', (texto or '')).strip()
-    texto_limpo = re.sub(r'\bItem without\b', '', texto_limpo, flags=re.IGNORECASE).strip()
+    # Remove marcadores de item
+    texto_limpo = re.sub(r'\b(Item\s+without|Item\s+with|without|with)\b', '', texto_limpo, flags=re.IGNORECASE).strip()
+    # Remove "GTIN," e tudo que vem depois (é continuação de outro item)
+    texto_limpo = re.sub(r'GTIN[,\s].*$', '', texto_limpo, flags=re.IGNORECASE).strip()
+    # Remove SKU patterns (XXXXX_X) que podem ter ficado
+    texto_limpo = re.sub(r'\b\d{8,}_\d+\b', '', texto_limpo).strip()
+    # Remove números grandes isolados (8+ dígitos = GTIN)
+    texto_limpo = re.sub(r'\s\d{8,}\s', ' ', texto_limpo).strip()
+    texto_limpo = re.sub(r'\s\d{8,}$', '', texto_limpo).strip()
     return texto_limpo
 
 
