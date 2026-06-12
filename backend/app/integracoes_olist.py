@@ -15,6 +15,7 @@ import json
 import base64
 import time
 import threading
+import re
 import urllib.request
 import urllib.parse
 from datetime import datetime, timedelta
@@ -470,6 +471,52 @@ class OlistIntegration:
             print(f"[OLIST] Busca por codigo '{codigo}' falhou: {e}")
             return []
 
+    def _normalizar_sku_busca(self, valor: str) -> str:
+        return re.sub(r'[^a-z0-9]', '', (valor or '').lower())
+
+    def _termo_parece_sku(self, termo: str) -> bool:
+        termo = (termo or '').strip()
+        return bool(termo) and ' ' not in termo and len(self._normalizar_sku_busca(termo)) >= 3
+
+    def _score_busca_produto(self, produto: Dict, termo: str, sku_like: bool) -> int:
+        termo_norm = self._normalizar_sku_busca(termo)
+        termo_lower = (termo or '').lower().strip()
+        sku = produto.get('sku', '') or produto.get('codigo_produto', '')
+        nome = produto.get('nome', '') or produto.get('descricao', '')
+        sku_norm = self._normalizar_sku_busca(sku)
+        nome_lower = nome.lower()
+        score = 0
+
+        if termo_norm and sku_norm == termo_norm:
+            score = max(score, 1000)
+        elif termo_norm and sku_norm.startswith(termo_norm):
+            score = max(score, 850)
+        elif termo_norm and termo_norm in sku_norm:
+            score = max(score, 700)
+
+        if not sku_like:
+            if nome_lower == termo_lower:
+                score = max(score, 650)
+            elif termo_lower and nome_lower.startswith(termo_lower):
+                score = max(score, 560)
+            elif termo_lower and termo_lower in nome_lower:
+                score = max(score, 420)
+
+        return score
+
+    def _deduplicar_produtos(self, produtos: List[Dict]) -> List[Dict]:
+        vistos = set()
+        saida = []
+        for p in produtos:
+            sku_norm = self._normalizar_sku_busca(p.get('sku') or p.get('codigo_produto') or '')
+            nome_norm = re.sub(r'\s+', ' ', (p.get('nome') or p.get('descricao') or '').strip().lower())
+            chave = (sku_norm, nome_norm)
+            if chave in vistos:
+                continue
+            vistos.add(chave)
+            saida.append(p)
+        return saida
+
     def buscar_produtos(self, termo: str, limite_resultados: int = 30) -> List[Dict]:
         """
         Busca hibrida:
@@ -482,28 +529,28 @@ class OlistIntegration:
         if not termo or len(termo) < 1:
             return []
 
-        termo_lower = termo.lower().strip()
+        termo = termo.strip()
+        termo_lower = termo.lower()
+        termo_norm = self._normalizar_sku_busca(termo)
+        sku_like = self._termo_parece_sku(termo)
 
         # 1) Cache local (instantaneo apos a 1a vez)
         todos = self.listar_todos_produtos(limite=3000)
 
-        matches_inicio = []
-        matches_meio = []
+        matches = []
         achou_sku_exato = False
         for p in todos:
-            sku = p.get('sku', '').lower()
-            nome = p.get('nome', '').lower()
-            codigo = p.get('codigo_produto', '').lower()
+            sku = p.get('sku', '') or p.get('codigo_produto', '')
+            sku_norm = self._normalizar_sku_busca(sku)
 
-            if sku == termo_lower:
+            if termo_norm and sku_norm == termo_norm:
                 achou_sku_exato = True
 
-            if sku.startswith(termo_lower) or nome.startswith(termo_lower):
-                matches_inicio.append(p)
-            elif termo_lower in nome or termo_lower in sku or termo_lower in codigo:
-                matches_meio.append(p)
-
-        resultado = matches_inicio + matches_meio
+            score = self._score_busca_produto(p, termo, sku_like)
+            if score > 0:
+                item = dict(p)
+                item['_score'] = score
+                matches.append(item)
 
         # 2) Busca na API por codigo (1 req) SOMENTE quando parece um SKU
         #    especifico que o cache nao cobriu bem:
@@ -511,14 +558,37 @@ class OlistIntegration:
         #    - cache trouxe poucos resultados (nao e um nome amplo tipo "viseira"), E
         #    - termo sem espaco com >=3 chars (formato de SKU).
         #    Isso acha VARIACOES sem penalizar buscas por nome.
-        if (not achou_sku_exato and len(resultado) < 5
+        if (not achou_sku_exato and len(matches) < 5
                 and ' ' not in termo and len(termo_lower) >= 3):
             via_api = self._buscar_por_codigo_api(termo.strip())
-            if via_api:
-                ids_no_resultado = {str(p.get('id')) for p in resultado}
-                novos = [p for p in via_api if str(p.get('id')) not in ids_no_resultado]
-                # Variacoes/SKU exato vem no TOPO (sao o que o usuario digitou)
-                resultado = novos + resultado
+            for p in via_api:
+                item = dict(p)
+                item['_score'] = max(1100, self._score_busca_produto(item, termo, sku_like))
+                matches.append(item)
+
+        matches.sort(
+            key=lambda p: (
+                -int(p.get('_score', 0)),
+                len((p.get('sku') or p.get('codigo_produto') or '')),
+                len(p.get('nome') or ''),
+            )
+        )
+        resultado = self._deduplicar_produtos(matches)
+
+        if sku_like:
+            exatos = [
+                p for p in resultado
+                if self._normalizar_sku_busca(p.get('sku') or p.get('codigo_produto') or '') == termo_norm
+            ]
+            if exatos:
+                resultado = exatos
+            else:
+                fortes = [p for p in resultado if int(p.get('_score', 0)) >= 700]
+                if fortes:
+                    resultado = fortes
+
+        for p in resultado:
+            p.pop('_score', None)
 
         resultado = resultado[:limite_resultados]
         print(f"[OLIST] Busca '{termo}': {len(resultado)} resultados (cache={len(todos)})")

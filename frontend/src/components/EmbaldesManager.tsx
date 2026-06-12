@@ -1,6 +1,8 @@
 import { useState, useEffect } from 'react'
 import api from '../services/api'
 
+const SHARED_SYNC_INTERVAL_MS = 5000
+
 interface ItemInbound {
   id: number
   titulo_anuncio: string
@@ -72,6 +74,8 @@ export function EmbaldesManager() {
   const [visao, setVisao] = useState<VisaoInbound>('upload')
   const [editandoData, setEditandoData] = useState<number | null>(null)
   const [novaData, setNovaData] = useState('')
+  const [editandoNome, setEditandoNome] = useState<number | null>(null)
+  const [novoNomeInbound, setNovoNomeInbound] = useState('')
   const [revisao, setRevisao] = useState<Revisao | null>(null)
   const [revisandoId, setRevisandoId] = useState<number | null>(null)
   const [carregandoRevisao, setCarregandoRevisao] = useState(false)
@@ -92,6 +96,24 @@ export function EmbaldesManager() {
   useEffect(() => {
     carregarInbounds()
   }, [])
+
+  useEffect(() => {
+    if (visao !== 'lista') return
+    const sincronizar = async () => {
+      await carregarInbounds()
+    }
+    const recarregarAoVoltar = () => {
+      if (document.visibilityState === 'visible') sincronizar()
+    }
+    const id = setInterval(sincronizar, SHARED_SYNC_INTERVAL_MS)
+    window.addEventListener('focus', sincronizar)
+    document.addEventListener('visibilitychange', recarregarAoVoltar)
+    return () => {
+      clearInterval(id)
+      window.removeEventListener('focus', sincronizar)
+      document.removeEventListener('visibilitychange', recarregarAoVoltar)
+    }
+  }, [visao])
 
   const carregarInbounds = async () => {
     try {
@@ -194,6 +216,27 @@ export function EmbaldesManager() {
       setNovaData('')
       await carregarInbounds()
       setMessage('Data limite atualizada')
+    } catch (erro: any) {
+      setMessage('Erro: ' + (erro.response?.data?.erro || String(erro)))
+    }
+  }
+
+  const salvarNomeInbound = async (id: number) => {
+    try {
+      const nome = novoNomeInbound.trim()
+      if (!nome) {
+        setMessage('Digite um nome válido para o inbound')
+        return
+      }
+      await api.post(`/embaldes/${id}/nome`, { nome_embale: nome })
+      setEditandoNome(null)
+      setNovoNomeInbound('')
+      await carregarInbounds()
+      if (inboundSelecionado?.id === id) {
+        const resposta = await api.get(`/embaldes/${id}`)
+        setInboundSelecionado(resposta.data)
+      }
+      setMessage('Nome do inbound atualizado')
     } catch (erro: any) {
       setMessage('Erro: ' + (erro.response?.data?.erro || String(erro)))
     }
@@ -348,7 +391,7 @@ export function EmbaldesManager() {
         marginBottom: '1.25rem',
         flexWrap: 'wrap'
       }}>
-        <h2 style={{ margin: 0, color: '#061a35' }}>Inbound (Lista de Separação ML FULL)</h2>
+        <h2 style={{ margin: 0, color: '#061a35' }}>Inbound (Lista de Separação FULL)</h2>
         {visao === 'upload' ? (
           <button
             type="button"
@@ -397,8 +440,8 @@ export function EmbaldesManager() {
       }}>
         <h3 style={{ marginTop: 0 }}>Subir Inbound</h3>
         <p style={{ color: '#666', fontSize: '0.9rem', marginBottom: '1.5rem' }}>
-          Envie o PDF de instruções de preparação do Mercado Livre FULL. O sistema lê o
-          SKU de cada produto e verifica se já existe um anúncio vinculado na Olist.
+          Envie o PDF de separação do Mercado Livre FULL ou da Shopee Fulfillment.
+          O sistema lê o SKU de cada produto e verifica se já existe um anúncio vinculado na Olist.
         </p>
 
         <form onSubmit={handleUpload}>
@@ -586,7 +629,28 @@ export function EmbaldesManager() {
                 onClick={() => carregarDetalhes(inb)}
               >
                 <div style={{ flex: '1 1 220px', minWidth: 0 }}>
-                  <div style={{ fontWeight: 'bold', fontSize: '1.1rem' }}>{inb.nome_embalde}</div>
+                  {editandoNome === inb.id ? (
+                    <div onClick={(e) => e.stopPropagation()} style={{ display: 'flex', gap: '0.4rem', alignItems: 'center', flexWrap: 'wrap' }}>
+                      <input
+                        type="text"
+                        value={novoNomeInbound}
+                        onChange={(e) => setNovoNomeInbound(e.target.value)}
+                        style={{ padding: '0.45rem 0.6rem', border: '1px solid #ddd', borderRadius: '4px', minWidth: '220px', fontSize: '0.95rem' }}
+                      />
+                      <button onClick={() => salvarNomeInbound(inb.id)} style={{ padding: '0.4rem 0.7rem', background: '#1976D2', color: '#fff', border: 'none', borderRadius: '4px', cursor: 'pointer' }}>OK</button>
+                      <button onClick={() => { setEditandoNome(null); setNovoNomeInbound('') }} style={{ padding: '0.4rem 0.7rem', background: '#eee', border: 'none', borderRadius: '4px', cursor: 'pointer' }}>x</button>
+                    </div>
+                  ) : (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+                      <div style={{ fontWeight: 'bold', fontSize: '1.1rem' }}>{inb.nome_embalde}</div>
+                      <button
+                        onClick={(e) => { e.stopPropagation(); setEditandoNome(inb.id); setNovoNomeInbound(inb.nome_embalde || '') }}
+                        style={{ padding: '0.2rem 0.5rem', background: 'none', border: '1px solid #ddd', borderRadius: '4px', cursor: 'pointer', fontSize: '0.78rem' }}
+                      >
+                        editar nome
+                      </button>
+                    </div>
+                  )}
                   <div style={{ color: '#666', fontSize: '0.85rem', marginTop: '0.4rem' }}>
                     {inb.numero_inbound ? `Frete #${inb.numero_inbound}` : 'Sem número'}
                     {inb.total_unidades ? ` · ${Math.round(inb.total_unidades)} un` : ''}

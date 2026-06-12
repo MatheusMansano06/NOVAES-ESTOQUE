@@ -19,7 +19,7 @@ import io
 from app.models import (
     NotaFiscal, ItemEstoque, ConfirmacaoEstoque, StatusEstoque, VinculoOlist,
     Fornecedor, HistoricoCompra, ConfiguracaoEstoqueMinimo, NotificacaoFornecedor,
-    EmbaleFU, ItemEmbaleFU
+    EmbaleFU, ItemEmbaleFU, ApelidoFornecedor
 )
 from app.utils.nfe_parser import NFeParsing
 from app.utils.nfe_pdf_generator import NFePDFGenerator
@@ -33,6 +33,24 @@ load_dotenv()
 
 # Create tables
 Base.metadata.create_all(bind=engine)
+
+
+def _garantir_colunas_sqlite():
+    """Aplica migrações leves em SQLite sem depender de Alembic."""
+    db_url = os.getenv("DATABASE_URL", "")
+    if "sqlite" not in db_url:
+        return
+    try:
+        with engine.begin() as conn:
+            colunas = {row[1] for row in conn.exec_driver_sql("PRAGMA table_info(itens_estoque)").fetchall()}
+            if "quantidade_olist_enviada" not in colunas:
+                conn.exec_driver_sql("ALTER TABLE itens_estoque ADD COLUMN quantidade_olist_enviada FLOAT")
+                print("[DB] Coluna itens_estoque.quantidade_olist_enviada criada")
+    except Exception as e:
+        print(f"[DB] Aviso ao garantir colunas SQLite: {e}")
+
+
+_garantir_colunas_sqlite()
 
 UPLOAD_DIR = os.getenv("UPLOAD_DIR", "./uploads")
 os.makedirs(UPLOAD_DIR, exist_ok=True)
@@ -112,6 +130,7 @@ def serialize_item(item):
         "olist_nome": item.olist_nome,
         "vinculado_em": item.vinculado_em.isoformat() if item.vinculado_em else None,
         "estoque_olist_atualizado_em": item.estoque_olist_atualizado_em.isoformat() if item.estoque_olist_atualizado_em else None,
+        "quantidade_olist_enviada": float(item.quantidade_olist_enviada or 0),
     }
 
 
@@ -1045,6 +1064,49 @@ def _sku_tem_overlap(sku_a, sku_b):
     return False
 
 
+def _normalizar_sku_texto(valor):
+    return "".join(c for c in (valor or "").lower() if c.isalnum())
+
+
+def _quantidade_item_para_olist(item: ItemEstoque) -> float:
+    base = item.quantidade_confirmada
+    if base is None:
+        base = item.quantidade_nf
+    try:
+        return max(0.0, float(base or 0))
+    except Exception:
+        return 0.0
+
+
+def _limpar_vinculo_item(item: ItemEstoque):
+    item.olist_produto_id = None
+    item.olist_sku = None
+    item.olist_nome = None
+    item.vinculado_em = None
+    item.estoque_olist_atualizado_em = None
+    item.quantidade_olist_enviada = 0
+
+
+def _item_combina_vinculo_memoria(item: ItemEstoque, vinculo: VinculoOlist) -> bool:
+    if str(item.olist_produto_id or "") != str(vinculo.olist_produto_id or ""):
+        return False
+
+    sku_item = _normalizar_sku_texto(item.olist_sku)
+    sku_vinculo = _normalizar_sku_texto(vinculo.olist_sku)
+    codigo_item = _normalizar_sku_texto(item.codigo_produto)
+    codigo_vinculo = _normalizar_sku_texto(vinculo.nf_codigo)
+    desc_item = " ".join(_normalizar_tokens(item.descricao or ""))
+    desc_vinculo = " ".join(_normalizar_tokens(vinculo.nf_descricao or ""))
+
+    if sku_item and sku_vinculo and sku_item == sku_vinculo:
+        return True
+    if codigo_item and codigo_vinculo and codigo_item == codigo_vinculo:
+        return True
+    if desc_item and desc_vinculo and desc_item == desc_vinculo:
+        return True
+    return False
+
+
 def _buscar_itens_inbound_similares(db, olist_produto_id, olist_sku,
                                     olist_nome, limite=6):
     """
@@ -1313,13 +1375,26 @@ async def atualizar_estoque_olist(request: Request):
             else:
                 ids_marcar = [item_id]
 
-            # Vincula todos ao mesmo anuncio Olist e marca todos como subidos.
+            # Vincula todos ao mesmo anuncio Olist, marca todos como subidos e
+            # registra quanto de fato entrou na Olist por item.
             itens_grupo = db.query(ItemEstoque).filter(ItemEstoque.id.in_(ids_marcar)).all()
-            for it in itens_grupo:
+            pesos = [_quantidade_item_para_olist(it) for it in itens_grupo]
+            total_pesos = sum(pesos)
+            restante_subido = float(quantidade_subir)
+            for idx, it in enumerate(itens_grupo):
                 it.olist_produto_id = item.olist_produto_id
                 it.olist_sku = item.olist_sku
                 it.olist_nome = item.olist_nome
                 it.estoque_olist_atualizado_em = agora
+                if total_pesos > 0:
+                    if idx == len(itens_grupo) - 1:
+                        qtd_item_subida = max(0.0, restante_subido)
+                    else:
+                        qtd_item_subida = round((float(quantidade_subir) * pesos[idx]) / total_pesos, 4)
+                        restante_subido = max(0.0, restante_subido - qtd_item_subida)
+                else:
+                    qtd_item_subida = 0.0
+                it.quantidade_olist_enviada = qtd_item_subida
 
             db.commit()  # persiste tb as baixas dos inbounds (reserva)
 
@@ -2428,8 +2503,139 @@ async def encerrar_embale(request: Request):
         db.close()
 
 
+async def apelidos_fornecedores(request: Request):
+    db = SessionLocal()
+    try:
+        if request.method == "GET":
+            rows = db.query(ApelidoFornecedor).all()
+            ultimo_update = None
+            if rows:
+                ultimo_update = max((r.atualizado_em or r.criado_em or datetime.utcnow()).isoformat() for r in rows)
+            return JSONResponse(
+                {
+                    "apelidos": {r.nome_fornecedor: r.apelido for r in rows},
+                    "total": len(rows),
+                    "updated_at": ultimo_update,
+                },
+                headers={"Cache-Control": "no-store, no-cache, must-revalidate, max-age=0"},
+            )
+
+        body = await request.json()
+        nome = (body.get("nome_fornecedor") or "").strip()
+        apelido = (body.get("apelido") or "").strip()
+        if not nome:
+            return JSONResponse({"erro": "nome_fornecedor obrigatorio"}, status_code=400)
+
+        row = db.query(ApelidoFornecedor).filter(ApelidoFornecedor.nome_fornecedor == nome).first()
+        if not apelido:
+            if row:
+                db.delete(row)
+                db.commit()
+            return JSONResponse({"ok": True, "removido": True, "nome_fornecedor": nome}, headers={"Cache-Control": "no-store, no-cache, must-revalidate, max-age=0"})
+
+        if row:
+            row.apelido = apelido
+            row.atualizado_em = datetime.utcnow()
+        else:
+            db.add(ApelidoFornecedor(nome_fornecedor=nome, apelido=apelido))
+        db.commit()
+        return JSONResponse(
+            {"ok": True, "nome_fornecedor": nome, "apelido": apelido, "updated_at": datetime.utcnow().isoformat()},
+            headers={"Cache-Control": "no-store, no-cache, must-revalidate, max-age=0"},
+        )
+    except Exception as e:
+        db.rollback()
+        return JSONResponse({"erro": str(e)}, status_code=500)
+    finally:
+        db.close()
+
+
+async def atualizar_nome_embale(request: Request):
+    db = SessionLocal()
+    try:
+        embale_id = int(request.path_params.get("embale_id"))
+        body = await request.json()
+        nome_embale = (body.get("nome_embale") or "").strip()
+        if not nome_embale:
+            return JSONResponse({"erro": "Nome do inbound é obrigatório"}, status_code=400)
+        embale = db.query(EmbaleFU).filter(EmbaleFU.id == embale_id).first()
+        if not embale:
+            return JSONResponse({"erro": "Inbound não encontrado"}, status_code=404)
+        embale.nome_embalde = nome_embale
+        db.commit()
+        return JSONResponse({"id": embale.id, "nome_embale": embale.nome_embalde, "mensagem": "Nome do inbound atualizado"})
+    except Exception as e:
+        db.rollback()
+        return JSONResponse({"erro": str(e)}, status_code=500)
+    finally:
+        db.close()
+
+
+async def olist_deletar_vinculo(request: Request):
+    db = SessionLocal()
+    try:
+        data = await request.json()
+        vinculo_id = data.get("id")
+        v = db.query(VinculoOlist).filter(VinculoOlist.id == vinculo_id).first()
+        if not v:
+            return JSONResponse({"error": "Vínculo não encontrado"}, status_code=404)
+
+        candidatos = db.query(ItemEstoque).filter(
+            ItemEstoque.olist_produto_id == str(v.olist_produto_id)
+        ).all()
+        itens_afetados = [
+            it for it in candidatos
+            if _item_combina_vinculo_memoria(it, v)
+        ]
+
+        quantidade_reverter = round(
+            sum(
+                float(
+                    it.quantidade_olist_enviada
+                    if it.quantidade_olist_enviada is not None
+                    else _quantidade_item_para_olist(it)
+                )
+                for it in itens_afetados
+                if it.estoque_olist_atualizado_em
+            ),
+            4,
+        )
+        if quantidade_reverter > 0:
+            sucesso = olist.atualizar_estoque(
+                v.olist_produto_id,
+                quantidade=quantidade_reverter,
+                tipo="S",
+                preco_unitario=float(v.olist_preco or 0),
+            )
+            if not sucesso:
+                db.rollback()
+                return JSONResponse({"error": "Falha ao reverter estoque na Olist"}, status_code=500)
+
+        itens_limpos = 0
+        for it in itens_afetados:
+            if it.olist_produto_id or it.estoque_olist_atualizado_em or (it.quantidade_olist_enviada or 0):
+                _limpar_vinculo_item(it)
+                itens_limpos += 1
+
+        db.delete(v)
+        db.commit()
+        qtd_txt = str(int(quantidade_reverter)) if float(quantidade_reverter).is_integer() else str(quantidade_reverter)
+        mensagem = "Vínculo removido"
+        if quantidade_reverter > 0:
+            mensagem += f" e {qtd_txt} un foram retiradas da Olist"
+        if itens_limpos > 0:
+            mensagem += f" ({itens_limpos} item(ns) desvinculados)"
+        return JSONResponse({"sucesso": True, "mensagem": mensagem, "quantidade_revertida": quantidade_reverter, "itens_limpos": itens_limpos})
+    except Exception as e:
+        db.rollback()
+        return JSONResponse({"error": str(e)}, status_code=500)
+    finally:
+        db.close()
+
+
 routes = [
     Route("/api/health", root, methods=["GET"]),
+    Route("/api/apelidos-fornecedores", apelidos_fornecedores, methods=["GET", "POST"]),
     Route("/api/upload-nfe", upload_nfe, methods=["POST"]),
     Route("/api/notas-fiscais", get_nfs, methods=["GET"]),
     Route("/api/notas-fiscais/{nf_id}", get_nf, methods=["GET"]),
@@ -2470,6 +2676,7 @@ routes = [
     Route("/api/embaldes/upload", upload_embale, methods=["POST"]),
     Route("/api/embaldes", listar_embaldes, methods=["GET"]),
     Route("/api/embaldes/{embale_id}", obter_embale, methods=["GET"]),
+    Route("/api/embaldes/{embale_id}/nome", atualizar_nome_embale, methods=["POST"]),
     Route("/api/embaldes/{embale_id}/data-limite", atualizar_data_limite_embale, methods=["POST"]),
     Route("/api/embaldes/{embale_id}/revisao", revisar_baixa_embale, methods=["GET"]),
     Route("/api/embaldes/{embale_id}/confirmar-baixa", confirmar_baixa_embale, methods=["POST"]),

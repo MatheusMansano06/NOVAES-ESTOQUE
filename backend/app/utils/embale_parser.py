@@ -27,26 +27,30 @@ def extrair_items_embale_pdf(caminho_pdf: str) -> dict:
     ou {"erro": True, "mensagem": "..."} em caso de falha.
     """
     try:
-        items = []
-        numero_inbound = None
-        total_unidades = 0
-
         with pdfplumber.open(caminho_pdf) as pdf:
+            texto_inicial = ""
+            if pdf.pages:
+                texto_inicial = pdf.pages[0].extract_text() or ""
+
+            if _eh_pdf_shopee(texto_inicial):
+                return _extrair_items_shopee_pdf(pdf)
+
+            items = []
+            numero_inbound = None
+            total_unidades = 0
+
             for page in pdf.pages:
                 texto = page.extract_text() or ""
 
-                # Numero do inbound (Frete #XXXXX)
                 if numero_inbound is None:
                     m = re.search(r'Frete\s*#?\s*(\d+)', texto)
                     if m:
                         numero_inbound = m.group(1)
 
-                # Total de unidades
                 m_total = re.search(r'Total de unidades:\s*(\d+)', texto)
                 if m_total:
                     total_unidades = int(m_total.group(1))
 
-                # Extrair tabelas de produtos
                 for tabela in page.extract_tables():
                     items_tabela = _parsear_tabela_produtos(tabela)
                     items.extend(items_tabela)
@@ -68,6 +72,216 @@ def extrair_items_embale_pdf(caminho_pdf: str) -> dict:
             "erro": True,
             "mensagem": f"Erro ao processar PDF: {str(e)}"
         }
+
+
+def _eh_pdf_shopee(texto_inicial: str) -> bool:
+    texto = (texto_inicial or "").lower()
+    return (
+        "shopee picking list" in texto
+        or "shopee fulfillment" in texto
+        or "id de envio (asn id)" in texto
+    )
+
+
+def _extrair_items_shopee_pdf(pdf) -> dict:
+    numero_inbound = None
+    total_unidades = 0
+    items = []
+    item_atual = None
+
+    for page in pdf.pages:
+        texto = page.extract_text() or ""
+
+        if numero_inbound is None:
+            m_asn = re.search(r'ID de Envio \(ASN ID\)\s*([A-Z0-9-]+)', texto, re.IGNORECASE)
+            if m_asn:
+                numero_inbound = m_asn.group(1).strip()
+
+        m_total = re.search(r'Notas\s+Total\s+(\d+)', texto, re.IGNORECASE)
+        if m_total:
+            total_unidades = int(m_total.group(1))
+
+        for linha in _linhas_shopee(page):
+            texto_linha = " ".join(
+                parte for parte in [
+                    linha["vendor"],
+                    linha["shopee"],
+                    linha["name"],
+                    linha["warehouse"],
+                    linha["qty"],
+                ] if parte
+            ).strip()
+
+            if not texto_linha or _linha_shopee_ignorada(texto_linha):
+                continue
+
+            sku_shopee = _extrair_sku_shopee(linha["shopee"])
+            sku_vendor = _extrair_sku_vendor_shopee(linha["vendor"])
+            qty_linha = _extrair_quantidade_coluna_shopee(linha["qty"])
+
+            if sku_shopee or _linha_indica_novo_item_shopee(linha, sku_vendor, qty_linha):
+                sku_base = _limpar_campo_shopee(linha["vendor"]) or sku_vendor or sku_shopee
+                if item_atual:
+                    items.append(_normalizar_item_shopee(item_atual))
+
+                descricao_inicial = _limpar_campo_shopee(
+                    f"{_remover_sku_shopee_do_texto(linha['shopee'], sku_shopee or sku_base)} {linha['name']}"
+                )
+                item_atual = {
+                    "sku": sku_base,
+                    "codigo_ml": None,
+                    "titulo_anuncio": descricao_inicial,
+                    "qtd_partes": [str(qty_linha)] if qty_linha is not None else [],
+                }
+                continue
+
+            if not item_atual:
+                continue
+
+            vendor_extra = _limpar_campo_shopee(linha["vendor"])
+            if vendor_extra:
+                item_atual["sku"] = f"{item_atual['sku']} {vendor_extra}".strip()
+
+            descricao_extra = _limpar_campo_shopee(f"{linha['shopee']} {linha['name']}")
+            if descricao_extra and not _texto_warehouse_shopee(descricao_extra):
+                item_atual["titulo_anuncio"] = f"{item_atual['titulo_anuncio']} {descricao_extra}".strip()
+
+        if item_atual:
+            items.append(_normalizar_item_shopee(item_atual))
+            item_atual = None
+
+    items = [item for item in items if item.get("titulo_anuncio") and item.get("quantidade_separada", 0) > 0]
+    if not items:
+        return {
+            "erro": True,
+            "mensagem": "Nenhum produto encontrado no PDF da Shopee. Verifique se o arquivo é um Picking List válido."
+        }
+
+    return {
+        "numero_inbound": numero_inbound,
+        "total_unidades": total_unidades,
+        "items": items
+    }
+
+
+def _linhas_shopee(page) -> List[dict]:
+    words = page.extract_words(use_text_flow=True)
+    rows = {}
+    for word in words:
+        key = round(word["top"])
+        rows.setdefault(key, []).append(word)
+
+    linhas = []
+    for key in sorted(rows):
+        partes = {"vendor": [], "shopee": [], "name": [], "warehouse": [], "qty": []}
+        for word in sorted(rows[key], key=lambda x: x["x0"]):
+            texto = (word.get("text") or "").strip()
+            if not texto:
+                continue
+            x0 = word["x0"]
+            if x0 < 110:
+                partes["vendor"].append(texto)
+            elif x0 < 190:
+                partes["shopee"].append(texto)
+            elif x0 < 445:
+                partes["name"].append(texto)
+            elif x0 < 525:
+                partes["warehouse"].append(texto)
+            else:
+                partes["qty"].append(texto)
+
+        linhas.append({k: " ".join(v).strip() for k, v in partes.items()})
+    return linhas
+
+
+def _linha_shopee_ignorada(texto_linha: str) -> bool:
+    texto = texto_linha.strip().lower()
+    if not texto:
+        return True
+    return any(
+        marcador in texto for marcador in [
+            "shopee picking list", "informação de inbound", "data de inbound",
+            "método de entrega", "instruções:", "informações de sku", "no. sku do",
+            "vendedor", "qnt.", "aprovada", "notas total", "usuário poderá inserir",
+        ]
+    )
+
+
+def _extrair_sku_shopee(texto: str) -> str | None:
+    m = re.search(r'(\d{8,}_\d+)', texto or "")
+    return m.group(1) if m else None
+
+
+def _extrair_sku_vendor_shopee(texto: str) -> str | None:
+    valor = (texto or "").strip()
+    if not valor or " " in valor:
+        return None
+    if re.search(r'\d{8,}_\d+', valor):
+        return valor
+    if re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9+\-_/]{2,}', valor):
+        return valor
+    return None
+
+
+def _remover_sku_shopee_do_texto(texto: str, sku_shopee: str) -> str:
+    return (texto or "").replace(sku_shopee, "", 1).strip()
+
+
+def _extrair_digitos_qtd(texto: str) -> List[str]:
+    if not texto:
+        return []
+    texto_limpo = texto.lower()
+    if "gtin" in texto_limpo:
+        return []
+    return re.findall(r'\d+', texto)
+
+
+def _extrair_quantidade_coluna_shopee(texto: str) -> int | None:
+    numeros = _extrair_digitos_qtd(texto)
+    if not numeros:
+        return None
+    try:
+        return int(numeros[-1])
+    except Exception:
+        return None
+
+
+def _linha_indica_novo_item_shopee(linha: dict, sku_vendor: str | None, qty_linha: int | None) -> bool:
+    if not sku_vendor or not qty_linha or qty_linha <= 0:
+        return False
+    texto_name = (linha.get("name") or "").strip()
+    texto_qty = (linha.get("qty") or "").lower()
+    return bool(texto_name) and ("item" in texto_qty or "without" in texto_qty or qty_linha > 0)
+
+
+def _texto_warehouse_shopee(texto: str) -> bool:
+    texto_norm = (texto or "").lower()
+    return "gtin" in texto_norm or texto_norm in {"item", "without", "item without"}
+
+
+def _limpar_campo_shopee(texto: str) -> str:
+    texto_limpo = re.sub(r'\s+', ' ', (texto or '')).strip()
+    texto_limpo = re.sub(r'\bItem without\b', '', texto_limpo, flags=re.IGNORECASE).strip()
+    return texto_limpo
+
+
+def _normalizar_item_shopee(item: dict) -> dict:
+    quantidade = 0
+    if item.get("qtd_partes"):
+        try:
+            quantidade = float(item["qtd_partes"][0])
+        except Exception:
+            quantidade = 0
+
+    titulo = _limpar_campo_shopee(item.get("titulo_anuncio", ""))
+    sku = _limpar_campo_shopee(item.get("sku", ""))
+
+    return {
+        "sku": sku,
+        "codigo_ml": item.get("codigo_ml"),
+        "titulo_anuncio": titulo or sku or "Produto sem titulo",
+        "quantidade_separada": quantidade,
+    }
 
 
 def _parsear_tabela_produtos(tabela: List[list]) -> List[dict]:

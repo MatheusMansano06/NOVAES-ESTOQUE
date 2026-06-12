@@ -8,6 +8,19 @@ import { EmbaldesManager } from './components/EmbaldesManager'
 import { baixarMultiplosOuPdfs } from './services/api'
 
 const API_BASE = import.meta.env.VITE_API_URL ?? 'http://127.0.0.1:8000'
+const SHARED_SYNC_INTERVAL_MS = 5000
+
+async function fetchJsonNoCache(url: string) {
+  const res = await fetch(url, {
+    cache: 'no-store',
+    headers: {
+      'Cache-Control': 'no-cache',
+      'Pragma': 'no-cache',
+    },
+  })
+  if (!res.ok) throw new Error(`Falha ao carregar ${url}: ${res.status}`)
+  return res.json()
+}
 
 interface NotaFiscal {
   id: number
@@ -139,6 +152,8 @@ function App() {
   const [buscandoSKU, setBuscandoSKU] = useState(false)
   // Inbounds ativos (diagnóstico em tempo real no topo das Notas)
   const [inboundsAtivos, setInboundsAtivos] = useState<Array<{ numero_inbound: string; data_limite: string | null; nome_embalde?: string }>>([])
+  const [syncSaudavel, setSyncSaudavel] = useState(false)
+  const [ultimaSincronizacao, setUltimaSincronizacao] = useState<string | null>(null)
 
   // Formata data ISO -> dd/mm/aaaa (pt-BR)
   const fmtData = (d: string | null) => {
@@ -147,11 +162,17 @@ function App() {
     return isNaN(dt.getTime()) ? d : dt.toLocaleDateString('pt-BR')
   }
 
+  const fmtHora = (d: string | null) => {
+    if (!d) return '--:--'
+    const dt = new Date(d)
+    return isNaN(dt.getTime()) ? '--:--' : dt.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
+  }
+
   // Carregar notas ao iniciar
   useEffect(() => {
-    loadNotas()
-    loadEstoque()
-    loadDivergencias()
+    loadNotas(false)
+    loadEstoque(false)
+    loadDivergencias(false)
   }, [])
 
   // Diagnóstico de inbounds ATIVOS em tempo real (atualiza a cada 20s).
@@ -159,14 +180,40 @@ function App() {
   useEffect(() => {
     const carregar = async () => {
       try {
-        const res = await fetch(`${API_BASE}/api/embaldes?limit=200`)
-        const data = await res.json()
+        const data = await fetchJsonNoCache(`${API_BASE}/api/embaldes?limit=200`)
         setInboundsAtivos((data.items || []).filter((e: any) => e.status !== 'encerrado'))
+        setSyncSaudavel(true)
+        setUltimaSincronizacao(new Date().toISOString())
       } catch { /* silencioso — não quebra a tela */ }
     }
     carregar()
-    const id = setInterval(carregar, 20000)
+    const id = setInterval(carregar, SHARED_SYNC_INTERVAL_MS)
     return () => clearInterval(id)
+  }, [])
+
+  useEffect(() => {
+    const sincronizar = async () => {
+      await Promise.allSettled([
+        loadNotas(true),
+        loadEstoque(true),
+        loadDivergencias(true),
+      ])
+    }
+
+    const aoVoltar = () => {
+      if (document.visibilityState === 'hidden') return
+      sincronizar()
+    }
+
+    const id = setInterval(sincronizar, SHARED_SYNC_INTERVAL_MS)
+    window.addEventListener('focus', aoVoltar)
+    document.addEventListener('visibilitychange', aoVoltar)
+
+    return () => {
+      clearInterval(id)
+      window.removeEventListener('focus', aoVoltar)
+      document.removeEventListener('visibilitychange', aoVoltar)
+    }
   }, [])
 
   // Ao entrar na tela de vínculo, busca se esse produto já foi vinculado antes
@@ -311,12 +358,18 @@ function App() {
   const deletarVinculo = async (id: number) => {
     if (!window.confirm('Remover este vínculo salvo? Ele não será mais sugerido automaticamente.')) return
     try {
-      await fetch(API_BASE + '/api/olist/vinculos/deletar', {
+      const res = await fetch(API_BASE + '/api/olist/vinculos/deletar', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ id }),
       })
-      loadVinculos()
+      const data = await res.json()
+      if (!res.ok || !data.sucesso) throw new Error(data.error || 'Falha ao remover vínculo')
+      await loadVinculos()
+      await loadNotas()
+      await loadEstoque()
+      await loadDivergencias()
+      alert(data.mensagem || 'Vínculo removido com sucesso')
     } catch (err) {
       alert('Erro ao remover vínculo')
     }
@@ -370,32 +423,39 @@ function App() {
     }
   }
 
-  const loadNotas = async () => {
+  const loadNotas = async (preservarSelecao = true) => {
     try {
-      const res = await fetch(API_BASE + '/api/notas-fiscais')
-      const data = await res.json()
+      const data = await fetchJsonNoCache(API_BASE + '/api/notas-fiscais')
       setNotas(data.items || [])
-      setNotasSelecionadas(new Set())
+      if (!preservarSelecao) {
+        setNotasSelecionadas(new Set())
+      }
+      setSyncSaudavel(true)
+      setUltimaSincronizacao(new Date().toISOString())
     } catch (err) {
+      setSyncSaudavel(false)
       console.error('Erro ao carregar notas:', err)
     }
   }
 
-  const loadEstoque = async () => {
+  const loadEstoque = async (_silencioso = true) => {
     try {
-      const res = await fetch(API_BASE + '/api/estoque-virtual')
-      const data = await res.json()
+      const data = await fetchJsonNoCache(API_BASE + '/api/estoque-virtual')
       setEstoque(data.produtos || [])
+      setSyncSaudavel(true)
+      setUltimaSincronizacao(new Date().toISOString())
     } catch (err) {
+      setSyncSaudavel(false)
       console.error('Erro ao carregar estoque:', err)
     }
   }
 
-  const loadDivergencias = async () => {
+  const loadDivergencias = async (_silencioso = true) => {
     try {
-      const res = await fetch(API_BASE + '/api/divergencias')
-      const data = await res.json()
+      const data = await fetchJsonNoCache(API_BASE + '/api/divergencias')
       setDivergencias(data.divergencias || [])
+      setSyncSaudavel(true)
+      setUltimaSincronizacao(new Date().toISOString())
     } catch (err) {
       console.error('Erro ao carregar divergências:', err)
     }
@@ -1090,9 +1150,48 @@ function App() {
     return (
       <div className="app">
         <header className="header">
-          <div className="container">
-            <h1>NVS TECH</h1>
+          <div
+            className="container"
+            style={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              gap: '1.5rem',
+              flexWrap: 'wrap'
+            }}
+          >
+            <div>
+              <h1 style={{ marginBottom: '0.35rem' }}>NVS TECH</h1>
             <p>Sistema de Gestão Inteligente de Estoque para Operações de Logística e Marketplace</p>
+            </div>
+            <div
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '0.45rem',
+                padding: '0.45rem 0.9rem',
+                borderRadius: '999px',
+                border: `1px solid ${syncSaudavel ? '#8bd694' : '#f3b0b0'}`,
+                background: syncSaudavel ? 'rgba(224, 255, 228, 0.12)' : 'rgba(255, 235, 235, 0.12)',
+                color: syncSaudavel ? '#c8ffd0' : '#ffd2d2',
+                fontSize: '0.78rem',
+                fontWeight: 800,
+                letterSpacing: '0.04em',
+                textTransform: 'uppercase'
+              }}
+            >
+              <span
+                style={{
+                  width: 8,
+                  height: 8,
+                  borderRadius: '50%',
+                  background: syncSaudavel ? '#7CFC8A' : '#ff8a80',
+                  display: 'inline-block'
+                }}
+              />
+              {syncSaudavel ? 'Sincronizado' : 'Sincronizando'}
+              <span style={{ opacity: 0.85, fontSize: '0.72rem' }}>{fmtHora(ultimaSincronizacao)}</span>
+            </div>
           </div>
         </header>
 
@@ -1131,6 +1230,10 @@ function App() {
                 <div style={{ marginTop: '1rem', paddingTop: '1rem', borderTop: '1px solid #e0e0e0', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
                   <button
                     onClick={() => setPagina('fornecedores')}
+                    translate="no"
+                    className="notranslate"
+                    aria-label="Fornecedores"
+                    title="Fornecedores"
                     style={{
                       padding: '0.75rem 1rem',
                       background: '#fff',
@@ -1187,25 +1290,27 @@ function App() {
 
             {/* FILTRO + LISTA DE NOTAS */}
             <div className="card">
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '1rem', flexWrap: 'wrap' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '1.75rem', marginBottom: '1.5rem', flexWrap: 'wrap' }}>
                 <h2 style={{ marginTop: 0 }}>Notas Fiscais ({notasFiltradas.length})</h2>
 
                 {/* ===== DIAGNÓSTICO DE INBOUNDS ATIVOS (TEMPO REAL) ===== */}
                 <div style={{
                   minWidth: '260px',
                   maxWidth: '380px',
+                  marginTop: '0.35rem',
                   border: `2px solid ${inboundsAtivos.length > 0 ? '#d32f2f' : '#a5d6a7'}`,
-                  borderRadius: '8px',
-                  padding: '0.6rem 0.85rem',
-                  background: inboundsAtivos.length > 0 ? '#fff5f5' : '#f3faf3'
+                  borderRadius: '12px',
+                  padding: '0.85rem 1rem',
+                  background: inboundsAtivos.length > 0 ? '#fff5f5' : '#f3faf3',
+                  boxShadow: inboundsAtivos.length > 0 ? '0 10px 24px rgba(211, 47, 47, 0.08)' : '0 8px 18px rgba(46, 125, 50, 0.08)'
                 }}>
                   {inboundsAtivos.length > 0 ? (
                     <>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', color: '#d32f2f', fontWeight: 800, fontSize: '0.78rem', letterSpacing: '0.04em', marginBottom: '0.45rem', textTransform: 'uppercase' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', color: '#d32f2f', fontWeight: 800, fontSize: '0.78rem', letterSpacing: '0.04em', marginBottom: '0.55rem', textTransform: 'uppercase' }}>
                         <span style={{ width: 9, height: 9, borderRadius: '50%', background: '#d32f2f', display: 'inline-block', animation: 'pulse-inbound 1.2s infinite' }} />
                         {inboundsAtivos.length === 1 ? 'Inbound ativo' : `${inboundsAtivos.length} inbounds ativos`}
                       </div>
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: '0.3rem' }}>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
                         {inboundsAtivos.map((inb) => (
                           <div key={inb.numero_inbound} style={{ display: 'flex', justifyContent: 'space-between', gap: '0.75rem', color: '#d32f2f', fontSize: '0.82rem', fontWeight: 700 }}>
                             <span>#{inb.numero_inbound}</span>

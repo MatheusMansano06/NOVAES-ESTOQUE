@@ -53,6 +53,8 @@ class ItemEstoque(Base):
     vinculado_em = Column(DateTime, nullable=True)  # Quando foi vinculado
     estoque_olist_atualizado_em = Column(DateTime, nullable=True)  # Última atualização de estoque
 
+    quantidade_olist_enviada = Column(Float, nullable=True)  # Quanto realmente entrou na Olist
+
     nota_fiscal = relationship("NotaFiscal", back_populates="itens")
 
 class Anuncio(Base):
@@ -235,3 +237,18 @@ class ItemEmbaleFU(Base):
     criado_em = Column(DateTime, default=datetime.utcnow)
 
     embalde = relationship("EmbaleFU", back_populates="itens")
+
+
+class ApelidoFornecedor(Base):
+    """
+    Apelido/nome customizado de um fornecedor, compartilhado entre todos os
+    usuários (persistido no banco). Mapeia o nome oficial (vindo da NF) para um
+    nome curto que o time prefere ver.
+    """
+    __tablename__ = "apelidos_fornecedores"
+
+    id = Column(Integer, primary_key=True)
+    nome_fornecedor = Column(String(255), index=True)
+    apelido = Column(String(100))
+    criado_em = Column(DateTime, default=datetime.utcnow)
+    atualizado_em = Column(DateTime, default=datetime.utcnow)
