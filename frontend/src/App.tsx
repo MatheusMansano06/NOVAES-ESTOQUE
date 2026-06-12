@@ -7,7 +7,7 @@ import { FornecedoresManager } from './components/FornecedoresManager'
 import { EmbaldesManager } from './components/EmbaldesManager'
 import { baixarMultiplosOuPdfs } from './services/api'
 
-const API_BASE = import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000'
+const API_BASE = import.meta.env.VITE_API_URL ?? 'http://127.0.0.1:8000'
 
 interface NotaFiscal {
   id: number

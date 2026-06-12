@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import './ModalDetalhes.css'
 
-const API_BASE = import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000'
+const API_BASE = import.meta.env.VITE_API_URL ?? 'http://127.0.0.1:8000'
 
 // ===== NÚMERO DE WHATSAPP DO FORNECEDOR/RESPONSÁVEL =====
 // Formato: código do país (55) + DDD + número, somente dígitos.

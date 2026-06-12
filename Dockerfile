@@ -12,8 +12,9 @@ COPY frontend/package*.json ./
 RUN npm ci
 
 COPY frontend/ ./
-# Base vazia => o frontend chama a API no MESMO domínio (/api/...). Sem CORS.
-ENV VITE_API_URL=""
+# URL pública do backend (mesmo serviço/domínio) — o frontend chama a API aqui.
+# Mesma origem => sem CORS. Valor explícito evita ambiguidade de string vazia.
+ENV VITE_API_URL=https://novaes-estoque-production.up.railway.app
 RUN npm run build
 
 # ---------- Stage 2: backend + estáticos ----------
