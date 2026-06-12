@@ -377,6 +377,44 @@ def _texto_warehouse_shopee(texto: str) -> bool:
     return "gtin" in texto_norm or texto_norm in {"item", "without", "item without"}
 
 
+def _detectar_nome_multiplo_produto(texto: str) -> bool:
+    """
+    Detecta se um nome provavelmente contém DOIS produtos diferentes.
+    Procura por padrão: "Par ... (tipo1) ... (tipo2)"
+    Exemplos de pares discriminantes:
+    - Manete + Viseira
+    - Retrovisor + Farol
+    - Protetor + Escapamento (ambas do mesmo produto, OK)
+
+    Retorna True se parece haver múltiplos produtos DISTINTOS.
+    """
+    if not texto or len(texto) < 30:
+        return False
+
+    # Grupos de categorias: produtos que NUNCA aparecem juntos no mesmo item
+    NUNCA_JUNTO = [
+        ("manete", ["viseira", "farol", "espelho", "retrovisor", "lanterna"]),
+        ("viseira", ["manete", "protetor", "embreagem", "retrovisor"]),
+        ("retrovisor", ["manete", "viseira", "farol", "embreagem"]),
+        ("farol", ["viseira", "manete", "retrovisor", "embreagem"]),
+        ("espelho", ["manete", "embreagem", "freio", "protetor"]),
+    ]
+
+    texto_lower = texto.lower()
+
+    for tipo1, incompativeis in NUNCA_JUNTO:
+        # Procura tipo1 (com ou sem espaço antes)
+        tem_tipo1 = (f" {tipo1}" in texto_lower or texto_lower.startswith(tipo1))
+        if tem_tipo1:
+            for tipo2 in incompativeis:
+                # Procura tipo2
+                tem_tipo2 = (f" {tipo2}" in texto_lower or texto_lower.startswith(tipo2))
+                if tem_tipo2:
+                    return True
+
+    return False
+
+
 def _limpar_campo_shopee(texto: str) -> str:
     texto_limpo = re.sub(r'\s+', ' ', (texto or '')).strip()
     # Remove marcadores de item
