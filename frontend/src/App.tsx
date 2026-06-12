@@ -137,12 +137,36 @@ function App() {
   // Debounce da busca de produtos Olist (evita 1 request por tecla)
   const buscaTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [buscandoSKU, setBuscandoSKU] = useState(false)
+  // Inbounds ativos (diagnóstico em tempo real no topo das Notas)
+  const [inboundsAtivos, setInboundsAtivos] = useState<Array<{ numero_inbound: string; data_limite: string | null; nome_embalde?: string }>>([])
+
+  // Formata data ISO -> dd/mm/aaaa (pt-BR)
+  const fmtData = (d: string | null) => {
+    if (!d) return 'sem data'
+    const dt = new Date(d)
+    return isNaN(dt.getTime()) ? d : dt.toLocaleDateString('pt-BR')
+  }
 
   // Carregar notas ao iniciar
   useEffect(() => {
     loadNotas()
     loadEstoque()
     loadDivergencias()
+  }, [])
+
+  // Diagnóstico de inbounds ATIVOS em tempo real (atualiza a cada 20s).
+  // Some quando o inbound é encerrado; some todos => "SEM INBOUND ATIVO".
+  useEffect(() => {
+    const carregar = async () => {
+      try {
+        const res = await fetch(`${API_BASE}/api/embaldes?limit=200`)
+        const data = await res.json()
+        setInboundsAtivos((data.items || []).filter((e: any) => e.status !== 'encerrado'))
+      } catch { /* silencioso — não quebra a tela */ }
+    }
+    carregar()
+    const id = setInterval(carregar, 20000)
+    return () => clearInterval(id)
   }, [])
 
   // Ao entrar na tela de vínculo, busca se esse produto já foi vinculado antes
@@ -1163,7 +1187,40 @@ function App() {
 
             {/* FILTRO + LISTA DE NOTAS */}
             <div className="card">
-              <h2 style={{ marginTop: 0 }}>Notas Fiscais ({notasFiltradas.length})</h2>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '1rem', flexWrap: 'wrap' }}>
+                <h2 style={{ marginTop: 0 }}>Notas Fiscais ({notasFiltradas.length})</h2>
+
+                {/* ===== DIAGNÓSTICO DE INBOUNDS ATIVOS (TEMPO REAL) ===== */}
+                <div style={{
+                  minWidth: '260px',
+                  maxWidth: '380px',
+                  border: `2px solid ${inboundsAtivos.length > 0 ? '#d32f2f' : '#a5d6a7'}`,
+                  borderRadius: '8px',
+                  padding: '0.6rem 0.85rem',
+                  background: inboundsAtivos.length > 0 ? '#fff5f5' : '#f3faf3'
+                }}>
+                  {inboundsAtivos.length > 0 ? (
+                    <>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', color: '#d32f2f', fontWeight: 800, fontSize: '0.78rem', letterSpacing: '0.04em', marginBottom: '0.45rem', textTransform: 'uppercase' }}>
+                        <span style={{ width: 9, height: 9, borderRadius: '50%', background: '#d32f2f', display: 'inline-block', animation: 'pulse-inbound 1.2s infinite' }} />
+                        {inboundsAtivos.length === 1 ? 'Inbound ativo' : `${inboundsAtivos.length} inbounds ativos`}
+                      </div>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '0.3rem' }}>
+                        {inboundsAtivos.map((inb) => (
+                          <div key={inb.numero_inbound} style={{ display: 'flex', justifyContent: 'space-between', gap: '0.75rem', color: '#d32f2f', fontSize: '0.82rem', fontWeight: 700 }}>
+                            <span>#{inb.numero_inbound}</span>
+                            <span>encerra {fmtData(inb.data_limite)}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </>
+                  ) : (
+                    <div style={{ color: '#2e7d32', fontWeight: 800, fontSize: '0.85rem', textAlign: 'center', letterSpacing: '0.04em' }}>
+                      ✓ SEM INBOUND ATIVO
+                    </div>
+                  )}
+                </div>
+              </div>
               <div className="card-body">
                 <div style={{ display: 'flex', gap: '0.75rem', marginBottom: '1.25rem', flexWrap: 'wrap' }}>
                   <input
