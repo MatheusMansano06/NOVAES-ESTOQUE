@@ -1,3 +1,4 @@
+import { jsx as _jsx, jsxs as _jsxs } from "react/jsx-runtime";
 import { useState } from 'react';
 import { uploadNFe, aceitarSugestaoVinculo } from '../services/api';
 import './UploadNFe.css';
@@ -74,63 +75,5 @@ export default function UploadNFe({ onUploadSuccess }) {
             setAcceptingIndex(null);
         }
     };
-    return (<div className="upload-container">
-      <form onSubmit={handleSubmit}>
-        <div className="upload-area">
-          <input type="file" accept=".xml,.pdf" onChange={handleFileChange} disabled={loading} id="file-input"/>
-          <label htmlFor="file-input" className="upload-label">
-            <div className="upload-icon">📄</div>
-            <p>
-              {file ? `Arquivo: ${file.name}` : 'Clique para selecionar ou arraste um arquivo XML/PDF'}
-            </p>
-            <small>Máximo 10MB</small>
-          </label>
-        </div>
-
-        {message && (<div className={`message message-${message.type}`}>
-            {message.type === 'success' ? '✓' : '✕'} {message.text}
-          </div>)}
-
-        {result && (<div className="result-summary">
-            <h3>✓ Processado com Sucesso</h3>
-            <dl>
-              <dt>ID:</dt>
-              <dd>{result.id}</dd>
-              <dt>NF:</dt>
-              <dd>{result.numero_nf}</dd>
-              <dt>Itens:</dt>
-              <dd>{result.itens_encontrados}</dd>
-              <dt>Status:</dt>
-              <dd>{result.status}</dd>
-            </dl>
-
-            {result.sugestoes_vinculacao && result.sugestoes_vinculacao.length > 0 && (<div className="sugestoes-vinculacao">
-                <h4>💡 {result.sugestoes_vinculacao.length} Vinculação(ões) Sugerida(s)</h4>
-                <div className="sugestoes-list">
-                  {result.sugestoes_vinculacao.map((sugestao, idx) => (<div key={idx} className="sugestao-item">
-                      <div className="sugestao-info">
-                        <div className="produto-nf">
-                          <strong>{sugestao.descricao}</strong>
-                        </div>
-                        <div className="confiance-bar">
-                          <div className="confiance-fill" style={{ width: `${sugestao.confianca}%` }}></div>
-                        </div>
-                        <div className="confiance-text">{sugestao.confianca}% de confiança</div>
-                        <div className="produto-olist">
-                          <small>→ {sugestao.sugestao.olist_nome}</small>
-                        </div>
-                      </div>
-                      <button type="button" className="btn-aceitar" onClick={() => handleAceitarSugestao(idx)} disabled={acceptingIndex === idx}>
-                        {acceptingIndex === idx ? '...' : '✓'}
-                      </button>
-                    </div>))}
-                </div>
-              </div>)}
-          </div>)}
-
-        <button type="submit" disabled={!file || loading} className="submit-btn">
-          {loading ? 'Processando...' : 'Enviar NF-e'}
-        </button>
-      </form>
-    </div>);
+    return (_jsx("div", { className: "upload-container", children: _jsxs("form", { onSubmit: handleSubmit, children: [_jsxs("div", { className: "upload-area", children: [_jsx("input", { type: "file", accept: ".xml,.pdf", onChange: handleFileChange, disabled: loading, id: "file-input" }), _jsxs("label", { htmlFor: "file-input", className: "upload-label", children: [_jsx("div", { className: "upload-icon", children: "\uD83D\uDCC4" }), _jsx("p", { children: file ? `Arquivo: ${file.name}` : 'Clique para selecionar ou arraste um arquivo XML/PDF' }), _jsx("small", { children: "M\u00E1ximo 10MB" })] })] }), message && (_jsxs("div", { className: `message message-${message.type}`, children: [message.type === 'success' ? '✓' : '✕', " ", message.text] })), result && (_jsxs("div", { className: "result-summary", children: [_jsx("h3", { children: "\u2713 Processado com Sucesso" }), _jsxs("dl", { children: [_jsx("dt", { children: "ID:" }), _jsx("dd", { children: result.id }), _jsx("dt", { children: "NF:" }), _jsx("dd", { children: result.numero_nf }), _jsx("dt", { children: "Itens:" }), _jsx("dd", { children: result.itens_encontrados }), _jsx("dt", { children: "Status:" }), _jsx("dd", { children: result.status })] }), result.sugestoes_vinculacao && result.sugestoes_vinculacao.length > 0 && (_jsxs("div", { className: "sugestoes-vinculacao", children: [_jsxs("h4", { children: ["\uD83D\uDCA1 ", result.sugestoes_vinculacao.length, " Vincula\u00E7\u00E3o(\u00F5es) Sugerida(s)"] }), _jsx("div", { className: "sugestoes-list", children: result.sugestoes_vinculacao.map((sugestao, idx) => (_jsxs("div", { className: "sugestao-item", children: [_jsxs("div", { className: "sugestao-info", children: [_jsx("div", { className: "produto-nf", children: _jsx("strong", { children: sugestao.descricao }) }), _jsx("div", { className: "confiance-bar", children: _jsx("div", { className: "confiance-fill", style: { width: `${sugestao.confianca}%` } }) }), _jsxs("div", { className: "confiance-text", children: [sugestao.confianca, "% de confian\u00E7a"] }), _jsx("div", { className: "produto-olist", children: _jsxs("small", { children: ["\u2192 ", sugestao.sugestao.olist_nome] }) })] }), _jsx("button", { type: "button", className: "btn-aceitar", onClick: () => handleAceitarSugestao(idx), disabled: acceptingIndex === idx, children: acceptingIndex === idx ? '...' : '✓' })] }, idx))) })] }))] })), _jsx("button", { type: "submit", disabled: !file || loading, className: "submit-btn", children: loading ? 'Processando...' : 'Enviar NF-e' })] }) }));
 }

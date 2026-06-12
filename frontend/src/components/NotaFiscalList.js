@@ -1,3 +1,4 @@
+import { jsx as _jsx, jsxs as _jsxs } from "react/jsx-runtime";
 import { useState, useEffect } from 'react';
 import { listNotasFiscais, excluirMultiplasNotas, baixarNotaFiscal } from '../services/api';
 import './NotaFiscalList.css';
@@ -66,69 +67,14 @@ export default function NotaFiscalList({ refresh }) {
         });
     };
     if (loading) {
-        return <div className="loading">Carregando...</div>;
+        return _jsx("div", { className: "loading", children: "Carregando..." });
     }
     if (error) {
-        return <div className="error">{error}</div>;
+        return _jsx("div", { className: "error", children: error });
     }
     if (notas.length === 0) {
-        return <div className="empty">Nenhuma nota fiscal processada ainda</div>;
+        return _jsx("div", { className: "empty", children: "Nenhuma nota fiscal processada ainda" });
     }
     const todasSelecionadas = selecionadas.size === notas.length && notas.length > 0;
-    return (<div className="list-container">
-      {selecionadas.size > 0 && (<div className="action-bar">
-          <span className="selection-info">
-            {selecionadas.size} selecionada{selecionadas.size !== 1 ? 's' : ''}
-          </span>
-          <div className="action-buttons">
-            <button className="btn-action btn-download" onClick={handleBaixar} disabled={deletando} title="Baixar arquivos selecionados">
-              📥 Baixar ({selecionadas.size})
-            </button>
-            <button className="btn-action btn-delete" onClick={handleExcluir} disabled={deletando} title="Excluir notas selecionadas">
-              {deletando ? '...' : '🗑 Excluir'}
-            </button>
-          </div>
-        </div>)}
-
-      <div className="list-header">
-        <label className="checkbox-all">
-          <input type="checkbox" checked={todasSelecionadas} onChange={selecionarTodas} title="Selecionar/Desselecionar todas"/>
-          <span>Todas</span>
-        </label>
-      </div>
-
-      <div className="list">
-        {notas.map(nota => (<div key={nota.id} className={`nota-item ${selecionadas.has(nota.id) ? 'selected' : ''}`}>
-            <div className="nota-checkbox">
-              <input type="checkbox" checked={selecionadas.has(nota.id)} onChange={() => toggleSelecao(nota.id)}/>
-            </div>
-            <div className="nota-content">
-              <div className="nota-header">
-                <h3>NF #{nota.numero_nf}</h3>
-                <span className={`status-badge status-${nota.status}`}>
-                  {nota.status}
-                </span>
-              </div>
-              <div className="nota-details">
-                <p><strong>Fornecedor:</strong> {nota.fornecedor}</p>
-                <p><strong>Série:</strong> {nota.serie}</p>
-                <p><strong>Itens:</strong> {nota.itens.length}</p>
-                <p><strong>Data Upload:</strong> {new Date(nota.data_upload).toLocaleDateString('pt-BR')}</p>
-              </div>
-              <div className="items-preview">
-                <h4>Produtos ({nota.itens.length})</h4>
-                <div className="items-list">
-                  {nota.itens.slice(0, 3).map(item => (<div key={item.id} className="item-row">
-                      <span className="item-desc">{item.descricao}</span>
-                      <span className="item-qty">{item.quantidade_nf} un</span>
-                    </div>))}
-                  {nota.itens.length > 3 && (<div className="item-more">
-                      + {nota.itens.length - 3} mais...
-                    </div>)}
-                </div>
-              </div>
-            </div>
-          </div>))}
-      </div>
-    </div>);
+    return (_jsxs("div", { className: "list-container", children: [selecionadas.size > 0 && (_jsxs("div", { className: "action-bar", children: [_jsxs("span", { className: "selection-info", children: [selecionadas.size, " selecionada", selecionadas.size !== 1 ? 's' : ''] }), _jsxs("div", { className: "action-buttons", children: [_jsxs("button", { className: "btn-action btn-download", onClick: handleBaixar, disabled: deletando, title: "Baixar arquivos selecionados", children: ["\uD83D\uDCE5 Baixar (", selecionadas.size, ")"] }), _jsx("button", { className: "btn-action btn-delete", onClick: handleExcluir, disabled: deletando, title: "Excluir notas selecionadas", children: deletando ? '...' : '🗑 Excluir' })] })] })), _jsx("div", { className: "list-header", children: _jsxs("label", { className: "checkbox-all", children: [_jsx("input", { type: "checkbox", checked: todasSelecionadas, onChange: selecionarTodas, title: "Selecionar/Desselecionar todas" }), _jsx("span", { children: "Todas" })] }) }), _jsx("div", { className: "list", children: notas.map(nota => (_jsxs("div", { className: `nota-item ${selecionadas.has(nota.id) ? 'selected' : ''}`, children: [_jsx("div", { className: "nota-checkbox", children: _jsx("input", { type: "checkbox", checked: selecionadas.has(nota.id), onChange: () => toggleSelecao(nota.id) }) }), _jsxs("div", { className: "nota-content", children: [_jsxs("div", { className: "nota-header", children: [_jsxs("h3", { children: ["NF #", nota.numero_nf] }), _jsx("span", { className: `status-badge status-${nota.status}`, children: nota.status })] }), _jsxs("div", { className: "nota-details", children: [_jsxs("p", { children: [_jsx("strong", { children: "Fornecedor:" }), " ", nota.fornecedor] }), _jsxs("p", { children: [_jsx("strong", { children: "S\u00E9rie:" }), " ", nota.serie] }), _jsxs("p", { children: [_jsx("strong", { children: "Itens:" }), " ", nota.itens.length] }), _jsxs("p", { children: [_jsx("strong", { children: "Data Upload:" }), " ", new Date(nota.data_upload).toLocaleDateString('pt-BR')] })] }), _jsxs("div", { className: "items-preview", children: [_jsxs("h4", { children: ["Produtos (", nota.itens.length, ")"] }), _jsxs("div", { className: "items-list", children: [nota.itens.slice(0, 3).map(item => (_jsxs("div", { className: "item-row", children: [_jsx("span", { className: "item-desc", children: item.descricao }), _jsxs("span", { className: "item-qty", children: [item.quantidade_nf, " un"] })] }, item.id))), nota.itens.length > 3 && (_jsxs("div", { className: "item-more", children: ["+ ", nota.itens.length - 3, " mais..."] }))] })] })] })] }, nota.id))) })] }));
 }

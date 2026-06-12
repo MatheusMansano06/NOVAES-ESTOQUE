@@ -41,6 +41,7 @@ interface ProdutoEstoque {
   codigo_produto: string
   quantidade_total: number
   quantidade_confirmada: number
+  quantidade_nf?: number
   preco_unitario: number
   notas_fiscais: Array<{
     numero_nf: string

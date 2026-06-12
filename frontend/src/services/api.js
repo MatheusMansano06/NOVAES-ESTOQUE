@@ -1,5 +1,5 @@
 import axios from 'axios';
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000/api';
+const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000/api';
 const api = axios.create({
     baseURL: API_BASE_URL,
     headers: {
@@ -67,5 +67,51 @@ export const baixarMultiplosOuPdfs = async (nfIds, formato) => {
         // Aguarda um pouco entre downloads para não sobrecarregar
         await new Promise(resolve => setTimeout(resolve, 200));
     }
+};
+// Fornecedores
+export const listarFornecedores = (skip = 0, limit = 100) => {
+    return api.get('/fornecedores', {
+        params: { skip, limit }
+    }).then(res => res.data);
+};
+export const criarFornecedor = (dados) => {
+    return api.post('/fornecedores', dados).then(res => res.data);
+};
+export const editarFornecedor = (id, dados) => {
+    return api.put(`/fornecedores/${id}`, dados).then(res => res.data);
+};
+export const deletarFornecedor = (id) => {
+    return api.delete(`/fornecedores/${id}`).then(res => res.data);
+};
+// Estoque Mínimo
+export const listarEstoqueMinimo = (skip = 0, limit = 100) => {
+    return api.get('/estoque-minimo', {
+        params: { skip, limit }
+    }).then(res => res.data);
+};
+export const criarEstoqueMinimo = (produto_codigo, estoque_minimo, notificar_fornecedores) => {
+    return api.post('/estoque-minimo', {
+        produto_codigo,
+        estoque_minimo,
+        notificar_fornecedores: notificar_fornecedores ? 1 : 0
+    }).then(res => res.data);
+};
+export const editarEstoqueMinimo = (produto_codigo, estoque_minimo, notificar_fornecedores) => {
+    return api.put(`/estoque-minimo/${produto_codigo}`, {
+        estoque_minimo,
+        notificar_fornecedores: notificar_fornecedores ? 1 : 0
+    }).then(res => res.data);
+};
+// Histórico e Notificações
+export const historicoComprasProduto = (produto_codigo) => {
+    return api.get(`/historico-compras/${produto_codigo}`).then(res => res.data);
+};
+export const notificarFornecedores = () => {
+    return api.post('/notificar-fornecedores', {}).then(res => res.data);
+};
+export const historicoNotificacoes = (skip = 0, limit = 100) => {
+    return api.get('/historico-notificacoes', {
+        params: { skip, limit }
+    }).then(res => res.data);
 };
 export default api;
