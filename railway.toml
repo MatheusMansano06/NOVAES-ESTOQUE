@@ -1,20 +1,6 @@
 [build]
-builder = "dockerfile"
-dockerfile = "./backend/Dockerfile"
+dockerfile = "Dockerfile"
 
 [deploy]
 startCommand = "uvicorn app.main:app --host 0.0.0.0 --port $PORT"
 port = 8000
-
-[env]
-# Database
-DATABASE_URL = "$DATABASE_URL"
-
-# Olist
-OLIST_API_TOKEN_SIMPLE = "$OLIST_API_TOKEN_SIMPLE"
-OLIST_CLIENT_ID = "$OLIST_CLIENT_ID"
-OLIST_CLIENT_SECRET = "$OLIST_CLIENT_SECRET"
-OLIST_REDIRECT_URI = "$OLIST_REDIRECT_URI"
-
-# General
-DEBUG = "False"
