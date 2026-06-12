@@ -2,15 +2,15 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-COPY requirements.txt .
+# Backend está em subdiretório
+COPY backend/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY . .
+COPY backend/ .
 
 # Criar diretório de uploads
 RUN mkdir -p uploads
 
-# Expor porta
 EXPOSE 8000
 
 # Rodar FastAPI
