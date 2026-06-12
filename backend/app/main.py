@@ -2429,7 +2429,7 @@ async def encerrar_embale(request: Request):
 
 
 routes = [
-    Route("/", root, methods=["GET"]),
+    Route("/api/health", root, methods=["GET"]),
     Route("/api/upload-nfe", upload_nfe, methods=["POST"]),
     Route("/api/notas-fiscais", get_nfs, methods=["GET"]),
     Route("/api/notas-fiscais/{nf_id}", get_nf, methods=["GET"]),
@@ -2485,6 +2485,13 @@ async def _on_startup():
     except Exception as e:
         print(f"[ERRO] Falha ao iniciar scheduler: {e}")
 
+
+# Serve o frontend compilado (dist) como SPA na raiz "/", se existir.
+# Fica DEPOIS de todas as rotas /api, entao a API tem prioridade.
+from starlette.staticfiles import StaticFiles
+STATIC_DIR = os.path.join(os.path.dirname(__file__), "..", "static")
+if os.path.isdir(STATIC_DIR):
+    routes.append(Mount("/", app=StaticFiles(directory=STATIC_DIR, html=True), name="frontend"))
 
 app = Starlette(routes=routes, on_startup=[_on_startup])
 

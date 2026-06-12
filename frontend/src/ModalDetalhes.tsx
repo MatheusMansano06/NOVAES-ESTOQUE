@@ -1,6 +1,8 @@
 import { useState, useEffect } from 'react'
 import './ModalDetalhes.css'
 
+const API_BASE = import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000'
+
 interface Historico {
   id: number
   quantidade_confirmada: number
@@ -56,7 +58,7 @@ export function ModalDetalhes({
   const loadHistorico = async () => {
     try {
       const res = await fetch(
-        `http://127.0.0.1:8000/api/historico-confirmacao/${produto.id_item}`
+        `${API_BASE}/api/historico-confirmacao/${produto.id_item}`
       )
       const data = await res.json()
       setHistorico(data.historico || [])
@@ -70,7 +72,7 @@ export function ModalDetalhes({
     setMessage('')
 
     try {
-      const res = await fetch('http://127.0.0.1:8000/api/confirmar-estoque', {
+      const res = await fetch(API_BASE + '/api/confirmar-estoque', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

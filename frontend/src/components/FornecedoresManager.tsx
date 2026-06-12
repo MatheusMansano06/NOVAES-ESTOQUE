@@ -1,5 +1,7 @@
 import { useState, useEffect } from 'react'
 
+const API_BASE = import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000'
+
 interface NotaFiscal {
   id: number
   numero_nf: string
@@ -77,7 +79,7 @@ export function FornecedoresManager({ onVoltar }: FornecedoresManagerProps) {
   const loadNotas = async () => {
     setCarregando(true)
     try {
-      const res = await fetch('http://127.0.0.1:8000/api/notas-fiscais')
+      const res = await fetch(API_BASE + '/api/notas-fiscais')
       if (!res.ok) throw new Error('Falha ao carregar notas')
 
       const response = await res.json()

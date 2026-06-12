@@ -1,107 +1,92 @@
 # 🏍️ NOVAES-ESTOQUE
 
-**Sistema de Gestão de Estoque e Inbound para Operações de E-commerce**
+Sistema de gestão de estoque, notas fiscais e inbounds (FULL) com integração Olist/Tiny.
 
-Solução profissional para gerenciar notas fiscais, inbounds (separação de produtos), vinculação com marketplaces e sincronização de estoque em tempo real.
-
----
-
-## **Tecnologias**
-
-- **Backend:** FastAPI (Python 3.11+)
+- **Backend:** Starlette (FastAPI-style) + SQLAlchemy — Python 3.11
 - **Frontend:** React 18 + Vite + TypeScript
-- **Database:** PostgreSQL (produção) / SQLite (desenvolvimento)
-- **Integração:** Olist API v3, Mercado Livre
+- **Banco:** SQLite (arquivo único, persistido em volume no Railway)
+- **Integração:** Olist/Tiny ERP (OAuth2 API v3)
+
+A aplicação roda como **um único serviço**: o backend serve a API em `/api/...`
+e o frontend já compilado na raiz `/`. Mesma origem → sem CORS, uma URL só.
 
 ---
 
-## **Características**
+## Desenvolvimento local
 
-✅ Upload e parsing automático de Notas Fiscais (XML/PDF)  
-✅ Gerenciamento de inbounds (Frete/Separação do Mercado Livre)  
-✅ Vinculação automática com anúncios Olist  
-✅ Sincronização de estoque em tempo real  
-✅ Reserva automática para FULL (inbounds)  
-✅ Revisão e confirmação de entradas  
-✅ Dashboard operacional com filtros avançados  
-
----
-
-## **Quick Start (Desenvolvimento)**
-
-### **Backend**
+**Backend** (porta 8000):
 ```bash
 cd backend
 python -m venv venv
-source venv/bin/activate  # ou venv\Scripts\activate (Windows)
+venv\Scripts\activate          # Windows  (Linux/Mac: source venv/bin/activate)
 pip install -r requirements.txt
-python -m uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
+python -m uvicorn app.main:app --reload --port 8000
 ```
 
-### **Frontend**
+**Frontend** (porta 5173, com hot-reload):
 ```bash
 cd frontend
 npm install
 npm run dev
 ```
-
-Acessa: **http://localhost:5173**
-
----
-
-## **Deploy em Produção**
-
-Ver [DEPLOYMENT.md](./DEPLOYMENT.md) para instruções completo de deploy em **Vercel + Railway**.
+O frontend lê `VITE_API_URL` de `frontend/.env.local` (já aponta para
+`http://127.0.0.1:8000`). Acesse **http://localhost:5173**.
 
 ---
 
-## **Documentação**
+## Deploy no Railway (tudo em 1 serviço)
 
-- [DEPLOYMENT.md](./DEPLOYMENT.md) - Guia de deploy Vercel/Railway
-- [CLAUDE.md](./CLAUDE.md) - Arquitetura e padrões
-- [Backend API](http://localhost:8000/docs) - Swagger automático
+O `Dockerfile` da raiz compila o frontend e o embute no backend. Passos:
+
+1. **New Project → Deploy from GitHub repo** → selecione `NOVAES-ESTOQUE`.
+   O Railway detecta o `Dockerfile` da raiz automaticamente.
+2. **Volume (persistência do banco):** em *Settings → Volumes*, adicione um
+   volume montado em **`/data`**. No 1º boot o `backend/seed.db` (seus dados
+   reais) é copiado para lá automaticamente; depois disso os dados ficam no
+   volume e sobrevivem a redeploys.
+3. **Variáveis de ambiente** (*Variables*) — para ativar a integração Olist:
+   ```
+   OLIST_CLIENT_ID=...
+   OLIST_CLIENT_SECRET=...
+   OLIST_REDIRECT_URI=https://SEU-APP.up.railway.app/api/olist/callback
+   ```
+   `DATABASE_URL` já vem definida na imagem (`sqlite:////data/estoque_virtual.db`).
+4. **Deploy.** A app sobe em `https://SEU-APP.up.railway.app` — frontend e API
+   no mesmo domínio.
+
+> **Atualizar os dados de produção depois:** substitua `backend/seed.db` por um
+> novo snapshot, faça commit e limpe o volume `/data` (o seed é recopiado).
 
 ---
 
-## **Variáveis de Ambiente**
+## Dados incluídos (`backend/seed.db`)
 
-Copiar `.env.example` → `.env` e preencher suas chaves Olist:
-
-```bash
-cp backend/.env.example backend/.env
-```
+6 notas fiscais · 338 itens de estoque · 84 confirmações · 29 vínculos Olist ·
+1 inbound (#69525707) com 131 itens.
 
 ---
 
-## **Estrutura**
+## Estrutura
 
 ```
 .
-├── backend/              # FastAPI + SQLAlchemy
+├── Dockerfile            # build único: frontend (Vite) + backend (uvicorn)
+├── railway.toml          # config de deploy do Railway
+├── backend/
 │   ├── app/
-│   │   ├── main.py      # Routes e lógica principal
-│   │   ├── models.py    # ORM models
-│   │   ├── schemas.py   # Pydantic validators
-│   │   └── integracoes_olist.py
-│   ├── Dockerfile       # Deploy em containers
-│   └── requirements.txt
-├── frontend/            # React + Vite
-│   ├── src/
-│   │   ├── App.tsx
-│   │   ├── components/
-│   │   └── services/api.ts
-│   ├── vercel.json      # Deploy em Vercel
-│   └── package.json
-├── DEPLOYMENT.md        # Guia de deployment
-└── railway.toml         # Config Railway
+│   │   ├── main.py            # rotas /api + mount do frontend em /
+│   │   ├── models.py          # ORM
+│   │   ├── schemas.py
+│   │   ├── integracoes_olist.py
+│   │   ├── jobs.py            # scheduler (inbounds, notificações)
+│   │   └── utils/
+│   ├── database.py           # engine + seed automático do SQLite
+│   ├── requirements.txt
+│   └── seed.db               # dados reais (vão para o volume no 1º boot)
+└── frontend/
+    ├── src/ (App.tsx, components/, services/api.ts)
+    └── package.json
 ```
 
----
-
-## **Licença**
-
-Proprietary - NOVAES
-
----
-
-**Desenvolvido com ❤️ por MatheusMansano06**
+Configuração de chaves: copie `backend/.env.example` → `backend/.env`.
+Setup detalhado da Olist em [SETUP_OLIST_APP.md](./SETUP_OLIST_APP.md).

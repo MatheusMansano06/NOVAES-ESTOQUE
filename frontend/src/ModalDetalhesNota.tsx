@@ -1,6 +1,8 @@
 import { useState } from 'react'
 import './ModalDetalhes.css'
 
+const API_BASE = import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000'
+
 // ===== NÚMERO DE WHATSAPP DO FORNECEDOR/RESPONSÁVEL =====
 // Formato: código do país (55) + DDD + número, somente dígitos.
 // Ex: 55 + 19 + 978149245 = 5519978149245
@@ -90,7 +92,7 @@ export function ModalDetalhesNota({
         }
 
         // Registrar divergência
-        const resDivergencia = await fetch('http://127.0.0.1:8000/api/registrar-divergencia', {
+        const resDivergencia = await fetch(API_BASE + '/api/registrar-divergencia', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -128,7 +130,7 @@ export function ModalDetalhesNota({
       } else {
         // === FLUXO SEM DIVERGÊNCIA (quantidade correta) ===
         // Persistir a confirmação no backend (marca como conferido)
-        const resConf = await fetch('http://127.0.0.1:8000/api/confirmar-estoque', {
+        const resConf = await fetch(API_BASE + '/api/confirmar-estoque', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({

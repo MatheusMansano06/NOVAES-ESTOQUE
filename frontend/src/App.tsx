@@ -7,6 +7,8 @@ import { FornecedoresManager } from './components/FornecedoresManager'
 import { EmbaldesManager } from './components/EmbaldesManager'
 import { baixarMultiplosOuPdfs } from './services/api'
 
+const API_BASE = import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000'
+
 interface NotaFiscal {
   id: number
   numero_nf: string
@@ -150,7 +152,7 @@ function App() {
       setSugestaoDispensada(false)
       const codigo = (produtoSelecionado as any).codigo_produto || ''
       const descricao = (produtoSelecionado as any).descricao || ''
-      fetch(`http://127.0.0.1:8000/api/olist/sugestao-vinculo?codigo=${encodeURIComponent(codigo)}&descricao=${encodeURIComponent(descricao)}`)
+      fetch(`${API_BASE}/api/olist/sugestao-vinculo?codigo=${encodeURIComponent(codigo)}&descricao=${encodeURIComponent(descricao)}`)
         .then((r) => r.json())
         .then((d) => { if (d.encontrado) setSugestaoVinculo(d.vinculo) })
         .catch(() => {})
@@ -171,7 +173,7 @@ function App() {
       olist_produto_id: produtoOlistSelecionado.id || '',
       olist_sku: produtoOlistSelecionado.sku || ''
     })
-    fetch(`http://127.0.0.1:8000/api/embaldes/reserva-produto?${params}`)
+    fetch(`${API_BASE}/api/embaldes/reserva-produto?${params}`)
       .then((r) => r.json())
       .then((d) => {
         const reserva = Math.round(d.reservado_full || 0)
@@ -185,7 +187,7 @@ function App() {
           olist_sku: produtoOlistSelecionado.sku || '',
           olist_nome: produtoOlistSelecionado.nome || ''
         })
-        fetch(`http://127.0.0.1:8000/api/embaldes/buscar-no-inbound?${p2}`)
+        fetch(`${API_BASE}/api/embaldes/buscar-no-inbound?${p2}`)
           .then((r) => r.json())
           .then((dc) => setInboundCandidatos(dc.candidatos || []))
           .catch(() => setInboundCandidatos([]))
@@ -203,7 +205,7 @@ function App() {
     setVinculandoCandidato(true)
     try {
       const res = await fetch(
-        `http://127.0.0.1:8000/api/embaldes/${cand.inbound_id}/itens/${cand.item_id}/vincular`,
+        `${API_BASE}/api/embaldes/${cand.inbound_id}/itens/${cand.item_id}/vincular`,
         {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -225,7 +227,7 @@ function App() {
         olist_produto_id: produtoOlistSelecionado.id || '',
         olist_sku: produtoOlistSelecionado.sku || ''
       })
-      const r = await fetch(`http://127.0.0.1:8000/api/embaldes/reserva-produto?${params}`)
+      const r = await fetch(`${API_BASE}/api/embaldes/reserva-produto?${params}`)
       const d = await r.json()
       setReservaInbound(Math.round(d.reservado_full || 0))
       setReservaInboundInbs((d.detalhes || []).map((x: any) => `#${x.numero_inbound}`).join(', '))
@@ -243,7 +245,7 @@ function App() {
     if (!sugestaoVinculo) return
     const termo = sugestaoVinculo.olist_sku || sugestaoVinculo.nf_codigo || ''
     try {
-      const res = await fetch(`http://127.0.0.1:8000/api/olist/produtos?q=${encodeURIComponent(termo)}`)
+      const res = await fetch(`${API_BASE}/api/olist/produtos?q=${encodeURIComponent(termo)}`)
       const data = await res.json()
       const lista = data.produtos || []
       const prod = lista.find((p: any) => String(p.id) === String(sugestaoVinculo.olist_produto_id)) || lista[0]
@@ -269,7 +271,7 @@ function App() {
 
   const loadVinculos = async () => {
     try {
-      const res = await fetch('http://127.0.0.1:8000/api/olist/vinculos')
+      const res = await fetch(API_BASE + '/api/olist/vinculos')
       const data = await res.json()
       setListaVinculos(data.vinculos || [])
     } catch (err) {
@@ -285,7 +287,7 @@ function App() {
   const deletarVinculo = async (id: number) => {
     if (!window.confirm('Remover este vínculo salvo? Ele não será mais sugerido automaticamente.')) return
     try {
-      await fetch('http://127.0.0.1:8000/api/olist/vinculos/deletar', {
+      await fetch(API_BASE + '/api/olist/vinculos/deletar', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ id }),
@@ -321,7 +323,7 @@ function App() {
 
     setDeletando(true)
     try {
-      await fetch('http://127.0.0.1:8000/api/notas-fiscais/deletar-multiplas', {
+      await fetch(API_BASE + '/api/notas-fiscais/deletar-multiplas', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ nf_ids: Array.from(notasSelecionadas) }),
@@ -346,7 +348,7 @@ function App() {
 
   const loadNotas = async () => {
     try {
-      const res = await fetch('http://127.0.0.1:8000/api/notas-fiscais')
+      const res = await fetch(API_BASE + '/api/notas-fiscais')
       const data = await res.json()
       setNotas(data.items || [])
       setNotasSelecionadas(new Set())
@@ -357,7 +359,7 @@ function App() {
 
   const loadEstoque = async () => {
     try {
-      const res = await fetch('http://127.0.0.1:8000/api/estoque-virtual')
+      const res = await fetch(API_BASE + '/api/estoque-virtual')
       const data = await res.json()
       setEstoque(data.produtos || [])
     } catch (err) {
@@ -367,7 +369,7 @@ function App() {
 
   const loadDivergencias = async () => {
     try {
-      const res = await fetch('http://127.0.0.1:8000/api/divergencias')
+      const res = await fetch(API_BASE + '/api/divergencias')
       const data = await res.json()
       setDivergencias(data.divergencias || [])
     } catch (err) {
@@ -424,7 +426,7 @@ function App() {
   // Abre o modal de detalhe da nota (busca dados frescos)
   const abrirDetalheNota = async (notaId: number) => {
     try {
-      const res = await fetch(`http://127.0.0.1:8000/api/notas-fiscais/${notaId}`)
+      const res = await fetch(`${API_BASE}/api/notas-fiscais/${notaId}`)
       const data: NotaFiscal = await res.json()
       setNotaDetalheAberta(data)
       setNotaSelecionada(data)
@@ -452,7 +454,7 @@ function App() {
     !nota ? [] : divergencias.filter((d) => String(d.numero_nf) === String(nota.numero_nf))
 
   const resolverDivergenciaItem = async (itemId: number) => {
-    const res = await fetch('http://127.0.0.1:8000/api/resolver-divergencia', {
+    const res = await fetch(API_BASE + '/api/resolver-divergencia', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ item_id: itemId })
     })
@@ -462,7 +464,7 @@ function App() {
 
   const deletarDivergenciaItem = async (itemId: number) => {
     if (!window.confirm('Tem certeza que deseja deletar esta divergência?')) return
-    const res = await fetch('http://127.0.0.1:8000/api/deletar-divergencia', {
+    const res = await fetch(API_BASE + '/api/deletar-divergencia', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ item_id: itemId })
     })
@@ -636,7 +638,7 @@ function App() {
 
   const executarBuscaSKU = async (busca: string) => {
     try {
-      const response = await fetch(`http://127.0.0.1:8000/api/olist/produtos?q=${encodeURIComponent(busca)}`)
+      const response = await fetch(`${API_BASE}/api/olist/produtos?q=${encodeURIComponent(busca)}`)
 
       if (!response.ok && response.status === 503) {
         setSugestoesSKU([])
@@ -664,7 +666,7 @@ function App() {
   const handleSelecionarSKU = async (produto: any) => {
     // Tentar detectar kit automaticamente
     try {
-      const resDeteccao = await fetch(`http://127.0.0.1:8000/api/olist/detectar-kit?sku=${encodeURIComponent(produto.sku.toUpperCase())}`)
+      const resDeteccao = await fetch(`${API_BASE}/api/olist/detectar-kit?sku=${encodeURIComponent(produto.sku.toUpperCase())}`)
       const dataDeteccao = await resDeteccao.json()
 
       if (dataDeteccao.eh_kit) {
@@ -709,7 +711,7 @@ function App() {
     // Busca o estoque atual sob demanda (1 requisição rápida)
     if (produto.id && (produto.estoque_atual === undefined || produto.estoque_atual === null)) {
       try {
-        const resEstoque = await fetch(`http://127.0.0.1:8000/api/olist/estoque-produto?id=${encodeURIComponent(produto.id)}`)
+        const resEstoque = await fetch(`${API_BASE}/api/olist/estoque-produto?id=${encodeURIComponent(produto.id)}`)
         const estoque = await resEstoque.json()
         setProdutoOlistSelecionado((prev) => ({
           ...prev,
@@ -747,7 +749,7 @@ function App() {
 
     try {
       // Vincular kit + atualizar estoque de cada componente
-      const res = await fetch('http://127.0.0.1:8000/api/olist/kits/vincular-com-componentes', {
+      const res = await fetch(API_BASE + '/api/olist/kits/vincular-com-componentes', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -782,7 +784,7 @@ function App() {
         const nfId = notaDetalheAberta?.id ?? notaSelecionada?.id
         if (nfId) {
           try {
-            const resNota = await fetch(`http://127.0.0.1:8000/api/notas-fiscais/${nfId}`)
+            const resNota = await fetch(`${API_BASE}/api/notas-fiscais/${nfId}`)
             const dataNota = await resNota.json()
             setProdutosNota(dataNota.itens || [])
             setNotaDetalheAberta(dataNota)
@@ -830,7 +832,7 @@ function App() {
         olist_produto_id: produtoOlistSelecionado.id || '',
         olist_sku: produtoOlistSelecionado.sku || ''
       })
-      const resR = await fetch(`http://127.0.0.1:8000/api/embaldes/reserva-produto?${params}`)
+      const resR = await fetch(`${API_BASE}/api/embaldes/reserva-produto?${params}`)
       const dataR = await resR.json()
       reservaFull = Math.round(dataR.reservado_full || 0)
       if (reservaFull > 0) {
@@ -857,7 +859,7 @@ function App() {
 
     try {
       // 1. Vincular produto NF -> anúncio Olist
-      const resVinc = await fetch('http://127.0.0.1:8000/api/olist/vincular-produto', {
+      const resVinc = await fetch(API_BASE + '/api/olist/vincular-produto', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -877,7 +879,7 @@ function App() {
       // 2. Atualizar estoque na Olist (ENTRADA da quantidade da NF)
       // Em subida em massa, envia todos os IDs do grupo para marcar todos como subidos
       const idsMassa = (produtoSelecionado as any).ids_massa as number[] | undefined
-      const resEst = await fetch('http://127.0.0.1:8000/api/olist/atualizar-estoque', {
+      const resEst = await fetch(API_BASE + '/api/olist/atualizar-estoque', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -903,7 +905,7 @@ function App() {
         const nfIdReabrir = notaDetalheAberta?.id ?? notaSelecionada?.id
         if (nfIdReabrir) {
           try {
-            const resNota = await fetch(`http://127.0.0.1:8000/api/notas-fiscais/${nfIdReabrir}`)
+            const resNota = await fetch(`${API_BASE}/api/notas-fiscais/${nfIdReabrir}`)
             const notaAtualizada = await resNota.json()
             setNotaSelecionada(notaAtualizada)
             setNotaDetalheAberta(notaAtualizada)
@@ -927,7 +929,7 @@ function App() {
     }
 
     try {
-      const res = await fetch('http://127.0.0.1:8000/api/produtos-manuais', {
+      const res = await fetch(API_BASE + '/api/produtos-manuais', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -946,7 +948,7 @@ function App() {
         // Recarregar a nota para atualizar a lista/abas
         const nfId = notaDetalheAberta?.id ?? notaSelecionada?.id
         if (nfId) {
-          const resNota = await fetch(`http://127.0.0.1:8000/api/notas-fiscais/${nfId}`)
+          const resNota = await fetch(`${API_BASE}/api/notas-fiscais/${nfId}`)
           const dataNota = await resNota.json()
           setProdutosNota(dataNota.itens || [])
           setNotaDetalheAberta(dataNota)
@@ -962,7 +964,7 @@ function App() {
 
   const abrirNotaSelecionada = async (notaId: number) => {
     try {
-      const res = await fetch(`http://127.0.0.1:8000/api/notas-fiscais/${notaId}`)
+      const res = await fetch(`${API_BASE}/api/notas-fiscais/${notaId}`)
       const data: NotaFiscal = await res.json()
       setNotaSelecionada(data)
       setPagina('inicial') // Mantém na inicial mas mostra a nota selecionada
@@ -975,7 +977,7 @@ function App() {
     if (!notaSelecionada) return
     try {
       // Buscar dados frescos da nota para refletir conferências já feitas
-      const res = await fetch(`http://127.0.0.1:8000/api/notas-fiscais/${notaSelecionada.id}`)
+      const res = await fetch(`${API_BASE}/api/notas-fiscais/${notaSelecionada.id}`)
       const data: NotaFiscal = await res.json()
       setNotaSelecionada(data)
       setProdutosNota(data.itens || [])
@@ -987,7 +989,7 @@ function App() {
 
   const abrirConferencia = async (notaId: number) => {
     try {
-      const res = await fetch(`http://127.0.0.1:8000/api/notas-fiscais/${notaId}`)
+      const res = await fetch(`${API_BASE}/api/notas-fiscais/${notaId}`)
       const data: NotaFiscal = await res.json()
       setNotaSelecionada(data)
       setPagina('conferencia')
@@ -1037,7 +1039,7 @@ function App() {
       const formData = new FormData()
       formData.append('file', file)
 
-      const res = await fetch('http://127.0.0.1:8000/api/upload-nfe', {
+      const res = await fetch(API_BASE + '/api/upload-nfe', {
         method: 'POST',
         body: formData,
       })
@@ -1499,7 +1501,7 @@ function App() {
                     }
 
                     const handleResolver = async () => {
-                      const res = await fetch('http://127.0.0.1:8000/api/resolver-divergencia', {
+                      const res = await fetch(API_BASE + '/api/resolver-divergencia', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({ item_id: div.item_id })
@@ -1514,7 +1516,7 @@ function App() {
 
                     const handleDeletar = async () => {
                       if (!window.confirm('Tem certeza que deseja deletar esta divergência?')) return
-                      const res = await fetch('http://127.0.0.1:8000/api/deletar-divergencia', {
+                      const res = await fetch(API_BASE + '/api/deletar-divergencia', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({ item_id: div.item_id })
