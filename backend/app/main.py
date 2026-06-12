@@ -46,6 +46,18 @@ def _garantir_colunas_sqlite():
             if "quantidade_olist_enviada" not in colunas:
                 conn.exec_driver_sql("ALTER TABLE itens_estoque ADD COLUMN quantidade_olist_enviada FLOAT")
                 print("[DB] Coluna itens_estoque.quantidade_olist_enviada criada")
+
+            # Colunas do recurso de Balanço (correção de erros passados)
+            colunas_embale = {row[1] for row in conn.exec_driver_sql("PRAGMA table_info(itens_embale_fu)").fetchall()}
+            migracoes_embale = [
+                ("foi_balanceado", "INTEGER DEFAULT 0"),
+                ("saldo_disponivel", "FLOAT"),
+                ("data_balanceamento", "DATETIME"),
+            ]
+            for nome, tipo in migracoes_embale:
+                if nome not in colunas_embale:
+                    conn.exec_driver_sql(f"ALTER TABLE itens_embale_fu ADD COLUMN {nome} {tipo}")
+                    print(f"[DB] Coluna itens_embale_fu.{nome} criada")
     except Exception as e:
         print(f"[DB] Aviso ao garantir colunas SQLite: {e}")
 
