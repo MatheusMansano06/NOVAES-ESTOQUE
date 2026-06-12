@@ -104,6 +104,18 @@ def _extrair_items_shopee_pdf(pdf) -> dict:
         items.extend(items_pagina)
 
     items = [item for item in items if item.get("titulo_anuncio") and item.get("quantidade_separada", 0) > 0]
+
+    # Remover duplicatas exatas (mesmo SKU vendor + Shopee + Qtd + Nome)
+    items_unicos = []
+    vistos = set()
+    for item in items:
+        chave = (item.get("sku"), item.get("codigo_ml"), int(item.get("quantidade_separada", 0)))
+        if chave not in vistos:
+            items_unicos.append(item)
+            vistos.add(chave)
+
+    items = items_unicos
+
     if not items:
         return {
             "erro": True,
@@ -122,6 +134,9 @@ def _extrair_items_shopee_pagina_v2(page) -> List[dict]:
     Parser v2 para Shopee: agrupa linhas consecutivas para montar item completo.
     Lida com nomes de produtos quebrados em múltiplas linhas.
 
+    IMPORTANTE: Se múltiplos SKUs vendor estão na mesma altura Y, trata como
+    produtos DIFERENTES (sobrepostos no PDF). Separa por mudança de SKU vendor.
+
     Padrão esperado:
     - SKU_vendor (coluna 1) | SKU_shopee padrão XXXXX_X (coluna 2) | Nome... | Item without/with | QTD
     - Continuações de nome vêm em linhas seguintes
@@ -133,26 +148,62 @@ def _extrair_items_shopee_pagina_v2(page) -> List[dict]:
         key = round(word["top"])
         rows.setdefault(key, []).append(word)
 
-    linhas_brutos = []
+    # Primeiro agrupamento: por coluna de vendor (x < 110)
+    # Se múltiplos vendors na mesma altura, separa como diferentes
+    linhas_brutos_separadas = []
+
     for key in sorted(rows):
-        partes = {"vendor": [], "shopee": [], "name": [], "warehouse": [], "qty": []}
-        for word in sorted(rows[key], key=lambda x: x["x0"]):
+        words_ordenados = sorted(rows[key], key=lambda x: x["x0"])
+
+        # Extrair todos os vendors dessa linha
+        vendors_linha = []
+        outras_colunas = {"shopee": [], "name": [], "warehouse": [], "qty": []}
+
+        for word in words_ordenados:
             texto = (word.get("text") or "").strip()
             if not texto:
                 continue
             x0 = word["x0"]
             if x0 < 110:
-                partes["vendor"].append(texto)
+                vendors_linha.append((x0, texto))
             elif x0 < 190:
-                partes["shopee"].append(texto)
+                outras_colunas["shopee"].append((x0, texto))
             elif x0 < 445:
-                partes["name"].append(texto)
+                outras_colunas["name"].append((x0, texto))
             elif x0 < 525:
-                partes["warehouse"].append(texto)
+                outras_colunas["warehouse"].append((x0, texto))
             else:
-                partes["qty"].append(texto)
+                outras_colunas["qty"].append((x0, texto))
 
-        linhas_brutos.append({k: " ".join(v).strip() for k, v in partes.items()})
+        # Se tem múltiplos vendors, são produtos diferentes
+        if len(vendors_linha) > 1:
+            # Criar um "item" por vendor, separando as colunas por posição X
+            for idx, (vendor_x, vendor_texto) in enumerate(vendors_linha):
+                partes = {"vendor": [vendor_texto], "shopee": [], "name": [], "warehouse": [], "qty": []}
+
+                # Para cada coluna, pegar os textos "mais próximos" deste vendor em X
+                for campo, valores in outras_colunas.items():
+                    if valores:
+                        # Se tem tantos textos quanto vendors, alinha por índice
+                        # Senão, pega o primeiro
+                        if len(valores) >= len(vendors_linha):
+                            partes[campo] = [valores[idx][1]]
+                        else:
+                            partes[campo] = [valores[0][1]]
+
+                linhas_brutos_separadas.append({k: " ".join(v).strip() for k, v in partes.items()})
+        else:
+            # Padrão: um vendor por linha
+            partes = {"vendor": [], "shopee": [], "name": [], "warehouse": [], "qty": []}
+            partes["vendor"] = [v[1] for v in vendors_linha]
+            partes["shopee"] = [v[1] for v in outras_colunas["shopee"]]
+            partes["name"] = [v[1] for v in outras_colunas["name"]]
+            partes["warehouse"] = [v[1] for v in outras_colunas["warehouse"]]
+            partes["qty"] = [v[1] for v in outras_colunas["qty"]]
+
+            linhas_brutos_separadas.append({k: " ".join(v).strip() for k, v in partes.items()})
+
+    linhas_brutos = linhas_brutos_separadas
 
     items = []
     item_atual = None
