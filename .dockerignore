@@ -1,0 +1,20 @@
+# Nunca copiar para a imagem
+**/node_modules
+**/__pycache__
+**/*.pyc
+backend/venv
+frontend/dist
+*.log
+.git
+.vscode
+.idea
+# Backups de banco (o seed.db É necessário, então NÃO ignorar ele)
+backend/*.db.backup*
+backend/estoque_virtual.db.vazio
+backend/estoque_virtual.db
+# Secrets locais / envs (não devem sobrescrever o build no Docker)
+*.env
+.env
+**/.env.local
+**/.env.*.local
+estoque-virtual-secrets.zip
