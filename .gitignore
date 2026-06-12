@@ -16,6 +16,7 @@ logs/
 
 # Tokens & Credentials
 olist_token.json
+produtos_cache.json
 credentials.json
 estoque-virtual-secrets.zip
 

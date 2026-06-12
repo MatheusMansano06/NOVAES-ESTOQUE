@@ -23,11 +23,30 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+# Diretório de dados persistentes. Em produção (Railway) aponta para o volume
+# (OLIST_DATA_DIR=/data) p/ o token OAuth sobreviver a redeploys; local usa
+# a própria pasta backend/.
+_DATA_DIR = os.getenv("OLIST_DATA_DIR") or os.path.join(os.path.dirname(__file__), "..")
+os.makedirs(_DATA_DIR, exist_ok=True)
+
 # Caminho para armazenar o token de forma persistente
-TOKEN_FILE = os.path.join(os.path.dirname(__file__), "..", "olist_token.json")
+TOKEN_FILE = os.path.join(_DATA_DIR, "olist_token.json")
 
 # Caminho para o cache de produtos (sobrevive a restart do servidor)
-CACHE_FILE = os.path.join(os.path.dirname(__file__), "..", "produtos_cache.json")
+CACHE_FILE = os.path.join(_DATA_DIR, "produtos_cache.json")
+
+# Seed do token OAuth em produção: se OLIST_TOKEN_JSON estiver definida e ainda
+# não houver token salvo, grava o token (já autorizado) no volume. Assim a Olist
+# funciona após o deploy sem precisar refazer o login OAuth no navegador.
+_token_seed = os.getenv("OLIST_TOKEN_JSON")
+if _token_seed and not os.path.exists(TOKEN_FILE):
+    try:
+        with open(TOKEN_FILE, "w", encoding="utf-8") as _f:
+            _f.write(_token_seed)
+        os.chmod(TOKEN_FILE, 0o600)
+        print(f"[OLIST] Token inicial gravado em {TOKEN_FILE}")
+    except Exception as _e:
+        print(f"[OLIST] Falha ao gravar token inicial: {_e}")
 
 
 class OlistIntegration:
