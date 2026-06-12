@@ -1048,7 +1048,7 @@ export function EmbaldesManager() {
             <div style={{ background: '#fff3e0', padding: '0.75rem', borderRadius: '4px', marginBottom: '1rem', borderLeft: '4px solid #d32f2f' }}>
               <div style={{ fontSize: '0.9rem', fontWeight: 'bold', marginBottom: '0.5rem' }}>⚠ Produto com divergência</div>
               <div style={{ fontSize: '0.85rem', color: '#666' }}>
-                <strong>{balanceandoItem.titulo}</strong>
+                <strong>{balanceandoItem.titulo_anuncio}</strong>
                 <br />SKU: {balanceandoItem.sku_inbound || '—'}
               </div>
             </div>

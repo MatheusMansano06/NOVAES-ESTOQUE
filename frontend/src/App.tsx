@@ -726,10 +726,7 @@ function App() {
 
       if (!response.ok && response.status === 503) {
         setSugestoesSKU([])
-        setMessage({
-          type: 'warning',
-          text: '⚠️ Configure sua chave de API da Olist no arquivo .env para usar a busca em tempo real.'
-        })
+        setMessage('⚠️ Configure sua chave de API da Olist no arquivo .env para usar a busca em tempo real.')
         return
       }
 
@@ -738,10 +735,7 @@ function App() {
     } catch (err) {
       console.error('Erro ao buscar produtos Olist:', err)
       setSugestoesSKU([])
-      setMessage({
-        type: 'error',
-        text: '❌ Erro ao buscar produtos da Olist. Verifique se a API está disponível.'
-      })
+      setMessage('❌ Erro ao buscar produtos da Olist. Verifique se a API está disponível.')
     } finally {
       setBuscandoSKU(false)
     }
@@ -3366,42 +3360,6 @@ function App() {
               </button>
             </div>
           </div>
-        </main>
-      </div>
-    )
-  }
-
-  // ===== PÁGINA FORNECEDORES =====
-  if (pagina === 'fornecedores') {
-    return (
-      <div className="app">
-        <header className="header">
-          <div className="container">
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <div>
-                <h1>GESTÃO DE FORNECEDORES</h1>
-                <p>Cadastre e gerencie fornecedores para notificações automáticas</p>
-              </div>
-              <button
-                onClick={() => setPagina('inicial')}
-                style={{
-                  padding: '0.6rem 1.2rem',
-                  backgroundColor: '#f0f0f0',
-                  color: '#1a1a1a',
-                  border: '1px solid #ddd',
-                  borderRadius: '4px',
-                  cursor: 'pointer',
-                  fontWeight: 'bold',
-                  fontSize: '0.9rem'
-                }}
-              >
-                ← Voltar
-              </button>
-            </div>
-          </div>
-        </header>
-        <main className="container main-content">
-          <FornecedoresManager onVoltar={voltarParaInicial} />
         </main>
       </div>
     )
