@@ -23,7 +23,6 @@ from app.models import (
 )
 from app.utils.nfe_parser import NFeParsing
 from app.utils.nfe_pdf_generator import NFePDFGenerator
-from app.utils.fornecedores import garantir_fornecedor, linkar_fornecedor_nf
 from app.utils.embale_parser import extrair_items_embale_pdf
 from app.integracoes_olist import olist
 from app.jobs import iniciar_scheduler
