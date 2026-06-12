@@ -242,6 +242,23 @@ export function EmbaldesManager() {
     }
   }
 
+  const deletarInbound = async (id: number) => {
+    if (!confirm('DELETAR este inbound PERMANENTEMENTE? Esta ação não pode ser desfeita. Todos os itens serão removidos do banco de dados.')) return
+    try {
+      setLoading(true)
+      await api.delete(`/embaldes/${id}`)
+      await carregarInbounds()
+      if (inboundSelecionado?.id === id) {
+        setInboundSelecionado(null)
+      }
+      setMessage('Inbound deletado permanentemente')
+    } catch (erro: any) {
+      setMessage('Erro ao deletar: ' + (erro.response?.data?.erro || String(erro)))
+    } finally {
+      setLoading(false)
+    }
+  }
+
   const carregarRevisao = async (id: number) => {
     if (revisandoId === id) {
       // Toggle: fecha
@@ -722,9 +739,13 @@ export function EmbaldesManager() {
                       Encerrar
                     </button>
                   ) : (
-                    <span style={{ padding: '0.4rem 0.9rem', background: '#9e9e9e', color: '#fff', borderRadius: '4px', fontSize: '0.82rem', fontWeight: 'bold', textAlign: 'center' }}>
-                      Encerrado
-                    </span>
+                    <button
+                      onClick={() => deletarInbound(inb.id)}
+                      style={{ padding: '0.5rem 1rem', background: '#fff', color: '#d32f2f', border: '1px solid #d32f2f', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold', fontSize: '0.85rem', whiteSpace: 'nowrap' }}
+                      title="Remover este inbound encerrado do banco de dados"
+                    >
+                      Deletar
+                    </button>
                   )}
                 </div>
               </div>

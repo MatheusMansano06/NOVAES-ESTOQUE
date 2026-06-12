@@ -2503,6 +2503,40 @@ async def encerrar_embale(request: Request):
         db.close()
 
 
+async def deletar_embale(request: Request):
+    """
+    DELETE /api/embaldes/{embale_id}
+    Deleta permanentemente um inbound (geralmente encerrado).
+    Remove o inbound e todos os seus itens da base de dados.
+    """
+    db = SessionLocal()
+    try:
+        embale_id = int(request.path_params.get("embale_id"))
+
+        embale = db.query(EmbaleFU).filter(EmbaleFU.id == embale_id).first()
+        if not embale:
+            return JSONResponse({"erro": "Inbound não encontrado"}, status_code=404)
+
+        # Deletar todos os itens do inbound (cascata automática via ORM)
+        for item in embale.itens:
+            db.delete(item)
+
+        # Deletar o inbound
+        db.delete(embale)
+        db.commit()
+
+        return JSONResponse({
+            "id": embale_id,
+            "mensagem": "Inbound deletado permanentemente"
+        })
+
+    except Exception as e:
+        db.rollback()
+        return JSONResponse({"erro": str(e)}, status_code=500)
+    finally:
+        db.close()
+
+
 async def apelidos_fornecedores(request: Request):
     db = SessionLocal()
     try:
@@ -2676,6 +2710,7 @@ routes = [
     Route("/api/embaldes/upload", upload_embale, methods=["POST"]),
     Route("/api/embaldes", listar_embaldes, methods=["GET"]),
     Route("/api/embaldes/{embale_id}", obter_embale, methods=["GET"]),
+    Route("/api/embaldes/{embale_id}", deletar_embale, methods=["DELETE"]),
     Route("/api/embaldes/{embale_id}/nome", atualizar_nome_embale, methods=["POST"]),
     Route("/api/embaldes/{embale_id}/data-limite", atualizar_data_limite_embale, methods=["POST"]),
     Route("/api/embaldes/{embale_id}/revisao", revisar_baixa_embale, methods=["GET"]),
