@@ -1310,7 +1310,7 @@ function App() {
                 </form>
 
                 {/* Botão de Fornecedores e Embaldes */}
-                <div style={{ marginTop: '1rem', paddingTop: '1rem', borderTop: '1px solid #e0e0e0', display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '0.75rem' }}>
+                <div style={{ marginTop: '1rem', paddingTop: '1rem', borderTop: '1px solid #e0e0e0', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
                   <button
                     onClick={() => setPagina('fornecedores')}
                     translate="no"
