@@ -1341,6 +1341,9 @@ async def atualizar_estoque_olist(request: Request):
         item_ids = data.get("item_ids")  # lista opcional: subida EM MASSA de varios registros
         quantidade = data.get("quantidade", 0)  # quantidade a ADICIONAR (entrada)
         tipo = data.get("tipo", "E")  # E=Entrada (padrao), B=Balanco, S=Saida
+        # MODO BALANÇO: quando o usuário informa o estoque REAL atual (corrige
+        # estoque fictício antigo). Estoque final = real informado + qtd da NF.
+        estoque_real = data.get("estoque_real")
 
         item = db.query(ItemEstoque).filter(ItemEstoque.id == item_id).first()
         if not item:
@@ -1352,31 +1355,52 @@ async def atualizar_estoque_olist(request: Request):
             }, status_code=400)
 
         agora = datetime.utcnow()
+        modo_balanco = estoque_real is not None
+        estoque_final_balanco = None
 
-        # ===== REGRA DO INBOUND =====
-        # Só se aplica em ENTRADA (tipo 'E'). Segura a qtd destinada ao FULL
-        # de inbounds ativos que ainda não deram baixa, e sobe só o restante.
-        reserva_full = 0.0
-        reserva_detalhes = []
-        if tipo == "E":
-            reserva_full, reserva_detalhes = _calcular_reserva_inbound(
-                db, item.olist_produto_id, item.olist_sku,
-                disponivel=float(quantidade), aplicar=True, agora=agora,
-                olist_nome=item.olist_nome
-            )
-
-        quantidade_subir = max(0.0, float(quantidade) - reserva_full)
-
-        # Sobe na Olist só o que sobrou (se sobrou). Se segurou tudo, não
-        # precisa chamar a Olist (nada de organico entra).
-        sucesso = True
-        if quantidade_subir > 0:
+        if modo_balanco:
+            # Corrige a base fictícia e soma a NF, escrevendo o ABSOLUTO na Olist.
+            # Não aplica reserva de inbound: é uma correção manual deliberada.
+            try:
+                base_real = max(0.0, float(estoque_real))
+            except (TypeError, ValueError):
+                return JSONResponse({"error": "Estoque real inválido"}, status_code=400)
+            estoque_final_balanco = base_real + float(quantidade)
+            reserva_full = 0.0
+            reserva_detalhes = []
+            quantidade_subir = float(quantidade)  # o que de fato entrou (a NF)
             sucesso = olist.atualizar_estoque(
                 item.olist_produto_id,
-                quantidade=quantidade_subir,
-                tipo=tipo,
-                preco_unitario=float(item.preco_unitario or 0)
+                quantidade=estoque_final_balanco,  # tipo B = absoluto
+                tipo="B",
+                preco_unitario=float(item.preco_unitario or 0),
+                observacao=f"Balanço via NF: base real {int(base_real)} + {int(float(quantidade))} da NF = {int(estoque_final_balanco)}"
             )
+        else:
+            # ===== REGRA DO INBOUND =====
+            # Só se aplica em ENTRADA (tipo 'E'). Segura a qtd destinada ao FULL
+            # de inbounds ativos que ainda não deram baixa, e sobe só o restante.
+            reserva_full = 0.0
+            reserva_detalhes = []
+            if tipo == "E":
+                reserva_full, reserva_detalhes = _calcular_reserva_inbound(
+                    db, item.olist_produto_id, item.olist_sku,
+                    disponivel=float(quantidade), aplicar=True, agora=agora,
+                    olist_nome=item.olist_nome
+                )
+
+            quantidade_subir = max(0.0, float(quantidade) - reserva_full)
+
+            # Sobe na Olist só o que sobrou (se sobrou). Se segurou tudo, não
+            # precisa chamar a Olist (nada de organico entra).
+            sucesso = True
+            if quantidade_subir > 0:
+                sucesso = olist.atualizar_estoque(
+                    item.olist_produto_id,
+                    quantidade=quantidade_subir,
+                    tipo=tipo,
+                    preco_unitario=float(item.preco_unitario or 0)
+                )
 
         if sucesso:
             # Determina TODOS os itens que participaram desta entrada.
@@ -1409,7 +1433,10 @@ async def atualizar_estoque_olist(request: Request):
 
             db.commit()  # persiste tb as baixas dos inbounds (reserva)
 
-            if reserva_full > 0:
+            if modo_balanco:
+                msg = (f"Balanço aplicado: estoque corrigido para {int(estoque_final_balanco)} un na Olist "
+                       f"(base real {int(float(estoque_real))} + {int(float(quantidade))} da NF).")
+            elif reserva_full > 0:
                 inbs = ", ".join(f"#{d['numero_inbound']}" for d in reserva_detalhes)
                 msg = (f"Entrada de {int(float(quantidade))} un: subi {int(quantidade_subir)} "
                        f"na Olist e segurei {int(reserva_full)} pro FULL (inbound {inbs}).")
@@ -1422,6 +1449,8 @@ async def atualizar_estoque_olist(request: Request):
                 "olist_produto_id": item.olist_produto_id,
                 "quantidade_recebida": float(quantidade),
                 "quantidade_subida": quantidade_subir,
+                "modo_balanco": modo_balanco,
+                "estoque_final": estoque_final_balanco,
                 "reservado_full": reserva_full,
                 "reserva_detalhes": reserva_detalhes,
                 "itens_marcados": len(itens_grupo)
@@ -2525,9 +2554,10 @@ async def balancear_item_embale(request: Request):
         qtd_full = item.quantidade_separada or 0
 
         # 1. Atualizar Olist para quantidade_real (balanço completo)
+        # tipo="B" é ABSOLUTO na Tiny: o valor enviado VIRA o estoque atual.
         sucesso = olist.atualizar_estoque(
             produto_id=produto_id,
-            quantidade=quantidade_real - estoque_antes,  # diferença = entrada/saída
+            quantidade=quantidade_real,  # absoluto: estoque passa a ser exatamente isto
             tipo="B",  # Balanço (não é entrada nem saída, é correção)
             observacao=f"Balanço do Inbound #{embale.numero_inbound}: corrigido de {estoque_antes} para {quantidade_real}"
         )

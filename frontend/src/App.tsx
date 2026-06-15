@@ -126,6 +126,9 @@ function App() {
   // Reserva de inbound ativo para o produto selecionado (regra do FULL)
   const [reservaInbound, setReservaInbound] = useState(0)
   const [reservaInboundInbs, setReservaInboundInbs] = useState('')
+  // Balanço de estoque: corrige estoque fictício antigo antes de subir a NF
+  const [balanceandoNF, setBalanceandoNF] = useState(false)
+  const [estoqueRealNF, setEstoqueRealNF] = useState('')
   // Candidatos do inbound que podem ser este mesmo produto (p/ confirmar)
   const [inboundCandidatos, setInboundCandidatos] = useState<any[]>([])
   const [candidatoVinculado, setCandidatoVinculado] = useState<any>(null)
@@ -971,29 +974,113 @@ function App() {
       const dataEst = await resEst.json()
       if (resEst.ok && dataEst.sucesso) {
         alert(`✅ Sucesso!\n\n${dataEst.mensagem || 'Produto vinculado e estoque atualizado na Olist.'}`)
-        // Recarregar dados
-        await loadNotas()
-        await loadDivergencias()
-        // Voltar para HOME com o modal da nota aberto na aba de conferência
-        setPagina('inicial')
-        setModalDetalhesNFAberto(false)
-        setAbaDetalhe('conferencia')
-        // Reabrir o modal com a nota ATUALIZADA da API (nao a versao antiga em
-        // memoria) - senao os itens recem-subidos continuam aparecendo "A conferir"
-        const nfIdReabrir = notaDetalheAberta?.id ?? notaSelecionada?.id
-        if (nfIdReabrir) {
-          try {
-            const resNota = await fetch(`${API_BASE}/api/notas-fiscais/${nfIdReabrir}`)
-            const notaAtualizada = await resNota.json()
-            setNotaSelecionada(notaAtualizada)
-            setNotaDetalheAberta(notaAtualizada)
-          } catch {
-            if (notaSelecionada) setNotaDetalheAberta(notaSelecionada)
-          }
-        }
+        await recarregarAposSubida()
         return
       } else {
         alert('⚠️ Produto vinculado, mas falha ao atualizar estoque: ' + (dataEst.error || 'desconhecido'))
+      }
+    } catch (err) {
+      alert('❌ Erro: ' + err)
+    }
+  }
+
+  // Recarrega notas/divergências e volta pra home com o modal da nota atualizado.
+  // Compartilhado entre a subida normal (handleVincular) e o balanço (handleBalancear).
+  const recarregarAposSubida = async () => {
+    await loadNotas()
+    await loadDivergencias()
+    setPagina('inicial')
+    setModalDetalhesNFAberto(false)
+    setAbaDetalhe('conferencia')
+    // Reabrir o modal com a nota ATUALIZADA da API (nao a versao antiga em
+    // memoria) - senao os itens recem-subidos continuam aparecendo "A conferir"
+    const nfIdReabrir = notaDetalheAberta?.id ?? notaSelecionada?.id
+    if (nfIdReabrir) {
+      try {
+        const resNota = await fetch(`${API_BASE}/api/notas-fiscais/${nfIdReabrir}`)
+        const notaAtualizada = await resNota.json()
+        setNotaSelecionada(notaAtualizada)
+        setNotaDetalheAberta(notaAtualizada)
+      } catch {
+        if (notaSelecionada) setNotaDetalheAberta(notaSelecionada)
+      }
+    }
+  }
+
+  // Balanço: corrige o estoque fictício antigo. O usuário informa o estoque REAL
+  // atual; o sistema escreve na Olist (real + qtd da NF) como valor ABSOLUTO.
+  const handleBalancear = async () => {
+    if (!produtoOlistSelecionado.sku || !produtoSelecionado) {
+      alert('❌ Selecione um anúncio da Olist primeiro!')
+      return
+    }
+    const itemId = (produtoSelecionado as any).id ?? (produtoSelecionado as any).id_item
+    if (!itemId) {
+      alert('❌ Erro: item sem identificador. Volte e selecione o produto novamente.')
+      return
+    }
+    const real = Math.round(Number(estoqueRealNF))
+    if (estoqueRealNF.trim() === '' || isNaN(real) || real < 0) {
+      alert('❌ Informe o estoque REAL atual (número válido, 0 ou mais).')
+      return
+    }
+
+    const qtdNF = Math.round(produtoSelecionado.quantidade_nf)
+    const novoTotal = real + qtdNF
+
+    const confirmar = window.confirm(
+      `Confirmar BALANÇO de estoque na Olist?\n\n` +
+      `Produto: ${produtoOlistSelecionado.nome}\n` +
+      `SKU: ${produtoOlistSelecionado.sku}\n\n` +
+      `⚠️ Isto IGNORA o estoque atual da Olist (${produtoOlistSelecionado.estoque_saldo} un) ` +
+      `por estar incorreto.\n\n` +
+      `Estoque real informado: ${real} un\n` +
+      `Quantidade da NF: ${qtdNF} un\n` +
+      `= Novo estoque total na Olist: ${novoTotal} un\n\n` +
+      `Deseja continuar?`
+    )
+    if (!confirmar) return
+
+    try {
+      // 1. Vincular produto NF -> anúncio Olist
+      const resVinc = await fetch(API_BASE + '/api/olist/vincular-produto', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          item_id: itemId,
+          olist_produto_id: produtoOlistSelecionado.id,
+          olist_sku: produtoOlistSelecionado.sku,
+          olist_nome: produtoOlistSelecionado.nome,
+          olist_preco: produtoOlistSelecionado.preco
+        })
+      })
+      if (!resVinc.ok) {
+        const err = await resVinc.json()
+        alert('❌ Erro ao vincular: ' + (err.error || 'desconhecido'))
+        return
+      }
+
+      // 2. Balanço: escreve (real + NF) como valor ABSOLUTO na Olist
+      const idsMassa = (produtoSelecionado as any).ids_massa as number[] | undefined
+      const resEst = await fetch(API_BASE + '/api/olist/atualizar-estoque', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          item_id: itemId,
+          item_ids: idsMassa && idsMassa.length > 1 ? idsMassa : undefined,
+          quantidade: qtdNF,
+          estoque_real: real
+        })
+      })
+      const dataEst = await resEst.json()
+      if (resEst.ok && dataEst.sucesso) {
+        alert(`✅ Balanço realizado!\n\n${dataEst.mensagem || ''}`)
+        setBalanceandoNF(false)
+        setEstoqueRealNF('')
+        await recarregarAposSubida()
+        return
+      } else {
+        alert('⚠️ Produto vinculado, mas falha no balanço: ' + (dataEst.error || 'desconhecido'))
       }
     } catch (err) {
       alert('❌ Erro: ' + err)
@@ -3312,7 +3399,57 @@ function App() {
               </div>
             )}
 
-            <div style={{ display: 'flex', gap: '1rem', justifyContent: 'flex-end', paddingTop: '1rem', borderTop: '1px solid #e0e0e0' }}>
+            {/* PAINEL DE BALANÇO (corrige estoque fictício antigo) */}
+            {produtoOlistSelecionado.sku && produtoSelecionado && balanceandoNF && (
+              <div style={{
+                background: '#fff3e0',
+                border: '2px solid #ff9800',
+                padding: '1.5rem',
+                borderRadius: '8px',
+                marginBottom: '1.5rem'
+              }}>
+                <h3 style={{ color: '#e65100', marginTop: 0 }}>⚖️ Balanço de Estoque (corrigir estoque fictício)</h3>
+                <p style={{ color: '#666', fontSize: '0.88rem', marginTop: 0 }}>
+                  O estoque atual da Olist (<strong>{produtoOlistSelecionado.estoque_saldo} un</strong>) está incorreto?
+                  Informe abaixo o estoque <strong>REAL</strong> que você tem hoje. O sistema vai corrigir a base
+                  e somar a quantidade da NF por cima.
+                </p>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '1.5rem', flexWrap: 'wrap', marginTop: '1rem' }}>
+                  <div>
+                    <label style={{ display: 'block', color: '#666', fontSize: '0.8rem', fontWeight: '600', marginBottom: '0.3rem' }}>
+                      ESTOQUE REAL HOJE
+                    </label>
+                    <input
+                      type="number"
+                      min="0"
+                      value={estoqueRealNF}
+                      onChange={(e) => setEstoqueRealNF(e.target.value)}
+                      placeholder="ex: 200"
+                      autoFocus
+                      style={{ width: '120px', padding: '0.6rem', fontSize: '1.2rem', fontWeight: '700', border: '2px solid #ff9800', borderRadius: '4px', textAlign: 'center' }}
+                    />
+                  </div>
+                  <div style={{ fontSize: '1.5rem', color: '#ff9800', fontWeight: '700' }}>+</div>
+                  <div>
+                    <p style={{ color: '#666', fontSize: '0.8rem', fontWeight: '600', margin: 0 }}>QTD DA NF</p>
+                    <p style={{ color: '#007acc', fontSize: '1.5rem', fontWeight: '700', margin: 0 }}>
+                      {Math.round(produtoSelecionado.quantidade_nf)}
+                    </p>
+                  </div>
+                  <div style={{ fontSize: '1.5rem', color: '#ff9800', fontWeight: '700' }}>=</div>
+                  <div>
+                    <p style={{ color: '#666', fontSize: '0.8rem', fontWeight: '600', margin: 0 }}>NOVO ESTOQUE TOTAL</p>
+                    <p style={{ color: '#e65100', fontSize: '1.8rem', fontWeight: '800', margin: 0 }}>
+                      {estoqueRealNF.trim() !== '' && !isNaN(Number(estoqueRealNF))
+                        ? Math.round(Number(estoqueRealNF)) + Math.round(produtoSelecionado.quantidade_nf)
+                        : '—'}
+                    </p>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            <div style={{ display: 'flex', gap: '1rem', justifyContent: 'flex-end', paddingTop: '1rem', borderTop: '1px solid #e0e0e0', flexWrap: 'wrap' }}>
               <button
                 onClick={voltarParaInicial}
                 style={{
@@ -3332,32 +3469,70 @@ function App() {
                 ← Voltar para Inicial
               </button>
               <button
-                onClick={handleVincular}
+                onClick={() => { setBalanceandoNF(!balanceandoNF); setEstoqueRealNF('') }}
                 disabled={!produtoOlistSelecionado.sku}
                 style={{
                   padding: '0.75rem 1.5rem',
-                  background: produtoOlistSelecionado.sku ? '#007acc' : '#ccc',
-                  color: 'white',
-                  border: 'none',
+                  background: balanceandoNF ? '#ff9800' : '#fff',
+                  color: balanceandoNF ? '#fff' : '#e65100',
+                  border: '2px solid #ff9800',
                   borderRadius: '4px',
                   fontWeight: '600',
                   cursor: produtoOlistSelecionado.sku ? 'pointer' : 'not-allowed',
                   fontSize: '0.95rem',
+                  opacity: produtoOlistSelecionado.sku ? 1 : 0.5,
                   transition: 'all 0.3s'
                 }}
-                onMouseEnter={(e) => {
-                  if (produtoOlistSelecionado.sku) {
-                    e.currentTarget.style.background = '#005a96'
-                  }
-                }}
-                onMouseLeave={(e) => {
-                  if (produtoOlistSelecionado.sku) {
-                    e.currentTarget.style.background = '#007acc'
-                  }
-                }}
               >
-                Vincular e Atualizar Estoque →
+                {balanceandoNF ? '✕ Cancelar balanço' : '⚖️ Balancear estoque'}
               </button>
+              {balanceandoNF ? (
+                <button
+                  onClick={handleBalancear}
+                  disabled={!produtoOlistSelecionado.sku || estoqueRealNF.trim() === ''}
+                  style={{
+                    padding: '0.75rem 1.5rem',
+                    background: (produtoOlistSelecionado.sku && estoqueRealNF.trim() !== '') ? '#e65100' : '#ccc',
+                    color: 'white',
+                    border: 'none',
+                    borderRadius: '4px',
+                    fontWeight: '600',
+                    cursor: (produtoOlistSelecionado.sku && estoqueRealNF.trim() !== '') ? 'pointer' : 'not-allowed',
+                    fontSize: '0.95rem',
+                    transition: 'all 0.3s'
+                  }}
+                >
+                  ⚖️ Confirmar Balanço →
+                </button>
+              ) : (
+                <button
+                  onClick={handleVincular}
+                  disabled={!produtoOlistSelecionado.sku}
+                  style={{
+                    padding: '0.75rem 1.5rem',
+                    background: produtoOlistSelecionado.sku ? '#007acc' : '#ccc',
+                    color: 'white',
+                    border: 'none',
+                    borderRadius: '4px',
+                    fontWeight: '600',
+                    cursor: produtoOlistSelecionado.sku ? 'pointer' : 'not-allowed',
+                    fontSize: '0.95rem',
+                    transition: 'all 0.3s'
+                  }}
+                  onMouseEnter={(e) => {
+                    if (produtoOlistSelecionado.sku) {
+                      e.currentTarget.style.background = '#005a96'
+                    }
+                  }}
+                  onMouseLeave={(e) => {
+                    if (produtoOlistSelecionado.sku) {
+                      e.currentTarget.style.background = '#007acc'
+                    }
+                  }}
+                >
+                  Vincular e Atualizar Estoque →
+                </button>
+              )}
             </div>
           </div>
         </main>
