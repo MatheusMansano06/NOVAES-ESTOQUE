@@ -28,6 +28,7 @@ interface Inbound {
   status: string
   qtd_items: number
   qtd_validados: number
+  total_lido?: number
   itens?: ItemInbound[]
 }
 
@@ -699,6 +700,20 @@ export function EmbaldesManager() {
                     {inb.numero_inbound ? `Frete #${inb.numero_inbound}` : 'Sem número'}
                     {inb.total_unidades ? ` · ${Math.round(inb.total_unidades)} un` : ''}
                   </div>
+                  {(() => {
+                    const declarado = Math.round(inb.total_unidades || 0)
+                    const lido = Math.round(inb.total_lido || 0)
+                    if (declarado > 0 && lido !== declarado) {
+                      const faltam = declarado - lido
+                      return (
+                        <div style={{ marginTop: '0.4rem', padding: '0.4rem 0.6rem', background: '#ffebee', border: '1px solid #ef5350', borderRadius: '4px', color: '#c62828', fontSize: '0.78rem', fontWeight: 'bold' }}>
+                          ⚠️ Leitura incompleta: {lido} de {declarado} un lidas
+                          {faltam > 0 ? ` (faltam ${faltam})` : ` (${-faltam} a mais)`}. Confira os itens manualmente.
+                        </div>
+                      )
+                    }
+                    return null
+                  })()}
                 </div>
 
                 {/* Data limite */}

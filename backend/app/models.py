@@ -29,6 +29,7 @@ class NotaFiscal(Base):
     xml_processado = Column(Text, nullable=True)
     status = Column(String(50), default="processando")
     erros = Column(Text, nullable=True)
+    valor_frete = Column(Float, default=0)  # Frete pago nesta compra (rateado por item no cálculo de margem)
 
     itens = relationship("ItemEstoque", back_populates="nota_fiscal", cascade="all, delete-orphan")
 
@@ -256,4 +257,17 @@ class ApelidoFornecedor(Base):
     nome_fornecedor = Column(String(255), index=True)
     apelido = Column(String(100))
     criado_em = Column(DateTime, default=datetime.utcnow)
+    atualizado_em = Column(DateTime, default=datetime.utcnow)
+
+
+class PrecoVendaProduto(Base):
+    """
+    Preço de venda definido manualmente pelo usuário para um produto, usado no
+    cálculo de margem. Chave = olist_sku quando vinculado, senão codigo_produto.
+    """
+    __tablename__ = "precos_venda_produto"
+
+    id = Column(Integer, primary_key=True)
+    produto_chave = Column(String(150), unique=True, index=True)  # olist_sku ou codigo_produto
+    preco_venda = Column(Float, default=0)
     atualizado_em = Column(DateTime, default=datetime.utcnow)

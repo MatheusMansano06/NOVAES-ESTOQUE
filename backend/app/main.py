@@ -19,12 +19,13 @@ import io
 from app.models import (
     NotaFiscal, ItemEstoque, ConfirmacaoEstoque, StatusEstoque, VinculoOlist,
     Fornecedor, HistoricoCompra, ConfiguracaoEstoqueMinimo, NotificacaoFornecedor,
-    EmbaleFU, ItemEmbaleFU, ApelidoFornecedor
+    EmbaleFU, ItemEmbaleFU, ApelidoFornecedor, PrecoVendaProduto
 )
 from app.utils.nfe_parser import NFeParsing
 from app.utils.nfe_pdf_generator import NFePDFGenerator
 from app.utils.embale_parser import extrair_items_embale_pdf
 from app.integracoes_olist import olist
+from app.integracoes_ml import ml
 from app.jobs import iniciar_scheduler
 
 # Carregar variáveis de ambiente do arquivo .env
@@ -45,6 +46,12 @@ def _garantir_colunas_sqlite():
             if "quantidade_olist_enviada" not in colunas:
                 conn.exec_driver_sql("ALTER TABLE itens_estoque ADD COLUMN quantidade_olist_enviada FLOAT")
                 print("[DB] Coluna itens_estoque.quantidade_olist_enviada criada")
+
+            # Frete pago na compra (cálculo de margem)
+            colunas_nf = {row[1] for row in conn.exec_driver_sql("PRAGMA table_info(notas_fiscais)").fetchall()}
+            if "valor_frete" not in colunas_nf:
+                conn.exec_driver_sql("ALTER TABLE notas_fiscais ADD COLUMN valor_frete FLOAT DEFAULT 0")
+                print("[DB] Coluna notas_fiscais.valor_frete criada")
 
             # Colunas do recurso de Balanço (correção de erros passados)
             colunas_embale = {row[1] for row in conn.exec_driver_sql("PRAGMA table_info(itens_embale_fu)").fetchall()}
@@ -159,6 +166,7 @@ def serialize_nota(nf):
         "arquivo_original": nf.arquivo_original,
         "status": nf.status,
         "erros": nf.erros,
+        "valor_frete": nf.valor_frete or 0,
         "itens": [serialize_item(item) for item in nf.itens],
     }
 
@@ -223,6 +231,11 @@ async def upload_nfe(request: Request):
     """Upload and process NF-e (XML or PDF)"""
     form = await request.form()
     file = form['file']
+    # Frete opcional informado no upload (entra no rateio de custo/margem)
+    try:
+        valor_frete = float(form.get("valor_frete") or 0)
+    except (TypeError, ValueError):
+        valor_frete = 0.0
 
     if not file.filename:
         return JSONResponse({"error": "No file provided"}, status_code=400)
@@ -263,6 +276,7 @@ async def upload_nfe(request: Request):
                 arquivo_original=safe_filename,
                 tipo_documento="nfe" if file_ext == "xml" else "pdf",
                 status="processado",
+                valor_frete=valor_frete,
                 xml_processado=content.decode('utf-8', errors='ignore') if file_ext == "xml" else None
             )
 
@@ -1341,6 +1355,9 @@ async def atualizar_estoque_olist(request: Request):
         item_ids = data.get("item_ids")  # lista opcional: subida EM MASSA de varios registros
         quantidade = data.get("quantidade", 0)  # quantidade a ADICIONAR (entrada)
         tipo = data.get("tipo", "E")  # E=Entrada (padrao), B=Balanco, S=Saida
+        # MODO BALANÇO: quando o usuário informa o estoque REAL atual (corrige
+        # estoque fictício antigo). Estoque final = real informado + qtd da NF.
+        estoque_real = data.get("estoque_real")
 
         item = db.query(ItemEstoque).filter(ItemEstoque.id == item_id).first()
         if not item:
@@ -1352,31 +1369,52 @@ async def atualizar_estoque_olist(request: Request):
             }, status_code=400)
 
         agora = datetime.utcnow()
+        modo_balanco = estoque_real is not None
+        estoque_final_balanco = None
 
-        # ===== REGRA DO INBOUND =====
-        # Só se aplica em ENTRADA (tipo 'E'). Segura a qtd destinada ao FULL
-        # de inbounds ativos que ainda não deram baixa, e sobe só o restante.
-        reserva_full = 0.0
-        reserva_detalhes = []
-        if tipo == "E":
-            reserva_full, reserva_detalhes = _calcular_reserva_inbound(
-                db, item.olist_produto_id, item.olist_sku,
-                disponivel=float(quantidade), aplicar=True, agora=agora,
-                olist_nome=item.olist_nome
-            )
-
-        quantidade_subir = max(0.0, float(quantidade) - reserva_full)
-
-        # Sobe na Olist só o que sobrou (se sobrou). Se segurou tudo, não
-        # precisa chamar a Olist (nada de organico entra).
-        sucesso = True
-        if quantidade_subir > 0:
+        if modo_balanco:
+            # Corrige a base fictícia e soma a NF, escrevendo o ABSOLUTO na Olist.
+            # Não aplica reserva de inbound: é uma correção manual deliberada.
+            try:
+                base_real = max(0.0, float(estoque_real))
+            except (TypeError, ValueError):
+                return JSONResponse({"error": "Estoque real inválido"}, status_code=400)
+            estoque_final_balanco = base_real + float(quantidade)
+            reserva_full = 0.0
+            reserva_detalhes = []
+            quantidade_subir = float(quantidade)  # o que de fato entrou (a NF)
             sucesso = olist.atualizar_estoque(
                 item.olist_produto_id,
-                quantidade=quantidade_subir,
-                tipo=tipo,
-                preco_unitario=float(item.preco_unitario or 0)
+                quantidade=estoque_final_balanco,  # tipo B = absoluto
+                tipo="B",
+                preco_unitario=float(item.preco_unitario or 0),
+                observacao=f"Balanço via NF: base real {int(base_real)} + {int(float(quantidade))} da NF = {int(estoque_final_balanco)}"
             )
+        else:
+            # ===== REGRA DO INBOUND =====
+            # Só se aplica em ENTRADA (tipo 'E'). Segura a qtd destinada ao FULL
+            # de inbounds ativos que ainda não deram baixa, e sobe só o restante.
+            reserva_full = 0.0
+            reserva_detalhes = []
+            if tipo == "E":
+                reserva_full, reserva_detalhes = _calcular_reserva_inbound(
+                    db, item.olist_produto_id, item.olist_sku,
+                    disponivel=float(quantidade), aplicar=True, agora=agora,
+                    olist_nome=item.olist_nome
+                )
+
+            quantidade_subir = max(0.0, float(quantidade) - reserva_full)
+
+            # Sobe na Olist só o que sobrou (se sobrou). Se segurou tudo, não
+            # precisa chamar a Olist (nada de organico entra).
+            sucesso = True
+            if quantidade_subir > 0:
+                sucesso = olist.atualizar_estoque(
+                    item.olist_produto_id,
+                    quantidade=quantidade_subir,
+                    tipo=tipo,
+                    preco_unitario=float(item.preco_unitario or 0)
+                )
 
         if sucesso:
             # Determina TODOS os itens que participaram desta entrada.
@@ -1409,7 +1447,10 @@ async def atualizar_estoque_olist(request: Request):
 
             db.commit()  # persiste tb as baixas dos inbounds (reserva)
 
-            if reserva_full > 0:
+            if modo_balanco:
+                msg = (f"Balanço aplicado: estoque corrigido para {int(estoque_final_balanco)} un na Olist "
+                       f"(base real {int(float(estoque_real))} + {int(float(quantidade))} da NF).")
+            elif reserva_full > 0:
                 inbs = ", ".join(f"#{d['numero_inbound']}" for d in reserva_detalhes)
                 msg = (f"Entrada de {int(float(quantidade))} un: subi {int(quantidade_subir)} "
                        f"na Olist e segurei {int(reserva_full)} pro FULL (inbound {inbs}).")
@@ -1422,6 +1463,8 @@ async def atualizar_estoque_olist(request: Request):
                 "olist_produto_id": item.olist_produto_id,
                 "quantidade_recebida": float(quantidade),
                 "quantidade_subida": quantidade_subir,
+                "modo_balanco": modo_balanco,
+                "estoque_final": estoque_final_balanco,
                 "reservado_full": reserva_full,
                 "reserva_detalhes": reserva_detalhes,
                 "itens_marcados": len(itens_grupo)
@@ -1954,7 +1997,8 @@ async def listar_embaldes(request: Request):
                     "data_encerramento": e.data_encerramento.isoformat() if e.data_encerramento else None,
                     "status": status_display(e),
                     "qtd_items": len(e.itens),
-                    "qtd_validados": sum(1 for i in e.itens if i.validado == 1)
+                    "qtd_validados": sum(1 for i in e.itens if i.validado == 1),
+                    "total_lido": sum(i.quantidade_separada or 0 for i in e.itens)
                 }
                 for e in embaldes
             ]
@@ -2525,9 +2569,10 @@ async def balancear_item_embale(request: Request):
         qtd_full = item.quantidade_separada or 0
 
         # 1. Atualizar Olist para quantidade_real (balanço completo)
+        # tipo="B" é ABSOLUTO na Tiny: o valor enviado VIRA o estoque atual.
         sucesso = olist.atualizar_estoque(
             produto_id=produto_id,
-            quantidade=quantidade_real - estoque_antes,  # diferença = entrada/saída
+            quantidade=quantidade_real,  # absoluto: estoque passa a ser exatamente isto
             tipo="B",  # Balanço (não é entrada nem saída, é correção)
             observacao=f"Balanço do Inbound #{embale.numero_inbound}: corrigido de {estoque_antes} para {quantidade_real}"
         )
@@ -2683,6 +2728,232 @@ async def apelidos_fornecedores(request: Request):
         db.close()
 
 
+async def atualizar_frete_nota(request: Request):
+    """POST /api/notas-fiscais/{id}/frete  Body: {valor_frete} — define o frete de uma NF existente."""
+    db = SessionLocal()
+    try:
+        nf_id = int(request.path_params.get("id"))
+        body = await request.json()
+        try:
+            valor = max(0.0, float(body.get("valor_frete") or 0))
+        except (TypeError, ValueError):
+            return JSONResponse({"erro": "valor_frete inválido"}, status_code=400)
+
+        nf = db.query(NotaFiscal).filter(NotaFiscal.id == nf_id).first()
+        if not nf:
+            return JSONResponse({"erro": "Nota não encontrada"}, status_code=404)
+        nf.valor_frete = valor
+        db.commit()
+        return JSONResponse({"ok": True, "id": nf_id, "valor_frete": valor})
+    except Exception as e:
+        db.rollback()
+        return JSONResponse({"erro": str(e)}, status_code=500)
+    finally:
+        db.close()
+
+
+async def precos_venda(request: Request):
+    """
+    GET  /api/precos-venda  -> {precos: {chave: preco}}
+    POST /api/precos-venda  Body: {produto_chave, preco_venda} (upsert; preco 0/None remove)
+    Chave = olist_sku quando vinculado, senão codigo_produto.
+    """
+    db = SessionLocal()
+    try:
+        if request.method == "GET":
+            rows = db.query(PrecoVendaProduto).all()
+            return JSONResponse(
+                {"precos": {r.produto_chave: r.preco_venda for r in rows}},
+                headers={"Cache-Control": "no-store, no-cache, must-revalidate, max-age=0"},
+            )
+
+        body = await request.json()
+        chave = (body.get("produto_chave") or "").strip()
+        if not chave:
+            return JSONResponse({"erro": "produto_chave obrigatório"}, status_code=400)
+        try:
+            preco = float(body.get("preco_venda") or 0)
+        except (TypeError, ValueError):
+            return JSONResponse({"erro": "preco_venda inválido"}, status_code=400)
+
+        row = db.query(PrecoVendaProduto).filter(PrecoVendaProduto.produto_chave == chave).first()
+        if preco <= 0:
+            if row:
+                db.delete(row)
+                db.commit()
+            return JSONResponse({"ok": True, "removido": True, "produto_chave": chave})
+
+        if row:
+            row.preco_venda = preco
+            row.atualizado_em = datetime.utcnow()
+        else:
+            db.add(PrecoVendaProduto(produto_chave=chave, preco_venda=preco))
+        db.commit()
+        return JSONResponse({"ok": True, "produto_chave": chave, "preco_venda": preco})
+    except Exception as e:
+        db.rollback()
+        return JSONResponse({"erro": str(e)}, status_code=500)
+    finally:
+        db.close()
+
+
+async def ml_status(request: Request):
+    """GET /api/ml/status — situação da integração Mercado Livre."""
+    return JSONResponse(ml.status(), headers={"Cache-Control": "no-store"})
+
+
+async def ml_anuncios(request: Request):
+    """GET /api/ml/anuncios?status=active&offset=0&limit=50 — lista anúncios do ML (somente leitura)."""
+    status = request.query_params.get("status", "active")
+    try:
+        offset = int(request.query_params.get("offset", 0))
+        limit = int(request.query_params.get("limit", 50))
+    except (TypeError, ValueError):
+        offset, limit = 0, 50
+    resultado = ml.listar_anuncios(status=status, offset=offset, limit=limit)
+    code = 200 if not resultado.get("erro") else 502
+    return JSONResponse(resultado, status_code=code, headers={"Cache-Control": "no-store"})
+
+
+async def ml_precificacao(request: Request):
+    """GET /api/ml/precificacao?price=X&category_id=Y — tarifa de venda real (Clássico/Premium)."""
+    try:
+        price = float(request.query_params.get("price", 0))
+    except (TypeError, ValueError):
+        return JSONResponse({"erro": "price inválido"}, status_code=400)
+    category_id = request.query_params.get("category_id") or None
+    if price <= 0:
+        return JSONResponse({"erro": "price obrigatório"}, status_code=400)
+    return JSONResponse(ml.precificacao(price, category_id), headers={"Cache-Control": "no-store"})
+
+
+async def ml_anuncio_detalhes(request: Request):
+    item_id = request.path_params.get("item_id")
+    if not item_id:
+        return JSONResponse({"erro": "item_id obrigatório"}, status_code=400)
+    result = ml.obter_anuncio_completo(item_id)
+    code = 200 if not result.get("erro") else 502
+    return JSONResponse(result, status_code=code, headers={"Cache-Control": "no-store"})
+
+
+async def ml_anuncio_descricao(request: Request):
+    item_id = request.path_params.get("item_id")
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"erro": "JSON inválido"}, status_code=400)
+    plain_text = (body.get("plain_text") or "").strip()
+    if not plain_text:
+        return JSONResponse({"erro": "plain_text obrigatório"}, status_code=400)
+    result = ml.atualizar_descricao(item_id, plain_text)
+    code = 200 if not result.get("erro") else int(result.get("status_code") or 502)
+    return JSONResponse(result, status_code=code)
+
+
+async def ml_anuncio_atributos(request: Request):
+    item_id = request.path_params.get("item_id")
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"erro": "JSON inválido"}, status_code=400)
+    attrs = body.get("attributes") or []
+    updates = {}
+    for attr in attrs:
+        attr_id = str(attr.get("id") or "").strip()
+        if not attr_id:
+            continue
+        updates[attr_id] = {
+            "value_name": attr.get("value_name"),
+            "value_id": attr.get("value_id"),
+        }
+    if not updates:
+        return JSONResponse({"erro": "Nenhum atributo informado"}, status_code=400)
+    result = ml.atualizar_atributos(item_id, updates)
+    code = 200 if not result.get("erro") else int(result.get("status_code") or 502)
+    return JSONResponse(result, status_code=code)
+
+
+async def ml_anuncio_dimensoes(request: Request):
+    item_id = request.path_params.get("item_id")
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"erro": "JSON inválido"}, status_code=400)
+    largura_cm = str(body.get("largura_cm") or "").strip()
+    altura_cm = str(body.get("altura_cm") or "").strip()
+    comprimento_cm = str(body.get("comprimento_cm") or "").strip()
+    peso_g = str(body.get("peso_g") or "").strip()
+    package_type = str(body.get("package_type") or "Com embalagem adicional").strip()
+    if not all([largura_cm, altura_cm, comprimento_cm, peso_g]):
+        return JSONResponse({"erro": "Todos os campos de dimensões são obrigatórios"}, status_code=400)
+    result = ml.atualizar_dimensoes(item_id, largura_cm, altura_cm, comprimento_cm, peso_g, package_type)
+    code = 200 if not result.get("erro") else int(result.get("status_code") or 502)
+    return JSONResponse(result, status_code=code)
+
+
+async def ml_anuncio_imagens_upload(request: Request):
+    item_id = request.path_params.get("item_id")
+    form = await request.form()
+    existing_ids_raw = form.get("existing_ids") or "[]"
+    try:
+        existing_ids = json.loads(existing_ids_raw)
+        if not isinstance(existing_ids, list):
+            existing_ids = []
+    except Exception:
+        existing_ids = []
+
+    files = []
+    for key, value in form.multi_items():
+        if key != "files":
+            continue
+        file_bytes = await value.read()
+        files.append({
+            "name": value.filename or "imagem",
+            "bytes": file_bytes,
+            "mime": getattr(value, "content_type", None),
+        })
+    if not files:
+        return JSONResponse({"erro": "Nenhum arquivo enviado"}, status_code=400)
+    result = ml.upload_imagem_e_atualizar(item_id, files, existing_ids)
+    code = 200 if not result.get("erro") else int(result.get("status_code") or 502)
+    return JSONResponse(result, status_code=code)
+
+
+async def ml_anuncio_imagens_reordenar(request: Request):
+    item_id = request.path_params.get("item_id")
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"erro": "JSON inválido"}, status_code=400)
+    pictures = body.get("pictures") or []
+    result = ml.atualizar_imagens(item_id, pictures)
+    code = 200 if not result.get("erro") else int(result.get("status_code") or 502)
+    return JSONResponse(result, status_code=code)
+
+
+async def ml_conectar(request: Request):
+    """GET /api/ml/conectar — redireciona pro login do Mercado Livre (re-autorização)."""
+    if not ml.enabled:
+        return HTMLResponse("<h2>Configure ML_CLIENT_ID/ML_CLIENT_SECRET no .env</h2>", status_code=400)
+    return RedirectResponse(ml.get_authorization_url())
+
+
+async def ml_callback(request: Request):
+    """GET /api/ml/callback — recebe o code do ML e troca por token."""
+    code = request.query_params.get("code")
+    erro = request.query_params.get("error")
+    if erro:
+        return HTMLResponse(f"<h2 style='color:#d32f2f'>Autorização negada: {erro}</h2>", status_code=400)
+    if not code:
+        return HTMLResponse("<h2>Código de autorização não recebido</h2>", status_code=400)
+    if ml.trocar_code_por_token(code):
+        return HTMLResponse("""<html><body style="font-family:sans-serif;text-align:center;padding:50px">
+            <h1 style="color:#2e7d32">✓ Mercado Livre conectado!</h1>
+            <a href="/" style="display:inline-block;margin-top:20px;padding:12px 30px;background:#1976d2;color:#fff;text-decoration:none;border-radius:6px">Voltar</a>
+            </body></html>""")
+    return HTMLResponse("<h2 style='color:#d32f2f'>Falha ao obter token do ML</h2>", status_code=500)
+
+
 async def atualizar_nome_embale(request: Request):
     db = SessionLocal()
     try:
@@ -2769,6 +3040,19 @@ async def olist_deletar_vinculo(request: Request):
 routes = [
     Route("/api/health", root, methods=["GET"]),
     Route("/api/apelidos-fornecedores", apelidos_fornecedores, methods=["GET", "POST"]),
+    Route("/api/notas-fiscais/{id:int}/frete", atualizar_frete_nota, methods=["POST"]),
+    Route("/api/precos-venda", precos_venda, methods=["GET", "POST"]),
+    Route("/api/ml/status", ml_status, methods=["GET"]),
+    Route("/api/ml/anuncios", ml_anuncios, methods=["GET"]),
+    Route("/api/ml/anuncios/{item_id:str}", ml_anuncio_detalhes, methods=["GET"]),
+    Route("/api/ml/anuncios/{item_id:str}/description", ml_anuncio_descricao, methods=["POST"]),
+    Route("/api/ml/anuncios/{item_id:str}/attributes", ml_anuncio_atributos, methods=["POST"]),
+    Route("/api/ml/anuncios/{item_id:str}/dimensions", ml_anuncio_dimensoes, methods=["POST"]),
+    Route("/api/ml/anuncios/{item_id:str}/pictures/upload", ml_anuncio_imagens_upload, methods=["POST"]),
+    Route("/api/ml/anuncios/{item_id:str}/pictures", ml_anuncio_imagens_reordenar, methods=["POST"]),
+    Route("/api/ml/precificacao", ml_precificacao, methods=["GET"]),
+    Route("/api/ml/conectar", ml_conectar, methods=["GET"]),
+    Route("/api/ml/callback", ml_callback, methods=["GET"]),
     Route("/api/upload-nfe", upload_nfe, methods=["POST"]),
     Route("/api/notas-fiscais", get_nfs, methods=["GET"]),
     Route("/api/notas-fiscais/{nf_id}", get_nf, methods=["GET"]),
@@ -2843,19 +3127,33 @@ app.add_middleware(
     allow_origins=[
         "http://localhost:3000",
         "http://localhost:5173",
+        "http://127.0.0.1:5173",
         "http://localhost:5174",
+        "http://127.0.0.1:5174",
         "http://localhost:5175",
+        "http://127.0.0.1:5175",
         "http://localhost:5176",
+        "http://127.0.0.1:5176",
         "http://localhost:5177",
+        "http://127.0.0.1:5177",
         "http://localhost:5178",
+        "http://127.0.0.1:5178",
         "http://localhost:5179",
+        "http://127.0.0.1:5179",
         "http://localhost:5180",
+        "http://127.0.0.1:5180",
         "http://localhost:5181",
+        "http://127.0.0.1:5181",
         "http://localhost:5182",
+        "http://127.0.0.1:5182",
         "http://localhost:5183",
+        "http://127.0.0.1:5183",
         "http://localhost:5184",
+        "http://127.0.0.1:5184",
         "http://localhost:5185",
+        "http://127.0.0.1:5185",
         "http://localhost:5186",
+        "http://127.0.0.1:5186",
     ],
     allow_credentials=True,
     allow_methods=["*"],
