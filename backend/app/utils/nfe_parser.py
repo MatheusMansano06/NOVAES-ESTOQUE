@@ -105,11 +105,22 @@ class NFeParsing:
                 "sucesso": True
             }
 
+        except ET.ParseError as e:
+            logger.error(f"Erro ao fazer parse do XML: {str(e)}")
+            tecnico = str(e)
+            if "no element found" in tecnico or "column 0" in tecnico:
+                amigavel = ("O arquivo XML está vazio ou não é uma NF-e válida. "
+                            "Baixe novamente o XML da nota (o arquivo .xml de verdade, "
+                            "não o DANFE/PDF) e tente de novo.")
+            else:
+                amigavel = ("Não consegui ler este XML de NF-e. Verifique se é o arquivo "
+                            f"XML correto da nota. (detalhe: {tecnico})")
+            return {"sucesso": False, "erro": amigavel, "itens": []}
         except Exception as e:
             logger.error(f"Erro ao fazer parse do XML: {str(e)}")
             return {
                 "sucesso": False,
-                "erro": str(e),
+                "erro": f"Erro ao processar o XML da NF-e: {str(e)}",
                 "itens": []
             }
 
