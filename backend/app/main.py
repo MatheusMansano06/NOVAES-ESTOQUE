@@ -25,6 +25,7 @@ from app.utils.nfe_parser import NFeParsing
 from app.utils.nfe_pdf_generator import NFePDFGenerator
 from app.utils.embale_parser import extrair_items_embale_pdf
 from app.integracoes_olist import olist
+from app.integracoes_ml import ml
 from app.jobs import iniciar_scheduler
 
 # Carregar variáveis de ambiente do arquivo .env
@@ -2796,6 +2797,47 @@ async def precos_venda(request: Request):
         db.close()
 
 
+async def ml_status(request: Request):
+    """GET /api/ml/status — situação da integração Mercado Livre."""
+    return JSONResponse(ml.status(), headers={"Cache-Control": "no-store"})
+
+
+async def ml_anuncios(request: Request):
+    """GET /api/ml/anuncios?status=active&offset=0&limit=50 — lista anúncios do ML (somente leitura)."""
+    status = request.query_params.get("status", "active")
+    try:
+        offset = int(request.query_params.get("offset", 0))
+        limit = int(request.query_params.get("limit", 50))
+    except (TypeError, ValueError):
+        offset, limit = 0, 50
+    resultado = ml.listar_anuncios(status=status, offset=offset, limit=limit)
+    code = 200 if not resultado.get("erro") else 502
+    return JSONResponse(resultado, status_code=code, headers={"Cache-Control": "no-store"})
+
+
+async def ml_conectar(request: Request):
+    """GET /api/ml/conectar — redireciona pro login do Mercado Livre (re-autorização)."""
+    if not ml.enabled:
+        return HTMLResponse("<h2>Configure ML_CLIENT_ID/ML_CLIENT_SECRET no .env</h2>", status_code=400)
+    return RedirectResponse(ml.get_authorization_url())
+
+
+async def ml_callback(request: Request):
+    """GET /api/ml/callback — recebe o code do ML e troca por token."""
+    code = request.query_params.get("code")
+    erro = request.query_params.get("error")
+    if erro:
+        return HTMLResponse(f"<h2 style='color:#d32f2f'>Autorização negada: {erro}</h2>", status_code=400)
+    if not code:
+        return HTMLResponse("<h2>Código de autorização não recebido</h2>", status_code=400)
+    if ml.trocar_code_por_token(code):
+        return HTMLResponse("""<html><body style="font-family:sans-serif;text-align:center;padding:50px">
+            <h1 style="color:#2e7d32">✓ Mercado Livre conectado!</h1>
+            <a href="/" style="display:inline-block;margin-top:20px;padding:12px 30px;background:#1976d2;color:#fff;text-decoration:none;border-radius:6px">Voltar</a>
+            </body></html>""")
+    return HTMLResponse("<h2 style='color:#d32f2f'>Falha ao obter token do ML</h2>", status_code=500)
+
+
 async def atualizar_nome_embale(request: Request):
     db = SessionLocal()
     try:
@@ -2884,6 +2926,10 @@ routes = [
     Route("/api/apelidos-fornecedores", apelidos_fornecedores, methods=["GET", "POST"]),
     Route("/api/notas-fiscais/{id:int}/frete", atualizar_frete_nota, methods=["POST"]),
     Route("/api/precos-venda", precos_venda, methods=["GET", "POST"]),
+    Route("/api/ml/status", ml_status, methods=["GET"]),
+    Route("/api/ml/anuncios", ml_anuncios, methods=["GET"]),
+    Route("/api/ml/conectar", ml_conectar, methods=["GET"]),
+    Route("/api/ml/callback", ml_callback, methods=["GET"]),
     Route("/api/upload-nfe", upload_nfe, methods=["POST"]),
     Route("/api/notas-fiscais", get_nfs, methods=["GET"]),
     Route("/api/notas-fiscais/{nf_id}", get_nf, methods=["GET"]),

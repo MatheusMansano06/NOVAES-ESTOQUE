@@ -5,6 +5,7 @@ import { ModalDetalhesNota } from './ModalDetalhesNota'
 import { ModalDetalhesNotaFiscal } from './ModalDetalhesNotaFiscal'
 import { FornecedoresManager } from './components/FornecedoresManager'
 import { EmbaldesManager } from './components/EmbaldesManager'
+import { AnunciosML } from './components/AnunciosML'
 import { baixarMultiplosOuPdfs } from './services/api'
 
 const API_BASE = import.meta.env.VITE_API_URL ?? 'http://127.0.0.1:8000'
@@ -66,7 +67,7 @@ interface ProdutoEstoque {
   }>
 }
 
-type Pagina = 'inicial' | 'conferencia' | 'produtos_nota' | 'relacionamento_produto' | 'fornecedores' | 'embaldes'
+type Pagina = 'inicial' | 'conferencia' | 'produtos_nota' | 'relacionamento_produto' | 'fornecedores' | 'embaldes' | 'anuncios'
 
 interface Divergencia {
   item_id: number
@@ -1309,7 +1310,7 @@ function App() {
                 </form>
 
                 {/* Botão de Fornecedores e Embaldes */}
-                <div style={{ marginTop: '1rem', paddingTop: '1rem', borderTop: '1px solid #e0e0e0', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
+                <div style={{ marginTop: '1rem', paddingTop: '1rem', borderTop: '1px solid #e0e0e0', display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '0.75rem' }}>
                   <button
                     onClick={() => setPagina('fornecedores')}
                     translate="no"
@@ -1365,6 +1366,32 @@ function App() {
                     }}
                   >
                     Inbound
+                  </button>
+                  <button
+                    onClick={() => setPagina('anuncios')}
+                    style={{
+                      padding: '0.75rem 1rem',
+                      background: '#fff',
+                      color: '#333',
+                      border: '1px solid #ddd',
+                      borderRadius: '4px',
+                      cursor: 'pointer',
+                      fontWeight: 600,
+                      fontSize: '0.95rem',
+                      transition: 'all 0.2s ease'
+                    }}
+                    onMouseEnter={(e) => {
+                      const el = e.currentTarget as HTMLElement
+                      el.style.background = '#f5f5f5'
+                      el.style.borderColor = '#999'
+                    }}
+                    onMouseLeave={(e) => {
+                      const el = e.currentTarget as HTMLElement
+                      el.style.background = '#fff'
+                      el.style.borderColor = '#ddd'
+                    }}
+                  >
+                    🛒 Anúncios ML
                   </button>
                 </div>
               </div>
@@ -2736,6 +2763,11 @@ function App() {
         onVoltar={voltarParaInicial}
       />
     )
+  }
+
+  // ===== PÁGINA DE ANÚNCIOS (MERCADO LIVRE) =====
+  if (pagina === 'anuncios') {
+    return <AnunciosML onVoltar={voltarParaInicial} />
   }
 
   // ===== PÁGINA DE CONFERÊNCIA =====
