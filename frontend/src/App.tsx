@@ -89,6 +89,7 @@ function App() {
 
   // Estados da página inicial
   const [file, setFile] = useState<File | null>(null)
+  const [freteNota, setFreteNota] = useState('')
   const [notas, setNotas] = useState<NotaFiscal[]>([])
   const [estoque, setEstoque] = useState<ProdutoEstoque[]>([])
   const [divergencias, setDivergencias] = useState<Divergencia[]>([])
@@ -1203,6 +1204,8 @@ function App() {
     try {
       const formData = new FormData()
       formData.append('file', file)
+      const freteNum = parseFloat((freteNota || '').replace(',', '.')) || 0
+      if (freteNum > 0) formData.append('valor_frete', String(freteNum))
 
       const res = await fetch(API_BASE + '/api/upload-nfe', {
         method: 'POST',
@@ -1214,6 +1217,7 @@ function App() {
       if (res.ok) {
         setMessage(`NF #${data.numero_nf} - ${data.itens_encontrados} itens importados com sucesso`)
         setFile(null)
+        setFreteNota('')
         loadNotas()
         loadEstoque()
       } else {
@@ -1294,6 +1298,11 @@ function App() {
                     </div>
                   </div>
                   <input ref={fileInputRef} type="file" accept=".xml,.pdf" onChange={(e) => setFile(e.target.files?.[0] || null)} disabled={loading} style={{ display: 'none' }} />
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.2rem' }}>
+                    <label style={{ fontSize: '0.72rem', color: '#90a4ae' }}>Frete (R$, opcional)</label>
+                    <input type="text" inputMode="decimal" placeholder="0,00" value={freteNota} onChange={(e) => setFreteNota(e.target.value)} disabled={loading}
+                      style={{ width: '110px', padding: '0.6rem 0.75rem', border: '1px solid #cfd8dc', borderRadius: '8px', fontSize: '0.95rem' }} />
+                  </div>
                   <button type="submit" disabled={!file || loading} className="upload-button" style={{ whiteSpace: 'nowrap' }}>
                     {loading ? 'Processando...' : 'Enviar NF-e'}
                   </button>
