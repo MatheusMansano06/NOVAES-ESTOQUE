@@ -19,7 +19,7 @@ import io
 from app.models import (
     NotaFiscal, ItemEstoque, ConfirmacaoEstoque, StatusEstoque, VinculoOlist,
     Fornecedor, HistoricoCompra, ConfiguracaoEstoqueMinimo, NotificacaoFornecedor,
-    EmbaleFU, ItemEmbaleFU, ApelidoFornecedor
+    EmbaleFU, ItemEmbaleFU, ApelidoFornecedor, PrecoVendaProduto
 )
 from app.utils.nfe_parser import NFeParsing
 from app.utils.nfe_pdf_generator import NFePDFGenerator
@@ -45,6 +45,12 @@ def _garantir_colunas_sqlite():
             if "quantidade_olist_enviada" not in colunas:
                 conn.exec_driver_sql("ALTER TABLE itens_estoque ADD COLUMN quantidade_olist_enviada FLOAT")
                 print("[DB] Coluna itens_estoque.quantidade_olist_enviada criada")
+
+            # Frete pago na compra (cálculo de margem)
+            colunas_nf = {row[1] for row in conn.exec_driver_sql("PRAGMA table_info(notas_fiscais)").fetchall()}
+            if "valor_frete" not in colunas_nf:
+                conn.exec_driver_sql("ALTER TABLE notas_fiscais ADD COLUMN valor_frete FLOAT DEFAULT 0")
+                print("[DB] Coluna notas_fiscais.valor_frete criada")
 
             # Colunas do recurso de Balanço (correção de erros passados)
             colunas_embale = {row[1] for row in conn.exec_driver_sql("PRAGMA table_info(itens_embale_fu)").fetchall()}
@@ -159,6 +165,7 @@ def serialize_nota(nf):
         "arquivo_original": nf.arquivo_original,
         "status": nf.status,
         "erros": nf.erros,
+        "valor_frete": nf.valor_frete or 0,
         "itens": [serialize_item(item) for item in nf.itens],
     }
 
@@ -223,6 +230,11 @@ async def upload_nfe(request: Request):
     """Upload and process NF-e (XML or PDF)"""
     form = await request.form()
     file = form['file']
+    # Frete opcional informado no upload (entra no rateio de custo/margem)
+    try:
+        valor_frete = float(form.get("valor_frete") or 0)
+    except (TypeError, ValueError):
+        valor_frete = 0.0
 
     if not file.filename:
         return JSONResponse({"error": "No file provided"}, status_code=400)
@@ -263,6 +275,7 @@ async def upload_nfe(request: Request):
                 arquivo_original=safe_filename,
                 tipo_documento="nfe" if file_ext == "xml" else "pdf",
                 status="processado",
+                valor_frete=valor_frete,
                 xml_processado=content.decode('utf-8', errors='ignore') if file_ext == "xml" else None
             )
 
@@ -2714,6 +2727,75 @@ async def apelidos_fornecedores(request: Request):
         db.close()
 
 
+async def atualizar_frete_nota(request: Request):
+    """POST /api/notas-fiscais/{id}/frete  Body: {valor_frete} — define o frete de uma NF existente."""
+    db = SessionLocal()
+    try:
+        nf_id = int(request.path_params.get("id"))
+        body = await request.json()
+        try:
+            valor = max(0.0, float(body.get("valor_frete") or 0))
+        except (TypeError, ValueError):
+            return JSONResponse({"erro": "valor_frete inválido"}, status_code=400)
+
+        nf = db.query(NotaFiscal).filter(NotaFiscal.id == nf_id).first()
+        if not nf:
+            return JSONResponse({"erro": "Nota não encontrada"}, status_code=404)
+        nf.valor_frete = valor
+        db.commit()
+        return JSONResponse({"ok": True, "id": nf_id, "valor_frete": valor})
+    except Exception as e:
+        db.rollback()
+        return JSONResponse({"erro": str(e)}, status_code=500)
+    finally:
+        db.close()
+
+
+async def precos_venda(request: Request):
+    """
+    GET  /api/precos-venda  -> {precos: {chave: preco}}
+    POST /api/precos-venda  Body: {produto_chave, preco_venda} (upsert; preco 0/None remove)
+    Chave = olist_sku quando vinculado, senão codigo_produto.
+    """
+    db = SessionLocal()
+    try:
+        if request.method == "GET":
+            rows = db.query(PrecoVendaProduto).all()
+            return JSONResponse(
+                {"precos": {r.produto_chave: r.preco_venda for r in rows}},
+                headers={"Cache-Control": "no-store, no-cache, must-revalidate, max-age=0"},
+            )
+
+        body = await request.json()
+        chave = (body.get("produto_chave") or "").strip()
+        if not chave:
+            return JSONResponse({"erro": "produto_chave obrigatório"}, status_code=400)
+        try:
+            preco = float(body.get("preco_venda") or 0)
+        except (TypeError, ValueError):
+            return JSONResponse({"erro": "preco_venda inválido"}, status_code=400)
+
+        row = db.query(PrecoVendaProduto).filter(PrecoVendaProduto.produto_chave == chave).first()
+        if preco <= 0:
+            if row:
+                db.delete(row)
+                db.commit()
+            return JSONResponse({"ok": True, "removido": True, "produto_chave": chave})
+
+        if row:
+            row.preco_venda = preco
+            row.atualizado_em = datetime.utcnow()
+        else:
+            db.add(PrecoVendaProduto(produto_chave=chave, preco_venda=preco))
+        db.commit()
+        return JSONResponse({"ok": True, "produto_chave": chave, "preco_venda": preco})
+    except Exception as e:
+        db.rollback()
+        return JSONResponse({"erro": str(e)}, status_code=500)
+    finally:
+        db.close()
+
+
 async def atualizar_nome_embale(request: Request):
     db = SessionLocal()
     try:
@@ -2800,6 +2882,8 @@ async def olist_deletar_vinculo(request: Request):
 routes = [
     Route("/api/health", root, methods=["GET"]),
     Route("/api/apelidos-fornecedores", apelidos_fornecedores, methods=["GET", "POST"]),
+    Route("/api/notas-fiscais/{id:int}/frete", atualizar_frete_nota, methods=["POST"]),
+    Route("/api/precos-venda", precos_venda, methods=["GET", "POST"]),
     Route("/api/upload-nfe", upload_nfe, methods=["POST"]),
     Route("/api/notas-fiscais", get_nfs, methods=["GET"]),
     Route("/api/notas-fiscais/{nf_id}", get_nf, methods=["GET"]),
