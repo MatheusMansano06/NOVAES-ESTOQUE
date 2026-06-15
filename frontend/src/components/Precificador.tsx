@@ -1,24 +1,44 @@
 import { useState, useEffect, useCallback } from 'react'
 
 const API_BASE = import.meta.env.VITE_API_URL ?? 'http://127.0.0.1:8000'
+const STORAGE_KEY = 'nvs_ml_precificador_v1'
 
 interface TarifaInfo { percentual: number; fixo: number }
+
+export interface PricingSnapshot {
+  itemId: string
+  precoOriginal: number
+  precoPromocional: number
+  valorVenda: number
+  frete: number
+  custo: number
+  impostoPct: number
+  tarifa: number
+  tarifaPct: number
+  margem: number
+  margemPct: number
+  tipoAtualId?: string
+  tipoAtualLabel: string
+  savedAt: string
+}
+
 interface Props {
   titulo: string
   sku?: string
+  itemId?: string
   precoInicial: number
+  precoOriginal?: number | null
   custoInicial?: number
   freteInicial?: number
   categoryId?: string
-  tipoAtualId?: string  // gold_special | gold_pro
+  tipoAtualId?: string
   onClose: () => void
+  onSaved?: (snapshot: PricingSnapshot) => void
 }
 
 const num = (s: string) => parseFloat((s || '').replace(',', '.')) || 0
 const brl = (v: number) => 'R$ ' + (Number.isFinite(v) ? v : 0).toFixed(2).replace('.', ',')
 
-// Defaults quando não há categoria ML (ex: aba Catálogo): Clássico 14% / Premium 17%,
-// taxa fixa do ML ~R$6,75 para itens abaixo de R$79.
 const tarifaDefault = (premium: boolean, preco: number): TarifaInfo => ({
   percentual: premium ? 17 : 14,
   fixo: preco < 79 ? 6.75 : 0,
@@ -28,16 +48,78 @@ function carregarImposto(): string {
   try { return localStorage.getItem('nvs_imposto_pct') || '9' } catch { return '9' }
 }
 
-export function Precificador({ titulo, sku, precoInicial, custoInicial = 0, freteInicial = 0, categoryId, tipoAtualId, onClose }: Props) {
-  const [valorVenda, setValorVenda] = useState(precoInicial ? String(precoInicial) : '')
+export function loadPricingSummaryMap(): Record<string, PricingSnapshot> {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY)
+    return raw ? JSON.parse(raw) : {}
+  } catch {
+    return {}
+  }
+}
+
+function loadPricingSummary(itemId?: string): PricingSnapshot | null {
+  if (!itemId) return null
+  const all = loadPricingSummaryMap()
+  return all[itemId] || null
+}
+
+function savePricingSummary(snapshot: PricingSnapshot) {
+  const all = loadPricingSummaryMap()
+  all[snapshot.itemId] = snapshot
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(all))
+}
+
+export function Precificador({
+  titulo,
+  sku,
+  itemId,
+  precoInicial,
+  precoOriginal,
+  custoInicial = 0,
+  freteInicial = 0,
+  categoryId,
+  tipoAtualId,
+  onClose,
+  onSaved,
+}: Props) {
+  const resumoSalvo = loadPricingSummary(itemId)
+  const [valorVenda, setValorVenda] = useState(resumoSalvo?.valorVenda ? String(resumoSalvo.valorVenda) : (precoInicial ? String(precoInicial) : ''))
   const [frete, setFrete] = useState(freteInicial ? String(freteInicial) : '')
-  const [custo, setCusto] = useState(custoInicial ? String(custoInicial) : '')
-  const [imposto, setImposto] = useState(carregarImposto())
+  const [custo, setCusto] = useState(resumoSalvo?.custo ? String(resumoSalvo.custo) : (custoInicial ? String(custoInicial) : ''))
+  const [imposto, setImposto] = useState(resumoSalvo?.impostoPct ? String(resumoSalvo.impostoPct) : carregarImposto())
   const [classicoFee, setClassicoFee] = useState<TarifaInfo | null>(null)
   const [premiumFee, setPremiumFee] = useState<TarifaInfo | null>(null)
   const [carregandoFee, setCarregandoFee] = useState(false)
+  const [carregandoFrete, setCarregandoFrete] = useState(false)
+  const [salvandoResumo, setSalvandoResumo] = useState(false)
 
   const v = num(valorVenda)
+
+  useEffect(() => {
+    setFrete(freteInicial ? String(freteInicial) : '')
+  }, [freteInicial])
+
+  useEffect(() => {
+    if (!itemId) return
+    let ativo = true
+
+    async function carregarFreteReal() {
+      setCarregandoFrete(true)
+      try {
+        const r = await fetch(`${API_BASE}/api/ml/anuncios/${itemId}`, { cache: 'no-store' })
+        const d = await r.json()
+        const freteMl = Number(d?.item?.frete_custo || 0)
+        if (ativo) setFrete(freteMl > 0 ? String(freteMl) : '')
+      } catch {
+        if (ativo) setFrete(freteInicial ? String(freteInicial) : '')
+      } finally {
+        if (ativo) setCarregandoFrete(false)
+      }
+    }
+
+    carregarFreteReal()
+    return () => { ativo = false }
+  }, [itemId, freteInicial])
 
   const buscarTarifa = useCallback(async (preco: number) => {
     if (!categoryId || preco <= 0) {
@@ -59,7 +141,6 @@ export function Precificador({ titulo, sku, precoInicial, custoInicial = 0, fret
     }
   }, [categoryId])
 
-  // Busca tarifa ao abrir e quando o valor de venda muda (debounced)
   useEffect(() => {
     const t = setTimeout(() => buscarTarifa(num(valorVenda)), 450)
     return () => clearTimeout(t)
@@ -79,21 +160,56 @@ export function Precificador({ titulo, sku, precoInicial, custoInicial = 0, fret
     return { tarifa, imp, margem, pct, percentual: f.percentual }
   }
 
-  const coluna = (nome: string, premium: boolean, fee: TarifaInfo | null, atual: boolean) => {
+  const calcAtual = tipoAtualId === 'gold_pro'
+    ? calc(premiumFee, true)
+    : calc(classicoFee, false)
+
+  const tipoAtualLabel = tipoAtualId === 'gold_pro' ? 'Premium' : 'Classico'
+  const freteDisponivel = !carregandoFrete && frete !== ''
+
+  const salvarResumo = () => {
+    if (!itemId) return
+    setSalvandoResumo(true)
+    try {
+      const snapshot: PricingSnapshot = {
+        itemId,
+        precoOriginal: Number(precoOriginal || precoInicial || 0),
+        precoPromocional: Number(precoInicial || 0),
+        valorVenda: v,
+        frete: num(frete),
+        custo: num(custo),
+        impostoPct: num(imposto),
+        tarifa: calcAtual.tarifa,
+        tarifaPct: calcAtual.percentual,
+        margem: calcAtual.margem,
+        margemPct: calcAtual.pct,
+        tipoAtualId,
+        tipoAtualLabel,
+        savedAt: new Date().toISOString(),
+      }
+      savePricingSummary(snapshot)
+      onSaved?.(snapshot)
+      onClose()
+    } finally {
+      setSalvandoResumo(false)
+    }
+  }
+
+  const coluna = (premium: boolean, fee: TarifaInfo | null, atual: boolean) => {
     const c = calc(fee, premium)
     return (
       <div style={{ flex: 1, minWidth: 0, background: '#f7f8fc', border: `1px solid ${atual ? '#7c4dff' : '#e0e0e0'}`, borderRadius: '10px', padding: '1rem' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem' }}>
-          <span style={{ fontWeight: 700, color: '#2d3277' }}>{premium ? '◆ ' : '◈ '}{nome}</span>
-          {atual && <span style={{ fontSize: '0.7rem', background: '#ede7f6', color: '#4527a0', padding: '2px 8px', borderRadius: '6px', fontWeight: 600 }}>Exposição Atual</span>}
+          <span style={{ fontWeight: 700, color: '#2d3277' }}>{premium ? 'Premium' : 'Classico'}</span>
+          {atual && <span style={{ fontSize: '0.7rem', background: '#ede7f6', color: '#4527a0', padding: '2px 8px', borderRadius: '6px', fontWeight: 600 }}>Exposicao Atual</span>}
         </div>
         <Campo label="Valor de Venda" valor={brl(v)} />
-        <Campo label="Frete (−)" valor={brl(num(frete))} />
-        <Campo label="Custo (−)" valor={brl(num(custo))} />
-        <Campo label="Imposto (−)" valor={brl(c.imp)} extra={`${num(imposto)}%`} />
-        <Campo label="Tarifa de Venda (−)" valor={brl(c.tarifa)} extra={carregandoFee ? '...' : `${c.percentual}%`} />
+        <Campo label="Frete (-)" valor={carregandoFrete ? 'Carregando...' : brl(num(frete))} extra={carregandoFrete ? 'direto ML' : 'travado'} />
+        <Campo label="Custo (-)" valor={brl(num(custo))} />
+        <Campo label="Imposto (-)" valor={brl(c.imp)} extra={`${num(imposto)}%`} />
+        <Campo label="Tarifa de Venda (-)" valor={brl(c.tarifa)} extra={carregandoFee ? '...' : `${c.percentual}%`} />
         <div style={{ marginTop: '0.75rem', padding: '0.75rem', background: '#fff', borderRadius: '8px', textAlign: 'center', border: '1px solid #e0e0e0' }}>
-          <div style={{ fontSize: '0.78rem', color: '#666' }}>Margem de Contribuição (=)</div>
+          <div style={{ fontSize: '0.78rem', color: '#666' }}>Margem de Contribuicao (=)</div>
           <div style={{ fontSize: '1.6rem', fontWeight: 800, color: c.margem >= 0 ? '#2e7d32' : '#c62828' }}>{brl(c.margem)}</div>
           <div style={{ fontWeight: 700, color: c.margem >= 0 ? '#2e7d32' : '#c62828' }}>({c.pct.toFixed(2)} %)</div>
         </div>
@@ -106,31 +222,39 @@ export function Precificador({ titulo, sku, precoInicial, custoInicial = 0, fret
       <div style={{ background: '#fff', borderRadius: '12px', maxWidth: '720px', width: '100%', maxHeight: '92vh', overflow: 'auto' }} onClick={e => e.stopPropagation()}>
         <div style={{ padding: '1.25rem 1.5rem', borderBottom: '1px solid #eee', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
           <div>
-            <h3 style={{ margin: 0 }}>Precificador de Anúncio</h3>
+            <h3 style={{ margin: 0 }}>Precificador de Anuncio</h3>
             <div style={{ fontSize: '0.85rem', color: '#555', marginTop: '0.35rem' }}>{titulo}</div>
             <div style={{ fontSize: '0.78rem', color: '#999', marginTop: '0.15rem' }}>
-              {sku ? `SKU: ${sku}` : ''}{precoInicial ? `  ·  Preço atual: ${brl(precoInicial)}` : ''}
+              {sku ? `SKU: ${sku}` : ''}{precoInicial ? `  |  Preco atual: ${brl(precoInicial)}` : ''}
             </div>
           </div>
-          <button onClick={onClose} style={{ background: 'none', border: 'none', fontSize: '1.5rem', cursor: 'pointer', color: '#999' }}>×</button>
+          <button onClick={onClose} style={{ background: 'none', border: 'none', fontSize: '1.5rem', cursor: 'pointer', color: '#999' }}>x</button>
         </div>
 
-        {/* Inputs compartilhados */}
         <div style={{ padding: '1rem 1.5rem', display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))', gap: '0.75rem', background: '#fafbfc', borderBottom: '1px solid #eee' }}>
           <EditCampo label="Valor de Venda" valor={valorVenda} onChange={setValorVenda} prefixo="R$" />
-          <EditCampo label="Frete" valor={frete} onChange={setFrete} prefixo="R$" />
+          <EditCampo label="Frete" valor={carregandoFrete ? 'Aguardando ML...' : (frete || '0,00')} onChange={setFrete} prefixo="R$" readOnly />
           <EditCampo label="Custo" valor={custo} onChange={setCusto} prefixo="R$" />
           <EditCampo label="Imposto" valor={imposto} onChange={setImpostoPersist} prefixo="%" />
         </div>
 
         <div style={{ padding: '1.25rem 1.5rem', display: 'flex', gap: '1rem', flexWrap: 'wrap' }}>
-          {coluna('Clássico', false, classicoFee, tipoAtualId === 'gold_special')}
-          {coluna('Premium', true, premiumFee, tipoAtualId === 'gold_pro')}
+          {coluna(false, classicoFee, tipoAtualId === 'gold_special')}
+          {coluna(true, premiumFee, tipoAtualId === 'gold_pro')}
         </div>
 
         <div style={{ padding: '0 1.5rem 1.25rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '1rem', flexWrap: 'wrap' }}>
-          <span style={{ fontSize: '0.78rem', color: '#999' }} title="Disponível numa próxima etapa">⚙ Aplicar preço ao anúncio (em breve)</span>
-          <button onClick={onClose} style={{ padding: '0.6rem 1.5rem', background: '#f0f0f0', border: '1px solid #ddd', borderRadius: '6px', cursor: 'pointer', fontWeight: 600 }}>Fechar</button>
+          <span style={{ fontSize: '0.78rem', color: '#999' }}>
+            O frete vem direto do Mercado Livre e fica bloqueado no calculo.
+          </span>
+          <div style={{ display: 'flex', gap: '.75rem', flexWrap: 'wrap' }}>
+            <button onClick={onClose} style={{ padding: '0.6rem 1.5rem', background: '#f0f0f0', border: '1px solid #ddd', borderRadius: '6px', cursor: 'pointer', fontWeight: 600 }}>Fechar</button>
+            {itemId && (
+              <button onClick={salvarResumo} disabled={salvandoResumo || !freteDisponivel} style={{ padding: '0.6rem 1.5rem', background: '#5b3cc4', border: '1px solid #5b3cc4', color: '#fff', borderRadius: '6px', cursor: 'pointer', fontWeight: 700, opacity: salvandoResumo || !freteDisponivel ? 0.7 : 1 }}>
+                {salvandoResumo ? 'Salvando...' : 'Salvar e Fechar'}
+              </button>
+            )}
+          </div>
         </div>
       </div>
     </div>
@@ -149,12 +273,20 @@ function Campo({ label, valor, extra }: { label: string; valor: string; extra?: 
   )
 }
 
-function EditCampo({ label, valor, onChange, prefixo }: { label: string; valor: string; onChange: (v: string) => void; prefixo: string }) {
+function EditCampo({ label, valor, onChange, prefixo, readOnly = false }: { label: string; valor: string; onChange: (v: string) => void; prefixo: string; readOnly?: boolean }) {
   return (
     <label style={{ display: 'flex', flexDirection: 'column', gap: '0.2rem', fontSize: '0.72rem', color: '#666' }}>
       {label} ({prefixo})
-      <input type="text" inputMode="decimal" value={valor} onChange={e => onChange(e.target.value)} placeholder="0,00"
-        style={{ padding: '0.5rem 0.6rem', border: '1px solid #cfd8dc', borderRadius: '6px', fontSize: '0.95rem', fontWeight: 600 }} />
+      <input
+        type="text"
+        inputMode="decimal"
+        value={valor}
+        onChange={e => onChange(e.target.value)}
+        placeholder="0,00"
+        readOnly={readOnly}
+        disabled={readOnly}
+        style={{ padding: '0.5rem 0.6rem', border: '1px solid #cfd8dc', borderRadius: '6px', fontSize: '0.95rem', fontWeight: 600, background: readOnly ? '#f3f4f6' : '#fff', color: readOnly ? '#667085' : '#101828', cursor: readOnly ? 'not-allowed' : 'text' }}
+      />
     </label>
   )
 }

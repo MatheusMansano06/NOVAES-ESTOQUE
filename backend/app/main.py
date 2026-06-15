@@ -2827,6 +2827,110 @@ async def ml_precificacao(request: Request):
     return JSONResponse(ml.precificacao(price, category_id), headers={"Cache-Control": "no-store"})
 
 
+async def ml_anuncio_detalhes(request: Request):
+    item_id = request.path_params.get("item_id")
+    if not item_id:
+        return JSONResponse({"erro": "item_id obrigatório"}, status_code=400)
+    result = ml.obter_anuncio_completo(item_id)
+    code = 200 if not result.get("erro") else 502
+    return JSONResponse(result, status_code=code, headers={"Cache-Control": "no-store"})
+
+
+async def ml_anuncio_descricao(request: Request):
+    item_id = request.path_params.get("item_id")
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"erro": "JSON inválido"}, status_code=400)
+    plain_text = (body.get("plain_text") or "").strip()
+    if not plain_text:
+        return JSONResponse({"erro": "plain_text obrigatório"}, status_code=400)
+    result = ml.atualizar_descricao(item_id, plain_text)
+    code = 200 if not result.get("erro") else int(result.get("status_code") or 502)
+    return JSONResponse(result, status_code=code)
+
+
+async def ml_anuncio_atributos(request: Request):
+    item_id = request.path_params.get("item_id")
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"erro": "JSON inválido"}, status_code=400)
+    attrs = body.get("attributes") or []
+    updates = {}
+    for attr in attrs:
+        attr_id = str(attr.get("id") or "").strip()
+        if not attr_id:
+            continue
+        updates[attr_id] = {
+            "value_name": attr.get("value_name"),
+            "value_id": attr.get("value_id"),
+        }
+    if not updates:
+        return JSONResponse({"erro": "Nenhum atributo informado"}, status_code=400)
+    result = ml.atualizar_atributos(item_id, updates)
+    code = 200 if not result.get("erro") else int(result.get("status_code") or 502)
+    return JSONResponse(result, status_code=code)
+
+
+async def ml_anuncio_dimensoes(request: Request):
+    item_id = request.path_params.get("item_id")
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"erro": "JSON inválido"}, status_code=400)
+    largura_cm = str(body.get("largura_cm") or "").strip()
+    altura_cm = str(body.get("altura_cm") or "").strip()
+    comprimento_cm = str(body.get("comprimento_cm") or "").strip()
+    peso_g = str(body.get("peso_g") or "").strip()
+    package_type = str(body.get("package_type") or "Com embalagem adicional").strip()
+    if not all([largura_cm, altura_cm, comprimento_cm, peso_g]):
+        return JSONResponse({"erro": "Todos os campos de dimensões são obrigatórios"}, status_code=400)
+    result = ml.atualizar_dimensoes(item_id, largura_cm, altura_cm, comprimento_cm, peso_g, package_type)
+    code = 200 if not result.get("erro") else int(result.get("status_code") or 502)
+    return JSONResponse(result, status_code=code)
+
+
+async def ml_anuncio_imagens_upload(request: Request):
+    item_id = request.path_params.get("item_id")
+    form = await request.form()
+    existing_ids_raw = form.get("existing_ids") or "[]"
+    try:
+        existing_ids = json.loads(existing_ids_raw)
+        if not isinstance(existing_ids, list):
+            existing_ids = []
+    except Exception:
+        existing_ids = []
+
+    files = []
+    for key, value in form.multi_items():
+        if key != "files":
+            continue
+        file_bytes = await value.read()
+        files.append({
+            "name": value.filename or "imagem",
+            "bytes": file_bytes,
+            "mime": getattr(value, "content_type", None),
+        })
+    if not files:
+        return JSONResponse({"erro": "Nenhum arquivo enviado"}, status_code=400)
+    result = ml.upload_imagem_e_atualizar(item_id, files, existing_ids)
+    code = 200 if not result.get("erro") else int(result.get("status_code") or 502)
+    return JSONResponse(result, status_code=code)
+
+
+async def ml_anuncio_imagens_reordenar(request: Request):
+    item_id = request.path_params.get("item_id")
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"erro": "JSON inválido"}, status_code=400)
+    pictures = body.get("pictures") or []
+    result = ml.atualizar_imagens(item_id, pictures)
+    code = 200 if not result.get("erro") else int(result.get("status_code") or 502)
+    return JSONResponse(result, status_code=code)
+
+
 async def ml_conectar(request: Request):
     """GET /api/ml/conectar — redireciona pro login do Mercado Livre (re-autorização)."""
     if not ml.enabled:
@@ -2940,6 +3044,12 @@ routes = [
     Route("/api/precos-venda", precos_venda, methods=["GET", "POST"]),
     Route("/api/ml/status", ml_status, methods=["GET"]),
     Route("/api/ml/anuncios", ml_anuncios, methods=["GET"]),
+    Route("/api/ml/anuncios/{item_id:str}", ml_anuncio_detalhes, methods=["GET"]),
+    Route("/api/ml/anuncios/{item_id:str}/description", ml_anuncio_descricao, methods=["POST"]),
+    Route("/api/ml/anuncios/{item_id:str}/attributes", ml_anuncio_atributos, methods=["POST"]),
+    Route("/api/ml/anuncios/{item_id:str}/dimensions", ml_anuncio_dimensoes, methods=["POST"]),
+    Route("/api/ml/anuncios/{item_id:str}/pictures/upload", ml_anuncio_imagens_upload, methods=["POST"]),
+    Route("/api/ml/anuncios/{item_id:str}/pictures", ml_anuncio_imagens_reordenar, methods=["POST"]),
     Route("/api/ml/precificacao", ml_precificacao, methods=["GET"]),
     Route("/api/ml/conectar", ml_conectar, methods=["GET"]),
     Route("/api/ml/callback", ml_callback, methods=["GET"]),
@@ -3017,19 +3127,33 @@ app.add_middleware(
     allow_origins=[
         "http://localhost:3000",
         "http://localhost:5173",
+        "http://127.0.0.1:5173",
         "http://localhost:5174",
+        "http://127.0.0.1:5174",
         "http://localhost:5175",
+        "http://127.0.0.1:5175",
         "http://localhost:5176",
+        "http://127.0.0.1:5176",
         "http://localhost:5177",
+        "http://127.0.0.1:5177",
         "http://localhost:5178",
+        "http://127.0.0.1:5178",
         "http://localhost:5179",
+        "http://127.0.0.1:5179",
         "http://localhost:5180",
+        "http://127.0.0.1:5180",
         "http://localhost:5181",
+        "http://127.0.0.1:5181",
         "http://localhost:5182",
+        "http://127.0.0.1:5182",
         "http://localhost:5183",
+        "http://127.0.0.1:5183",
         "http://localhost:5184",
+        "http://127.0.0.1:5184",
         "http://localhost:5185",
+        "http://127.0.0.1:5185",
         "http://localhost:5186",
+        "http://127.0.0.1:5186",
     ],
     allow_credentials=True,
     allow_methods=["*"],
