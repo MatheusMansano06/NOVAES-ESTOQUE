@@ -2815,6 +2815,18 @@ async def ml_anuncios(request: Request):
     return JSONResponse(resultado, status_code=code, headers={"Cache-Control": "no-store"})
 
 
+async def ml_precificacao(request: Request):
+    """GET /api/ml/precificacao?price=X&category_id=Y — tarifa de venda real (Clássico/Premium)."""
+    try:
+        price = float(request.query_params.get("price", 0))
+    except (TypeError, ValueError):
+        return JSONResponse({"erro": "price inválido"}, status_code=400)
+    category_id = request.query_params.get("category_id") or None
+    if price <= 0:
+        return JSONResponse({"erro": "price obrigatório"}, status_code=400)
+    return JSONResponse(ml.precificacao(price, category_id), headers={"Cache-Control": "no-store"})
+
+
 async def ml_conectar(request: Request):
     """GET /api/ml/conectar — redireciona pro login do Mercado Livre (re-autorização)."""
     if not ml.enabled:
@@ -2928,6 +2940,7 @@ routes = [
     Route("/api/precos-venda", precos_venda, methods=["GET", "POST"]),
     Route("/api/ml/status", ml_status, methods=["GET"]),
     Route("/api/ml/anuncios", ml_anuncios, methods=["GET"]),
+    Route("/api/ml/precificacao", ml_precificacao, methods=["GET"]),
     Route("/api/ml/conectar", ml_conectar, methods=["GET"]),
     Route("/api/ml/callback", ml_callback, methods=["GET"]),
     Route("/api/upload-nfe", upload_nfe, methods=["POST"]),

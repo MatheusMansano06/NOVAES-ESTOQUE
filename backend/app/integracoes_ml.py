@@ -221,6 +221,31 @@ class MLIntegration:
             "categoria_id": body.get("category_id"),
         }
 
+    def precificacao(self, price: float, category_id: Optional[str] = None) -> Dict:
+        """Tarifa de venda real do ML (Clássico=gold_special, Premium=gold_pro) p/ um preço/categoria."""
+        params = {"price": price}
+        if category_id:
+            params["category_id"] = category_id
+        data = self._get("/sites/MLB/listing_prices", params)
+        out: Dict = {"classico": None, "premium": None}
+        for entry in (data or []):
+            lt = entry.get("listing_type_id")
+            det = entry.get("sale_fee_details") or {}
+            info = {
+                "percentual": det.get("percentage_fee"),
+                "fixo": det.get("fixed_fee", 0),
+                "tarifa": entry.get("sale_fee_amount"),
+            }
+            if lt == "gold_special":
+                out["classico"] = info
+            elif lt == "gold_pro":
+                out["premium"] = info
+        return out
+
+    def obter_anuncio(self, item_id: str) -> Optional[Dict]:
+        body = self._get(f"/items/{item_id}", {"attributes": "id,title,price,category_id,listing_type_id,seller_custom_field,available_quantity"})
+        return self._simplificar_item(body) if body else None
+
     def listar_anuncios(self, status: str = "active", offset: int = 0, limit: int = 50) -> Dict:
         """Lista anúncios do vendedor (uma página). status: active|paused|closed|under_review."""
         if not self.user_id:

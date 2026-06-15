@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
+import { Precificador } from './Precificador'
 
 const API_BASE = import.meta.env.VITE_API_URL ?? 'http://127.0.0.1:8000'
 const PAGINA = 50
@@ -18,6 +19,7 @@ interface Anuncio {
   logistica?: string
   thumbnail?: string
   permalink?: string
+  categoria_id?: string
 }
 
 interface Props { onVoltar: () => void }
@@ -39,6 +41,7 @@ export function AnunciosML({ onVoltar }: Props) {
   const [erro, setErro] = useState('')
   const [busca, setBusca] = useState('')
   const [statusConexao, setStatusConexao] = useState<'ok' | 'erro' | 'verificando'>('verificando')
+  const [precificando, setPrecificando] = useState<Anuncio | null>(null)
 
   const carregar = useCallback(async () => {
     setLoading(true)
@@ -153,6 +156,10 @@ export function AnunciosML({ onVoltar }: Props) {
                   <div style={{ fontWeight: 700, fontSize: '1.05rem', color: '#1a1a1a' }}>{brl(a.preco)}</div>
                   <div style={{ fontSize: '0.72rem', fontWeight: 600, color: corStatus(a.status) }}>{labelStatus(a.status)}</div>
                 </div>
+                <button onClick={() => setPrecificando(a)} title="Precificador"
+                  style={{ flexShrink: 0, padding: '0.5rem 0.7rem', background: '#ede7f6', color: '#4527a0', border: '1px solid #d1c4e9', borderRadius: '8px', cursor: 'pointer', fontWeight: 600, fontSize: '0.8rem', whiteSpace: 'nowrap' }}>
+                  ⚖ Precificar
+                </button>
               </div>
             ))}
           </div>
@@ -169,6 +176,17 @@ export function AnunciosML({ onVoltar }: Props) {
           </div>
         )}
       </main>
+
+      {precificando && (
+        <Precificador
+          titulo={precificando.titulo}
+          sku={precificando.sku}
+          precoInicial={precificando.preco}
+          categoryId={precificando.categoria_id}
+          tipoAtualId={precificando.tipo_anuncio_id}
+          onClose={() => setPrecificando(null)}
+        />
+      )}
     </div>
   )
 }

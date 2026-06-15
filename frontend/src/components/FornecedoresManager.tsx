@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { Precificador } from './Precificador'
 
 const API_BASE = import.meta.env.VITE_API_URL ?? 'http://127.0.0.1:8000'
 const SHARED_SYNC_INTERVAL_MS = 5000
@@ -145,6 +146,7 @@ export function FornecedoresManager({ onVoltar }: FornecedoresManagerProps) {
   // Catálogo: busca e edição de preço de venda
   const [termoBusca, setTermoBusca] = useState('')
   const [precoEditando, setPrecoEditando] = useState<{ [chave: string]: string }>({})
+  const [precificandoProd, setPrecificandoProd] = useState<ProdutoCatalogo | null>(null)
 
   useEffect(() => { loadTudo() }, [])
 
@@ -521,6 +523,10 @@ export function FornecedoresManager({ onVoltar }: FornecedoresManagerProps) {
                             <div style={{ fontWeight: 700, color: corMargem(mML) }}>{mML === null ? '—' : `${brl(mML)} (${pct(mML)}%)`}</div>
                           </div>
                         </div>
+                        <button onClick={() => setPrecificandoProd(prod)} title="Precificador detalhado"
+                          style={{ padding: '0.5rem 0.9rem', background: '#ede7f6', color: '#4527a0', border: '1px solid #d1c4e9', borderRadius: '8px', cursor: 'pointer', fontWeight: 600, fontSize: '0.85rem', whiteSpace: 'nowrap' }}>
+                          ⚖ Precificador
+                        </button>
                       </div>
 
                       {/* Fornecedores e compras */}
@@ -618,6 +624,16 @@ export function FornecedoresManager({ onVoltar }: FornecedoresManagerProps) {
             </div>
           </div>
         </div>
+      )}
+
+      {precificandoProd && (
+        <Precificador
+          titulo={precificandoProd.titulo}
+          sku={precificandoProd.olist_sku || precificandoProd.fornecedores[0]?.codigo}
+          precoInicial={precosVenda[precificandoProd.chave] || 0}
+          custoInicial={precificandoProd.custoMedioGeral}
+          onClose={() => setPrecificandoProd(null)}
+        />
       )}
     </div>
   )
