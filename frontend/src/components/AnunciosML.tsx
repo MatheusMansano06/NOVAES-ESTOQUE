@@ -79,7 +79,7 @@ export function AnunciosML({ onVoltar }: Props) {
   const labelStatus = (s: string) => s === 'active' ? 'Ativo' : s === 'paused' ? 'Pausado' : s === 'closed' ? 'Finalizado' : s
 
   return (
-    <div className="app">
+    <div className="app" style={{ background: '#ffffff' }}>
       <header className="header"><div className="container"><h1>NVS TECH</h1><p>Anúncios do Mercado Livre</p></div></header>
 
       <main className="container main-content">

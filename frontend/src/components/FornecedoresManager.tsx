@@ -367,7 +367,7 @@ export function FornecedoresManager({ onVoltar }: FornecedoresManagerProps) {
 
   if (carregando) {
     return (
-      <div className="app">
+      <div className="app" style={{ background: '#ffffff' }}>
         <header className="header"><div className="container"><h1>NVS TECH</h1><p>Sistema de Gestão Inteligente de Estoque</p></div></header>
         <main className="container main-content"><p style={{ textAlign: 'center', color: '#999', padding: '2rem' }}>Carregando...</p></main>
       </div>
@@ -375,7 +375,7 @@ export function FornecedoresManager({ onVoltar }: FornecedoresManagerProps) {
   }
 
   return (
-    <div className="app">
+    <div className="app" style={{ background: '#ffffff' }}>
       <header className="header"><div className="container"><h1>NVS TECH</h1><p>Sistema de Gestão Inteligente de Estoque para Operações de Logística e Marketplace</p></div></header>
 
       <main className="container main-content">
