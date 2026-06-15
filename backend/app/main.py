@@ -1983,7 +1983,8 @@ async def listar_embaldes(request: Request):
                     "data_encerramento": e.data_encerramento.isoformat() if e.data_encerramento else None,
                     "status": status_display(e),
                     "qtd_items": len(e.itens),
-                    "qtd_validados": sum(1 for i in e.itens if i.validado == 1)
+                    "qtd_validados": sum(1 for i in e.itens if i.validado == 1),
+                    "total_lido": sum(i.quantidade_separada or 0 for i in e.itens)
                 }
                 for e in embaldes
             ]
