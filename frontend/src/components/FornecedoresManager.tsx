@@ -1,5 +1,4 @@
 import { useState, useEffect } from 'react'
-import { Precificador } from './Precificador'
 
 const API_BASE = import.meta.env.VITE_API_URL ?? 'http://127.0.0.1:8000'
 const SHARED_SYNC_INTERVAL_MS = 5000
@@ -111,6 +110,26 @@ function taxaML(preco: number, t: Taxas): number {
   return preco * t.ml_comissao / 100 + fixo
 }
 
+// ---- Margem vinda do nosso anúncio no Mercado Livre (cruzada por SKU) ----
+interface MargemML {
+  item_id: string
+  titulo: string
+  preco: number | null
+  promocional: number | null
+  frete: number | null
+  tarifa: number | null
+  tarifa_pct: number | null
+  tipo_anuncio?: string
+  permalink?: string
+}
+function carregarImpostoPct(): number {
+  try {
+    const v = parseFloat(localStorage.getItem('nvs_imposto_pct') || '')
+    if (Number.isFinite(v) && v >= 0) return v
+  } catch { /* ignore */ }
+  return 9
+}
+
 const brl = (v: number) => 'R$ ' + (Number.isFinite(v) ? v : 0).toFixed(2).replace('.', ',')
 const dataBR = (iso?: string) => {
   if (!iso) return '—'
@@ -143,10 +162,11 @@ export function FornecedoresManager({ onVoltar }: FornecedoresManagerProps) {
   const [novoNome, setNovoNome] = useState('')
   const [salvandoNome, setSalvandoNome] = useState(false)
 
-  // Catálogo: busca e edição de preço de venda
+  // Catálogo: busca + margens reais dos nossos anúncios do ML (por SKU)
   const [termoBusca, setTermoBusca] = useState('')
-  const [precoEditando, setPrecoEditando] = useState<{ [chave: string]: string }>({})
-  const [precificandoProd, setPrecificandoProd] = useState<ProdutoCatalogo | null>(null)
+  const [margensML, setMargensML] = useState<Record<string, MargemML>>({})
+  const [loadingMargens, setLoadingMargens] = useState(false)
+  const [impostoPct, setImpostoPct] = useState<number>(carregarImpostoPct())
 
   useEffect(() => { loadTudo() }, [])
 
@@ -162,6 +182,28 @@ export function FornecedoresManager({ onVoltar }: FornecedoresManagerProps) {
       document.removeEventListener('visibilitychange', aoVoltar)
     }
   }, [])
+
+  // Busca as margens reais dos nossos anúncios do ML (cruza por SKU) ao abrir o Catálogo
+  useEffect(() => {
+    if (view !== 'catalogo') return
+    const skus = new Set<string>()
+    notas.forEach(n => (n.itens || []).forEach(it => {
+      if (it.olist_sku) skus.add(String(it.olist_sku).trim().toUpperCase())
+    }))
+    if (skus.size === 0) return
+    let ativo = true
+    setLoadingMargens(true)
+    fetch(API_BASE + '/api/ml/margens', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ skus: Array.from(skus) }),
+    })
+      .then(r => r.json())
+      .then(d => { if (ativo && d && d.margens) setMargensML(d.margens) })
+      .catch(() => { /* mantém o que já tem */ })
+      .finally(() => { if (ativo) setLoadingMargens(false) })
+    return () => { ativo = false }
+  }, [view, notas])
 
   const loadTudo = async () => {
     setCarregando(true)
@@ -437,37 +479,23 @@ export function FornecedoresManager({ onVoltar }: FornecedoresManagerProps) {
               ))}
             </div>
 
-            {/* Busca + taxas */}
-            <div style={{ display: 'flex', gap: '0.75rem', marginBottom: '1rem', flexWrap: 'wrap' }}>
+            {/* Busca + imposto */}
+            <div style={{ display: 'flex', gap: '0.75rem', marginBottom: '1rem', flexWrap: 'wrap', alignItems: 'center' }}>
               <input type="text" placeholder="Buscar produto, descrição, código ou SKU Olist..." value={termoBusca} onChange={e => setTermoBusca(e.target.value)}
                 style={{ flex: 1, minWidth: '260px', padding: '0.75rem 1rem', border: '1px solid #cfd8dc', borderRadius: '6px', fontSize: '0.95rem' }} />
-              <button onClick={() => setMostrarTaxas(v => !v)} style={{ padding: '0.75rem 1rem', background: '#fff', border: '1px solid #cfd8dc', borderRadius: '6px', cursor: 'pointer', fontWeight: 600 }}>⚙ Taxas</button>
+              <label style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.85rem', color: '#666', whiteSpace: 'nowrap' }}>
+                Imposto %
+                <input type="number" step="0.01" min="0" value={impostoPct}
+                  onChange={e => {
+                    const v = parseFloat(e.target.value)
+                    const novo = Number.isFinite(v) && v >= 0 ? v : 0
+                    setImpostoPct(novo)
+                    try { localStorage.setItem('nvs_imposto_pct', String(novo)) } catch { /* ignore */ }
+                  }}
+                  style={{ width: '72px', padding: '0.5rem', border: '1px solid #cfd8dc', borderRadius: '6px', fontWeight: 600 }} />
+              </label>
+              {loadingMargens && <span style={{ fontSize: '0.8rem', color: '#999' }}>carregando margens do ML…</span>}
             </div>
-
-            {/* Painel de taxas */}
-            {mostrarTaxas && (
-              <div style={{ background: '#fffdf5', border: '1px solid #ffe082', borderRadius: '8px', padding: '1rem', marginBottom: '1.5rem' }}>
-                <div style={{ fontWeight: 600, marginBottom: '0.75rem' }}>Taxas dos marketplaces (2026) — ajuste conforme sua conta</div>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: '0.75rem', fontSize: '0.85rem' }}>
-                  {([
-                    ['Mercado Livre comissão %', 'ml_comissao'],
-                    ['ML custo fixo (<R$79)', 'ml_custo_fixo'],
-                    ['Shopee comissão % (≤R$79)', 'shopee_com_baixo'],
-                    ['Shopee comissão % (>R$79)', 'shopee_com_alto'],
-                    ['Shopee fixo ≤R$79', 'shopee_fix_1'],
-                    ['Shopee fixo R$80–99', 'shopee_fix_2'],
-                    ['Shopee fixo R$100–199', 'shopee_fix_3'],
-                    ['Shopee fixo ≥R$200', 'shopee_fix_4'],
-                  ] as [string, keyof Taxas][]).map(([label, campo]) => (
-                    <label key={campo} style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem', color: '#666' }}>
-                      {label}
-                      <input type="number" step="0.01" value={taxas[campo]} onChange={e => atualizarTaxa(campo, e.target.value)}
-                        style={{ padding: '0.4rem', border: '1px solid #ddd', borderRadius: '4px' }} />
-                    </label>
-                  ))}
-                </div>
-              </div>
-            )}
 
             {/* Lista de produtos */}
             {catalogoFiltrado.length === 0 ? (
@@ -475,13 +503,15 @@ export function FornecedoresManager({ onVoltar }: FornecedoresManagerProps) {
             ) : (
               <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
                 {catalogoFiltrado.map(prod => {
-                  const precoVenda = precosVenda[prod.chave] || 0
-                  const precoEdit = precoEditando[prod.chave]
-                  const valorInput = precoEdit !== undefined ? precoEdit : (precoVenda ? String(precoVenda) : '')
                   const custo = prod.custoMedioGeral
-                  const mShopee = precoVenda > 0 ? precoVenda - custo - taxaShopee(precoVenda, taxas) : null
-                  const mML = precoVenda > 0 ? precoVenda - custo - taxaML(precoVenda, taxas) : null
-                  const pct = (lucro: number) => precoVenda > 0 ? Math.round((lucro / precoVenda) * 100) : 0
+                  const skuML = (prod.olist_sku || '').trim().toUpperCase()
+                  const anuncio = skuML ? margensML[skuML] : undefined
+                  const precoML = anuncio ? (anuncio.promocional ?? anuncio.preco ?? 0) : 0
+                  const freteML = anuncio?.frete ?? 0
+                  const tarifaML = anuncio?.tarifa ?? 0
+                  const impostoML = precoML > 0 ? precoML * impostoPct / 100 : 0
+                  const margemML = anuncio && precoML > 0 ? precoML - freteML - tarifaML - impostoML - custo : null
+                  const margemPctML = margemML != null && precoML > 0 ? Math.round((margemML / precoML) * 100) : 0
                   const corMargem = (l: number | null) => l === null ? '#999' : l > 0 ? '#2e7d32' : '#c62828'
 
                   return (
@@ -503,30 +533,38 @@ export function FornecedoresManager({ onVoltar }: FornecedoresManagerProps) {
                         </div>
                       </div>
 
-                      {/* Preço de venda + margem */}
-                      <div style={{ padding: '0.85rem 1.25rem', background: '#f9fbfc', borderBottom: '1px solid #eee', display: 'flex', alignItems: 'center', gap: '1.5rem', flexWrap: 'wrap' }}>
-                        <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.85rem', color: '#666' }}>
-                          Preço de venda:
-                          <input type="text" inputMode="decimal" placeholder="R$ 0,00" value={valorInput}
-                            onChange={e => setPrecoEditando(prev => ({ ...prev, [prod.chave]: e.target.value }))}
-                            onBlur={e => { salvarPrecoVenda(prod.chave, e.target.value); setPrecoEditando(prev => { const n = { ...prev }; delete n[prod.chave]; return n }) }}
-                            onKeyDown={e => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur() }}
-                            style={{ width: '110px', padding: '0.4rem 0.6rem', border: '1px solid #cfd8dc', borderRadius: '6px', fontSize: '0.95rem', fontWeight: 600 }} />
-                        </label>
-                        <div style={{ display: 'flex', gap: '1.25rem' }}>
-                          <div>
-                            <div style={{ fontSize: '0.72rem', color: '#666' }}>Margem Shopee</div>
-                            <div style={{ fontWeight: 700, color: corMargem(mShopee) }}>{mShopee === null ? '—' : `${brl(mShopee)} (${pct(mShopee)}%)`}</div>
+                      {/* Margem direto do nosso anúncio no Mercado Livre (cruza por SKU) */}
+                      <div style={{ padding: '0.85rem 1.25rem', background: '#f9fbfc', borderBottom: '1px solid #eee' }}>
+                        {anuncio ? (
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '1.5rem', flexWrap: 'wrap' }}>
+                            <div>
+                              <div style={{ fontSize: '0.72rem', color: '#666' }}>Preço no ML{anuncio.tipo_anuncio ? ` · ${anuncio.tipo_anuncio}` : ''}</div>
+                              <div style={{ fontSize: '1.05rem', fontWeight: 700, color: '#1a1a1a' }}>{brl(precoML)}</div>
+                            </div>
+                            <div style={{ display: 'flex', gap: '1rem', fontSize: '0.74rem', color: '#666', flexWrap: 'wrap' }}>
+                              <span>Frete <strong style={{ color: '#b42318' }}>{anuncio.frete != null ? `-${brl(freteML)}` : '—'}</strong></span>
+                              <span>Tarifa <strong style={{ color: '#b42318' }}>{anuncio.tarifa != null ? `-${brl(tarifaML)}` : '—'}</strong></span>
+                              <span>Imposto <strong style={{ color: '#b42318' }}>-{brl(impostoML)}</strong></span>
+                              <span>Custo <strong style={{ color: '#b42318' }}>-{brl(custo)}</strong></span>
+                            </div>
+                            <div style={{ marginLeft: 'auto', textAlign: 'right' }}>
+                              <div style={{ fontSize: '0.72rem', color: '#666' }}>Margem de contribuição</div>
+                              <div style={{ fontWeight: 700, fontSize: '1.05rem', color: corMargem(margemML) }}>
+                                {margemML === null ? '—' : `${brl(margemML)} (${margemPctML}%)`}
+                              </div>
+                            </div>
+                            {anuncio.permalink && (
+                              <a href={anuncio.permalink} target="_blank" rel="noreferrer"
+                                style={{ fontSize: '0.78rem', color: '#3483fa', textDecoration: 'none', whiteSpace: 'nowrap' }}>ver no ML ↗</a>
+                            )}
                           </div>
-                          <div>
-                            <div style={{ fontSize: '0.72rem', color: '#666' }}>Margem Mercado Livre</div>
-                            <div style={{ fontWeight: 700, color: corMargem(mML) }}>{mML === null ? '—' : `${brl(mML)} (${pct(mML)}%)`}</div>
+                        ) : (
+                          <div style={{ fontSize: '0.82rem', color: '#999' }}>
+                            {prod.olist_sku
+                              ? `Sem anúncio ativo no ML para o SKU ${prod.olist_sku}.`
+                              : 'Produto sem SKU Olist — vincule para puxar a margem do anúncio.'}
                           </div>
-                        </div>
-                        <button onClick={() => setPrecificandoProd(prod)} title="Precificador detalhado"
-                          style={{ padding: '0.5rem 0.9rem', background: '#ede7f6', color: '#4527a0', border: '1px solid #d1c4e9', borderRadius: '8px', cursor: 'pointer', fontWeight: 600, fontSize: '0.85rem', whiteSpace: 'nowrap' }}>
-                          ⚖ Precificador
-                        </button>
+                        )}
                       </div>
 
                       {/* Fornecedores e compras */}
@@ -626,15 +664,6 @@ export function FornecedoresManager({ onVoltar }: FornecedoresManagerProps) {
         </div>
       )}
 
-      {precificandoProd && (
-        <Precificador
-          titulo={precificandoProd.titulo}
-          sku={precificandoProd.olist_sku || precificandoProd.fornecedores[0]?.codigo}
-          precoInicial={precosVenda[precificandoProd.chave] || 0}
-          custoInicial={precificandoProd.custoMedioGeral}
-          onClose={() => setPrecificandoProd(null)}
-        />
-      )}
     </div>
   )
 }

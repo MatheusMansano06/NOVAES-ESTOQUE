@@ -1002,6 +1002,60 @@ class MLIntegration:
                 print(f"[ML] sync_catalogo async erro: {e}")
         threading.Thread(target=run, daemon=True).start()
 
+    def margens_por_sku(self, skus: Optional[List[str]] = None) -> Dict[str, Any]:
+        """Para cada SKU, devolve os dados do anúncio ML ativo correspondente
+        (preço/promo/frete reais do cache + tarifa real via listing_prices).
+        Base do Catálogo mostrar a margem direto dos nossos anúncios. Se `skus`
+        vier, filtra só esses (uppercase); senão devolve todos com SKU.
+        """
+        alvo = {str(s).strip().upper() for s in (skus or []) if str(s).strip()}
+        db = self._db()
+        try:
+            rows = db.query(MercadoLivreItemCache).filter(MercadoLivreItemCache.status == "active").all()
+        finally:
+            db.close()
+
+        por_sku: Dict[str, MercadoLivreItemCache] = {}
+        for r in rows:
+            s = (r.sku or "").strip().upper()
+            if not s or (alvo and s not in alvo):
+                continue
+            atual = por_sku.get(s)
+            # se houver mais de um anúncio com o mesmo SKU, fica o de maior preço
+            if atual is None or (r.preco or 0) > (atual.preco or 0):
+                por_sku[s] = r
+
+        fee_cache: Dict[Any, Dict] = {}
+        out: Dict[str, Any] = {}
+        for s, r in por_sku.items():
+            promo = r.preco_promocional or r.preco
+            lt = r.listing_type_id
+            tarifa = None
+            tarifa_pct = None
+            if promo and lt in ("gold_special", "gold_pro"):
+                key = (r.categoria_id, lt, round(float(promo), 2))
+                pr = fee_cache.get(key)
+                if pr is None:
+                    pr = self.precificacao(float(promo), r.categoria_id)
+                    fee_cache[key] = pr
+                info = pr.get("classico") if lt == "gold_special" else pr.get("premium")
+                if info:
+                    tarifa = info.get("tarifa")
+                    tarifa_pct = info.get("percentual")
+            out[s] = {
+                "item_id": r.item_id,
+                "titulo": r.titulo,
+                "preco": r.preco,
+                "promocional": promo,
+                "frete": r.frete_custo,
+                "tarifa": tarifa,
+                "tarifa_pct": tarifa_pct,
+                "tipo_anuncio": r.tipo_anuncio,
+                "tipo_anuncio_id": lt,
+                "permalink": r.permalink,
+            }
+        return {"margens": out, "total": len(out)}
+
     def precificacao(self, price: float, category_id: Optional[str] = None) -> Dict:
         """Tarifa de venda real do ML (Clássico=gold_special, Premium=gold_pro) p/ um preço/categoria."""
         params = {"price": price}

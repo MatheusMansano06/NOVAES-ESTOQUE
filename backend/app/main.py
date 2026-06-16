@@ -2829,6 +2829,19 @@ async def ml_precificacao(request: Request):
     return JSONResponse(ml.precificacao(price, category_id), headers={"Cache-Control": "no-store"})
 
 
+async def ml_margens(request: Request):
+    """POST /api/ml/margens {"skus":[...]} — margem por SKU (preço/frete/tarifa reais
+    do ML, do cache). Usado pelo Catálogo para mostrar a margem dos nossos anúncios."""
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    skus = body.get("skus") if isinstance(body, dict) else None
+    if skus is not None and not isinstance(skus, list):
+        skus = None
+    return JSONResponse(ml.margens_por_sku(skus), headers={"Cache-Control": "no-store"})
+
+
 async def ml_anuncio_detalhes(request: Request):
     item_id = request.path_params.get("item_id")
     if not item_id:
@@ -3135,6 +3148,7 @@ routes = [
     Route("/api/ml/anuncios/{item_id:str}/pictures/upload", ml_anuncio_imagens_upload, methods=["POST"]),
     Route("/api/ml/anuncios/{item_id:str}/pictures", ml_anuncio_imagens_reordenar, methods=["POST"]),
     Route("/api/ml/precificacao", ml_precificacao, methods=["GET"]),
+    Route("/api/ml/margens", ml_margens, methods=["POST"]),
     Route("/api/ml/conectar", ml_conectar, methods=["GET"]),
     Route("/api/ml/callback", ml_callback, methods=["GET"]),
     Route("/api/upload-nfe", upload_nfe, methods=["POST"]),
