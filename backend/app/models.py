@@ -271,3 +271,75 @@ class PrecoVendaProduto(Base):
     produto_chave = Column(String(150), unique=True, index=True)  # olist_sku ou codigo_produto
     preco_venda = Column(Float, default=0)
     atualizado_em = Column(DateTime, default=datetime.utcnow)
+
+
+class MercadoLivreItemCache(Base):
+    """
+    Espelho local do anúncio do Mercado Livre.
+    Mantém snapshot normalizado + payloads brutos para a tela responder rápido
+    e para a aplicação conseguir detectar/sincronizar mudanças futuras.
+    """
+    __tablename__ = "ml_item_cache"
+
+    id = Column(Integer, primary_key=True)
+    item_id = Column(String(50), unique=True, index=True)
+    status = Column(String(50), index=True)
+    titulo = Column(String(255))
+    sku = Column(String(120), index=True, nullable=True)
+    categoria_id = Column(String(80), nullable=True)
+    listing_type_id = Column(String(80), nullable=True)
+    tipo_anuncio = Column(String(80), nullable=True)
+    moeda = Column(String(10), nullable=True)
+    preco = Column(Float, nullable=True)
+    preco_original = Column(Float, nullable=True)
+    preco_promocional = Column(Float, nullable=True)
+    estoque_disponivel = Column(Integer, nullable=True)
+    vendidos = Column(Integer, nullable=True)
+    frete_gratis = Column(Integer, default=0)
+    frete_custo = Column(Float, nullable=True)
+    frete_moeda = Column(String(10), nullable=True)
+    logistic_type = Column(String(80), nullable=True)
+    flex = Column(Integer, default=0)
+    full = Column(Integer, default=0)
+    imagens_total = Column(Integer, default=0)
+    imagem_principal = Column(Text, nullable=True)
+    thumbnail = Column(Text, nullable=True)
+    permalink = Column(Text, nullable=True)
+    dimensoes_texto = Column(String(255), nullable=True)
+    dimensoes_json = Column(Text, nullable=True)
+    sale_terms_json = Column(Text, nullable=True)
+    tags_json = Column(Text, nullable=True)
+    attributes_json = Column(Text, nullable=True)
+    pictures_json = Column(Text, nullable=True)
+    description_json = Column(Text, nullable=True)
+    prices_json = Column(Text, nullable=True)
+    sale_price_json = Column(Text, nullable=True)
+    shipping_fee_json = Column(Text, nullable=True)
+    shipping_preview_json = Column(Text, nullable=True)
+    shipping_tags_json = Column(Text, nullable=True)
+    raw_item_json = Column(Text, nullable=True)
+    ml_last_updated = Column(DateTime, nullable=True)
+    ml_last_changed_at = Column(DateTime, nullable=True)
+    cache_version = Column(Integer, default=1)
+    synced_at = Column(DateTime, default=datetime.utcnow, index=True)
+    cache_expires_at = Column(DateTime, nullable=True, index=True)
+    last_error = Column(Text, nullable=True)
+
+
+class MercadoLivreSyncState(Base):
+    """
+    Estado do último sync de uma visão/listagem do ML.
+    Permite servir total/metadata sem bater na API a cada paginação.
+    """
+    __tablename__ = "ml_sync_state"
+
+    id = Column(Integer, primary_key=True)
+    scope = Column(String(80), unique=True, index=True)
+    resource = Column(String(80), index=True)
+    status = Column(String(50), index=True, nullable=True)
+    remote_total = Column(Integer, nullable=True)
+    offset = Column(Integer, default=0)
+    limit = Column(Integer, default=0)
+    synced_at = Column(DateTime, default=datetime.utcnow)
+    cache_expires_at = Column(DateTime, nullable=True)
+    last_error = Column(Text, nullable=True)

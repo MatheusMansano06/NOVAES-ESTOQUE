@@ -19,7 +19,8 @@ import io
 from app.models import (
     NotaFiscal, ItemEstoque, ConfirmacaoEstoque, StatusEstoque, VinculoOlist,
     Fornecedor, HistoricoCompra, ConfiguracaoEstoqueMinimo, NotificacaoFornecedor,
-    EmbaleFU, ItemEmbaleFU, ApelidoFornecedor, PrecoVendaProduto
+    EmbaleFU, ItemEmbaleFU, ApelidoFornecedor, PrecoVendaProduto,
+    MercadoLivreItemCache, MercadoLivreSyncState
 )
 from app.utils.nfe_parser import NFeParsing
 from app.utils.nfe_pdf_generator import NFePDFGenerator
@@ -2805,12 +2806,13 @@ async def ml_status(request: Request):
 async def ml_anuncios(request: Request):
     """GET /api/ml/anuncios?status=active&offset=0&limit=50 — lista anúncios do ML (somente leitura)."""
     status = request.query_params.get("status", "active")
+    force_refresh = request.query_params.get("force_refresh", "").strip().lower() in {"1", "true", "yes", "sim"}
     try:
         offset = int(request.query_params.get("offset", 0))
         limit = int(request.query_params.get("limit", 50))
     except (TypeError, ValueError):
         offset, limit = 0, 50
-    resultado = ml.listar_anuncios(status=status, offset=offset, limit=limit)
+    resultado = ml.listar_anuncios(status=status, offset=offset, limit=limit, force_refresh=force_refresh)
     code = 200 if not resultado.get("erro") else 502
     return JSONResponse(resultado, status_code=code, headers={"Cache-Control": "no-store"})
 
@@ -2831,7 +2833,8 @@ async def ml_anuncio_detalhes(request: Request):
     item_id = request.path_params.get("item_id")
     if not item_id:
         return JSONResponse({"erro": "item_id obrigatório"}, status_code=400)
-    result = ml.obter_anuncio_completo(item_id)
+    force_refresh = request.query_params.get("force_refresh", "").strip().lower() in {"1", "true", "yes", "sim"}
+    result = ml.obter_anuncio_completo(item_id, force_refresh=force_refresh)
     code = 200 if not result.get("erro") else 502
     return JSONResponse(result, status_code=code, headers={"Cache-Control": "no-store"})
 
@@ -2917,7 +2920,34 @@ async def ml_anuncio_preco_resumo(request: Request):
     item_id = request.path_params.get("item_id")
     if not item_id:
         return JSONResponse({"erro": "item_id obrigatório"}, status_code=400)
-    result = ml.resumo_preco(item_id)
+    force_refresh = request.query_params.get("force_refresh", "").strip().lower() in {"1", "true", "yes", "sim"}
+    result = ml.resumo_preco(item_id, force_refresh=force_refresh)
+    code = 200 if not result.get("erro") else 502
+    return JSONResponse(result, status_code=code, headers={"Cache-Control": "no-store"})
+
+
+async def ml_sync_cache(request: Request):
+    """
+    POST /api/ml/sync
+    Atualiza o espelho local do Mercado Livre.
+    """
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+
+    item_id = str(body.get("item_id") or "").strip()
+    status = str(body.get("status") or "active").strip() or "active"
+    try:
+        offset = int(body.get("offset", 0) or 0)
+        limit = int(body.get("limit", 50) or 50)
+    except (TypeError, ValueError):
+        offset, limit = 0, 50
+
+    if item_id:
+        result = ml.sync_item(item_id, force=True)
+    else:
+        result = ml.listar_anuncios(status=status, offset=offset, limit=limit, force_refresh=True)
     code = 200 if not result.get("erro") else 502
     return JSONResponse(result, status_code=code, headers={"Cache-Control": "no-store"})
 
@@ -3088,6 +3118,7 @@ routes = [
     Route("/api/notas-fiscais/{id:int}/frete", atualizar_frete_nota, methods=["POST"]),
     Route("/api/precos-venda", precos_venda, methods=["GET", "POST"]),
     Route("/api/ml/status", ml_status, methods=["GET"]),
+    Route("/api/ml/sync", ml_sync_cache, methods=["POST"]),
     Route("/api/ml/anuncios", ml_anuncios, methods=["GET"]),
     Route("/api/ml/anuncios/{item_id:str}", ml_anuncio_detalhes, methods=["GET"]),
     Route("/api/ml/anuncios/{item_id:str}/description", ml_anuncio_descricao, methods=["POST"]),
