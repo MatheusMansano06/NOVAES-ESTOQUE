@@ -65,6 +65,13 @@ def _garantir_colunas_sqlite():
                 if nome not in colunas_embale:
                     conn.exec_driver_sql(f"ALTER TABLE itens_embale_fu ADD COLUMN {nome} {tipo}")
                     print(f"[DB] Coluna itens_embale_fu.{nome} criada")
+
+            # Tarifa de venda do ML guardada no cache (margem sem chamada ao vivo)
+            colunas_ml = {row[1] for row in conn.exec_driver_sql("PRAGMA table_info(ml_item_cache)").fetchall()}
+            for nome, tipo in [("tarifa_valor", "FLOAT"), ("tarifa_pct", "FLOAT"), ("tarifa_fixo", "FLOAT")]:
+                if colunas_ml and nome not in colunas_ml:
+                    conn.exec_driver_sql(f"ALTER TABLE ml_item_cache ADD COLUMN {nome} {tipo}")
+                    print(f"[DB] Coluna ml_item_cache.{nome} criada")
     except Exception as e:
         print(f"[DB] Aviso ao garantir colunas SQLite: {e}")
 

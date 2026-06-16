@@ -485,17 +485,21 @@ class MLIntegration:
             })
 
         tarifa_atual = None
-        preco_efetivo = None
-        if isinstance(sale_price, dict):
-            preco_efetivo = sale_price.get("amount")
-        if preco_efetivo is None:
-            preco_efetivo = row.preco_promocional or row.preco
-        if preco_efetivo:
-            precificacao = self.precificacao(float(preco_efetivo), row.categoria_id)
-            if row.listing_type_id == "gold_special":
-                tarifa_atual = precificacao.get("classico")
-            elif row.listing_type_id == "gold_pro":
-                tarifa_atual = precificacao.get("premium")
+        if row.tarifa_valor is not None:
+            # tarifa já gravada no sync — evita chamada ao vivo
+            tarifa_atual = {"tarifa": row.tarifa_valor, "percentual": row.tarifa_pct, "fixo": row.tarifa_fixo}
+        else:
+            preco_efetivo = None
+            if isinstance(sale_price, dict):
+                preco_efetivo = sale_price.get("amount")
+            if preco_efetivo is None:
+                preco_efetivo = row.preco_promocional or row.preco
+            if preco_efetivo:
+                precificacao = self.precificacao(float(preco_efetivo), row.categoria_id)
+                if row.listing_type_id == "gold_special":
+                    tarifa_atual = precificacao.get("classico")
+                elif row.listing_type_id == "gold_pro":
+                    tarifa_atual = precificacao.get("premium")
 
         return {
             "item": item,
@@ -772,6 +776,11 @@ class MLIntegration:
                 description=desc,
                 detail={"shipping_tags": (body.get("shipping") or {}).get("tags") or []},
             )
+            valor, pct, fixo = self._tarifa_para(row.preco_promocional or row.preco, row.categoria_id, row.listing_type_id)
+            if valor is not None:
+                row.tarifa_valor = valor
+                row.tarifa_pct = pct
+                row.tarifa_fixo = fixo
             db.commit()
             db.refresh(row)
             return self._build_detalhe_from_cache(row)
@@ -910,6 +919,7 @@ class MLIntegration:
                     body_by_id[str(body.get("id"))] = body
                     simples.append(self._simplificar_item(body))
         custos_frete = self._custos_frete_gratis([s["id"] for s in simples if s.get("frete_gratis")])
+        fee_cache: Dict[Any, Dict] = {}
         n = 0
         for s in simples:
             body = body_by_id.get(str(s.get("id")))
@@ -920,6 +930,12 @@ class MLIntegration:
             row = self._upsert_item_cache(db, body, shipping_fee=shipping_fee, cache_ttl_seconds=self.LIST_CACHE_TTL_SECONDS)
             if row.preco_promocional is None:
                 row.preco_promocional = row.preco
+            # grava a tarifa real; só sobrescreve quando obteve valor (preserva último bom)
+            valor, pct, fixo = self._tarifa_para(row.preco_promocional or row.preco, row.categoria_id, row.listing_type_id, fee_cache)
+            if valor is not None:
+                row.tarifa_valor = valor
+                row.tarifa_pct = pct
+                row.tarifa_fixo = fixo
             n += 1
         return n
 
@@ -1002,6 +1018,24 @@ class MLIntegration:
                 print(f"[ML] sync_catalogo async erro: {e}")
         threading.Thread(target=run, daemon=True).start()
 
+    def _tarifa_para(self, price: Optional[float], categoria_id: Optional[str], listing_type_id: Optional[str], fee_cache: Optional[Dict[Any, Dict]] = None):
+        """Tarifa de venda real (valor, %, fixo) p/ um preço/categoria/tipo.
+        Só Clássico (gold_special) e Premium (gold_pro) têm tarifa via listing_prices.
+        fee_cache evita recalcular o mesmo (categoria, tipo, preço) no mesmo sync.
+        """
+        if not price or listing_type_id not in ("gold_special", "gold_pro"):
+            return (None, None, None)
+        key = (categoria_id, listing_type_id, round(float(price), 2))
+        pr = fee_cache.get(key) if fee_cache is not None else None
+        if pr is None:
+            pr = self.precificacao(float(price), categoria_id)
+            if fee_cache is not None:
+                fee_cache[key] = pr
+        info = pr.get("classico") if listing_type_id == "gold_special" else pr.get("premium")
+        if not info:
+            return (None, None, None)
+        return (info.get("tarifa"), info.get("percentual"), info.get("fixo"))
+
     def margens_por_sku(self, skus: Optional[List[str]] = None) -> Dict[str, Any]:
         """Para cada SKU, devolve os dados do anúncio ML ativo correspondente
         (preço/promo/frete reais do cache + tarifa real via listing_prices).
@@ -1025,33 +1059,20 @@ class MLIntegration:
             if atual is None or (r.preco or 0) > (atual.preco or 0):
                 por_sku[s] = r
 
-        fee_cache: Dict[Any, Dict] = {}
         out: Dict[str, Any] = {}
         for s, r in por_sku.items():
             promo = r.preco_promocional or r.preco
-            lt = r.listing_type_id
-            tarifa = None
-            tarifa_pct = None
-            if promo and lt in ("gold_special", "gold_pro"):
-                key = (r.categoria_id, lt, round(float(promo), 2))
-                pr = fee_cache.get(key)
-                if pr is None:
-                    pr = self.precificacao(float(promo), r.categoria_id)
-                    fee_cache[key] = pr
-                info = pr.get("classico") if lt == "gold_special" else pr.get("premium")
-                if info:
-                    tarifa = info.get("tarifa")
-                    tarifa_pct = info.get("percentual")
             out[s] = {
                 "item_id": r.item_id,
                 "titulo": r.titulo,
                 "preco": r.preco,
                 "promocional": promo,
                 "frete": r.frete_custo,
-                "tarifa": tarifa,
-                "tarifa_pct": tarifa_pct,
+                # tarifa vem do cache (gravada no sync) — sem chamada ao vivo
+                "tarifa": r.tarifa_valor,
+                "tarifa_pct": r.tarifa_pct,
                 "tipo_anuncio": r.tipo_anuncio,
-                "tipo_anuncio_id": lt,
+                "tipo_anuncio_id": r.listing_type_id,
                 "permalink": r.permalink,
             }
         return {"margens": out, "total": len(out)}
