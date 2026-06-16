@@ -6,6 +6,7 @@ Tarefas agendadas (Jobs) do sistema de estoque
 
 from apscheduler.schedulers.background import BackgroundScheduler
 from datetime import datetime
+import os
 import logging
 from database import SessionLocal
 from app.models import (
@@ -175,6 +176,37 @@ Obrigado!"""
         db.close()
 
 
+def sincronizar_anuncios_ml():
+    """
+    Polling incremental do Mercado Livre: espelha o catálogo no cache local,
+    buscando o detalhe SÓ dos anúncios que mudaram (compara last_updated).
+    Assim a aba Anúncios serve do SQLite e só fala com a API quando o ML muda.
+    """
+    try:
+        from app.integracoes_ml import ml
+    except Exception as e:
+        logger.error(f"[JOB][ML] import falhou: {e}")
+        return
+
+    if not ml.user_id or not ml.get_access_token():
+        # sem credenciais/autorização: nada a sincronizar
+        return
+
+    try:
+        resultado = ml.sync_catalogo(status="active")
+        if resultado.get("skipped"):
+            return
+        if resultado.get("erro"):
+            logger.error(f"[JOB][ML] sync falhou: {resultado.get('erro')}")
+        else:
+            logger.info(
+                f"[JOB][ML] catálogo sincronizado: total={resultado.get('total')} "
+                f"atualizados={resultado.get('atualizados')} ({resultado.get('modo')})"
+            )
+    except Exception as e:
+        logger.error(f"[JOB][ML] erro inesperado: {e}")
+
+
 def iniciar_scheduler():
     """
     Inicia o scheduler com a tarefa diária às 8am
@@ -198,7 +230,32 @@ def iniciar_scheduler():
             id='encerrar_inbounds_vencidos',
             name='Encerramento automático de inbounds vencidos'
         )
+        # Polling incremental do Mercado Livre (intervalo configurável; roda já no boot)
+        try:
+            ml_intervalo = max(2, int(os.getenv("ML_POLL_INTERVAL_MINUTES", "10")))
+        except (TypeError, ValueError):
+            ml_intervalo = 10
+        scheduler.add_job(
+            sincronizar_anuncios_ml,
+            'interval',
+            minutes=ml_intervalo,
+            id='ml_sync_catalogo',
+            name='Sincronização incremental de anúncios do Mercado Livre',
+            max_instances=1,
+            coalesce=True,
+            misfire_grace_time=3600,
+        )
         scheduler.start()
         logger.info("[SCHEDULER] Agendador iniciado com sucesso")
         logger.info("[SCHEDULER] Job 'check_estoque_minimo' agendado para 08:00 todos os dias")
         logger.info("[SCHEDULER] Job 'encerrar_inbounds_vencidos' agendado a cada 1 hora")
+        logger.info(f"[SCHEDULER] Job 'ml_sync_catalogo' agendado a cada {ml_intervalo} min")
+
+        # Aquece o cache logo no boot, sem depender de next_run_time (que sofre
+        # misfire) e sem bloquear o startup: dispara o sync numa thread daemon.
+        try:
+            from app.integracoes_ml import ml
+            ml._sync_catalogo_async("active")
+            logger.info("[SCHEDULER] Sync inicial de anúncios ML disparado em background")
+        except Exception as e:
+            logger.error(f"[SCHEDULER] Falha ao disparar sync inicial ML: {e}")

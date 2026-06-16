@@ -19,7 +19,8 @@ import io
 from app.models import (
     NotaFiscal, ItemEstoque, ConfirmacaoEstoque, StatusEstoque, VinculoOlist,
     Fornecedor, HistoricoCompra, ConfiguracaoEstoqueMinimo, NotificacaoFornecedor,
-    EmbaleFU, ItemEmbaleFU, ApelidoFornecedor, PrecoVendaProduto
+    EmbaleFU, ItemEmbaleFU, ApelidoFornecedor, PrecoVendaProduto,
+    MercadoLivreItemCache, MercadoLivreSyncState
 )
 from app.utils.nfe_parser import NFeParsing
 from app.utils.nfe_pdf_generator import NFePDFGenerator
@@ -59,11 +60,24 @@ def _garantir_colunas_sqlite():
                 ("foi_balanceado", "INTEGER DEFAULT 0"),
                 ("saldo_disponivel", "FLOAT"),
                 ("data_balanceamento", "DATETIME"),
+                ("revisao_salva_em", "DATETIME"),
             ]
             for nome, tipo in migracoes_embale:
-                if nome not in colunas_embale:
+                if nome in {"foi_balanceado", "saldo_disponivel", "data_balanceamento"} and nome not in colunas_embale:
                     conn.exec_driver_sql(f"ALTER TABLE itens_embale_fu ADD COLUMN {nome} {tipo}")
                     print(f"[DB] Coluna itens_embale_fu.{nome} criada")
+
+            colunas_embale_header = {row[1] for row in conn.exec_driver_sql("PRAGMA table_info(embaldes_fu)").fetchall()}
+            if "revisao_salva_em" not in colunas_embale_header:
+                conn.exec_driver_sql("ALTER TABLE embaldes_fu ADD COLUMN revisao_salva_em DATETIME")
+                print("[DB] Coluna embaldes_fu.revisao_salva_em criada")
+
+            # Tarifa de venda do ML guardada no cache (margem sem chamada ao vivo)
+            colunas_ml = {row[1] for row in conn.exec_driver_sql("PRAGMA table_info(ml_item_cache)").fetchall()}
+            for nome, tipo in [("tarifa_valor", "FLOAT"), ("tarifa_pct", "FLOAT"), ("tarifa_fixo", "FLOAT")]:
+                if colunas_ml and nome not in colunas_ml:
+                    conn.exec_driver_sql(f"ALTER TABLE ml_item_cache ADD COLUMN {nome} {tipo}")
+                    print(f"[DB] Coluna ml_item_cache.{nome} criada")
     except Exception as e:
         print(f"[DB] Aviso ao garantir colunas SQLite: {e}")
 
@@ -718,18 +732,6 @@ async def buscar_produtos_olist(request: Request):
         print(f"[BUSCA] Buscando na Olist: {query}")
         produtos = olist.buscar_produtos(query)
 
-        # Se não encontrou produtos e não tem nenhum token configurado
-        if not produtos and not olist.get_access_token() and not olist.token_v2:
-            print("[BUSCA] Nenhum token Olist configurado")
-            return JSONResponse({
-                "produtos": [],
-                "total": 0,
-                "termo_busca": query,
-                "nao_autorizado": True,
-                "url_autorizacao": "http://localhost:8000/api/olist/conectar",
-                "mensagem": "Configure a chave OLIST_API_TOKEN_SIMPLE no .env ou conecte-se via OAuth2"
-            })
-
         if produtos:
             return JSONResponse({
                 "produtos": produtos,
@@ -738,7 +740,23 @@ async def buscar_produtos_olist(request: Request):
                 "metodo": "oauth2_v3"
             })
 
-        # Nenhum produto encontrado (mas API funcionou)
+        # Sem produtos: distinguir "Olist desconectado" de "produto realmente não existe".
+        try:
+            st = olist.status()
+        except Exception:
+            st = {}
+        if not st.get("autorizado"):
+            print("[BUSCA] Olist não autorizado — sinalizando reconexão")
+            return JSONResponse({
+                "produtos": [],
+                "total": 0,
+                "termo_busca": query,
+                "nao_autorizado": True,
+                "url_autorizacao": st.get("url_autorizacao") or "/api/olist/conectar",
+                "mensagem": "Olist desconectado — reconecte a integração para buscar produtos."
+            })
+
+        # Nenhum produto encontrado (mas a integração está ok)
         return JSONResponse({
             "produtos": [],
             "total": 0,
@@ -1276,7 +1294,8 @@ def _calcular_reserva_inbound(db, olist_produto_id, olist_sku, disponivel=None,
                 continue
 
             ja_segurado = it.quantidade_baixada or 0
-            falta_segurar = (it.quantidade_separada or 0) - ja_segurado
+            quantidade_planejada = _quantidade_planejada_full(it)
+            falta_segurar = quantidade_planejada - ja_segurado
             if falta_segurar <= 0:
                 continue
 
@@ -1288,7 +1307,7 @@ def _calcular_reserva_inbound(db, olist_produto_id, olist_sku, disponivel=None,
                 continue
 
             reserva_total += segurar
-            completo = (ja_segurado + segurar) >= (it.quantidade_separada or 0)
+            completo = (ja_segurado + segurar) >= quantidade_planejada
             detalhes.append({
                 "inbound_id": emb.id,
                 "numero_inbound": emb.numero_inbound,
@@ -1297,7 +1316,7 @@ def _calcular_reserva_inbound(db, olist_produto_id, olist_sku, disponivel=None,
                 "titulo": it.titulo_anuncio,
                 "sku": it.sku_inbound,
                 "segurar": segurar,
-                "full_total": it.quantidade_separada,
+                "full_total": quantidade_planejada,
                 "completo": completo,
             })
 
@@ -1987,6 +2006,8 @@ async def listar_embaldes(request: Request):
             "limit": limit,
             "items": [
                 {
+                    "total_planejado_full": sum(_progresso_item_full(i)[0] for i in e.itens),
+                    "total_baixado_full": sum(_progresso_item_full(i)[1] for i in e.itens),
                     "id": e.id,
                     "nome_embalde": e.nome_embalde,
                     "numero_inbound": e.numero_inbound,
@@ -1998,7 +2019,9 @@ async def listar_embaldes(request: Request):
                     "status": status_display(e),
                     "qtd_items": len(e.itens),
                     "qtd_validados": sum(1 for i in e.itens if i.validado == 1),
-                    "total_lido": sum(i.quantidade_separada or 0 for i in e.itens)
+                    "qtd_baixados": sum(1 for i in e.itens if _progresso_item_full(i)[1] >= _progresso_item_full(i)[0] and _progresso_item_full(i)[0] > 0),
+                    "total_lido": sum(i.quantidade_separada or 0 for i in e.itens),
+                    "revisao_salva_em": e.revisao_salva_em.isoformat() if e.revisao_salva_em else None,
                 }
                 for e in embaldes
             ]
@@ -2142,6 +2165,97 @@ def _resolver_olist_para_item(item):
     return None, None
 
 
+def _quantidade_planejada_full(item) -> float:
+    """Quantidade planejada para este item ir ao FULL."""
+    if item.quantidade_baixar is None:
+        return float(item.quantidade_separada or 0)
+    return max(0.0, float(item.quantidade_baixar or 0))
+
+
+def _progresso_item_full(item) -> tuple[float, float]:
+    """Retorna (planejado, realizado) para progresso persistido do inbound."""
+    planejado = _quantidade_planejada_full(item)
+    realizado = min(max(0.0, float(item.quantidade_baixada or 0)), planejado)
+    return planejado, realizado
+
+
+def _resumo_revisao_salva_item(item):
+    produto_id = item.olist_produto_id
+    qtd_full = _quantidade_planejada_full(item)
+    qtd_original = float(item.quantidade_separada or 0)
+
+    if not produto_id:
+        return {
+            "item_id": item.id,
+            "titulo_anuncio": item.titulo_anuncio,
+            "sku_inbound": item.sku_inbound,
+            "quantidade_original": qtd_original,
+            "quantidade_full": qtd_full,
+            "olist_encontrado": False,
+            "olist_produto_id": None,
+            "olist_nome": None,
+            "estoque_atual": None,
+            "baixa_proposta": None,
+            "resultado": None,
+            "falta": None,
+            "tem_falta": False,
+            "estoque_indisponivel": False,
+            "baixa_aplicada": item.baixa_aplicada or 0,
+            "vinculado": item.validado or 0,
+            "foi_balanceado": item.foi_balanceado or 0,
+            "saldo_disponivel": item.saldo_disponivel,
+        }
+
+    saldo = item.olist_estoque_antes
+    if saldo is None:
+        return {
+            "item_id": item.id,
+            "titulo_anuncio": item.titulo_anuncio,
+            "sku_inbound": item.sku_inbound,
+            "quantidade_original": qtd_original,
+            "quantidade_full": qtd_full,
+            "olist_encontrado": True,
+            "olist_produto_id": produto_id,
+            "olist_nome": item.olist_nome,
+            "estoque_atual": None,
+            "baixa_proposta": None,
+            "resultado": None,
+            "falta": None,
+            "tem_falta": False,
+            "estoque_indisponivel": True,
+            "baixa_aplicada": item.baixa_aplicada or 0,
+            "vinculado": item.validado or 0,
+            "foi_balanceado": item.foi_balanceado or 0,
+            "saldo_disponivel": item.saldo_disponivel,
+        }
+
+    saldo = float(saldo or 0)
+    falta = max(0.0, qtd_full - saldo)
+    tem_falta = falta > 0
+    disponivel_para_baixa = max(0.0, saldo)
+
+    return {
+        "item_id": item.id,
+        "titulo_anuncio": item.titulo_anuncio,
+        "sku_inbound": item.sku_inbound,
+        "quantidade_original": qtd_original,
+        "quantidade_full": qtd_full,
+        "olist_encontrado": True,
+        "olist_produto_id": produto_id,
+        "olist_nome": item.olist_nome,
+        "estoque_atual": saldo,
+        "baixa_proposta": qtd_full if not tem_falta else min(disponivel_para_baixa, qtd_full),
+        "resultado": (saldo - qtd_full) if not tem_falta else None,
+        "falta": falta,
+        "tem_falta": tem_falta,
+        "estoque_indisponivel": False,
+        "baixa_aplicada": item.baixa_aplicada or 0,
+        "vinculado": item.validado or 0,
+        "foi_balanceado": item.foi_balanceado or 0,
+        "saldo_disponivel": item.saldo_disponivel,
+    }
+
+
 async def revisar_baixa_embale(request: Request):
     """
     GET /api/embaldes/{embale_id}/revisao
@@ -2159,27 +2273,47 @@ async def revisar_baixa_embale(request: Request):
             return JSONResponse({"erro": "Inbound não encontrado"}, status_code=404)
 
         itens = list(embale.itens)
+        force_refresh = request.query_params.get("refresh", "").strip().lower() in {"1", "true", "yes", "sim"}
+
+        if embale.revisao_salva_em and not force_refresh:
+            revisao = [_resumo_revisao_salva_item(item) for item in itens]
+            resumo = {
+                "total": len(revisao),
+                "encontrados": sum(1 for item in revisao if item["olist_encontrado"]),
+                "nao_encontrados": sum(1 for item in revisao if not item["olist_encontrado"]),
+                "com_falta": sum(1 for item in revisao if item["tem_falta"]),
+            }
+            return JSONResponse({
+                "embale_id": embale.id,
+                "nome_embalde": embale.nome_embalde,
+                "numero_inbound": embale.numero_inbound,
+                "status": embale.status,
+                "revisao_salva_em": embale.revisao_salva_em.isoformat(),
+                "resumo": resumo,
+                "itens": revisao,
+            })
 
         # 1) Resolver produto Olist de cada item.
         #    Persiste o vínculo encontrado no banco para acelerar as próximas
         #    revisões (não precisa buscar de novo) e reduzir chamadas à API.
         resolvidos = {}  # item_id -> (produto_id, nome)
-        houve_novo_vinculo = False
+        revisado_em = datetime.utcnow()
         for item in itens:
             pid, nome = _resolver_olist_para_item(item)
             resolvidos[item.id] = (pid, nome)
             # Salva o vínculo se for novo (ainda não tinha olist_produto_id).
             # Marca validado=1 também — senão o item aparecia "Sem vínculo"
             # mesmo já tendo anúncio resolvido na Olist.
-            if pid and (not item.olist_produto_id or not item.validado):
+            if pid:
                 item.olist_produto_id = pid
                 item.olist_nome = nome
                 item.validado = 1
                 item.validacao_mensagem = None
-                db.add(item)
-                houve_novo_vinculo = True
-        if houve_novo_vinculo:
-            db.commit()
+            if item.quantidade_baixar is None:
+                item.quantidade_baixar = float(item.quantidade_separada or 0)
+            item.data_validacao = revisado_em
+            db.add(item)
+        db.commit()
 
         # 2) Buscar saldo na Olist (throttled internamente p/ respeitar 120/min).
         #    Workers baixos: o gargalo real é o rate limit, não a CPU.
@@ -2202,14 +2336,17 @@ async def revisar_baixa_embale(request: Request):
 
         for item in itens:
             produto_id, nome_olist = resolvidos[item.id]
-            qtd_full = item.quantidade_separada or 0
+            qtd_full = _quantidade_planejada_full(item)
 
             if not produto_id:
+                item.olist_estoque_antes = None
+                item.falta = None
                 resumo["nao_encontrados"] += 1
                 revisao.append({
                     "item_id": item.id,
                     "titulo_anuncio": item.titulo_anuncio,
                     "sku_inbound": item.sku_inbound,
+                    "quantidade_original": float(item.quantidade_separada or 0),
                     "quantidade_full": qtd_full,
                     "olist_encontrado": False,
                     "olist_produto_id": None,
@@ -2218,20 +2355,27 @@ async def revisar_baixa_embale(request: Request):
                     "resultado": None,
                     "falta": None,
                     "tem_falta": False,
+                    "estoque_indisponivel": False,
                     "baixa_aplicada": item.baixa_aplicada or 0,
                     "vinculado": item.validado or 0,
+                    "foi_balanceado": item.foi_balanceado or 0,
+                    "saldo_disponivel": item.saldo_disponivel,
                 })
+                db.add(item)
                 continue
 
             resumo["encontrados"] += 1
             saldo = estoques.get(produto_id)
 
             if saldo is None:
+                item.olist_estoque_antes = None
+                item.falta = None
                 # Achou o produto mas não conseguiu ler o estoque
                 revisao.append({
                     "item_id": item.id,
                     "titulo_anuncio": item.titulo_anuncio,
                     "sku_inbound": item.sku_inbound,
+                    "quantidade_original": float(item.quantidade_separada or 0),
                     "quantidade_full": qtd_full,
                     "olist_encontrado": True,
                     "olist_produto_id": produto_id,
@@ -2243,10 +2387,15 @@ async def revisar_baixa_embale(request: Request):
                     "estoque_indisponivel": True,
                     "baixa_aplicada": item.baixa_aplicada or 0,
                     "vinculado": item.validado or 0,
+                    "foi_balanceado": item.foi_balanceado or 0,
+                    "saldo_disponivel": item.saldo_disponivel,
                 })
+                db.add(item)
                 continue
 
+            item.olist_estoque_antes = float(saldo or 0)
             falta = max(0, qtd_full - saldo)
+            item.falta = float(falta)
             tem_falta = falta > 0
             if tem_falta:
                 resumo["com_falta"] += 1
@@ -2258,6 +2407,7 @@ async def revisar_baixa_embale(request: Request):
                 "item_id": item.id,
                 "titulo_anuncio": item.titulo_anuncio,
                 "sku_inbound": item.sku_inbound,
+                "quantidade_original": float(item.quantidade_separada or 0),
                 "quantidade_full": qtd_full,
                 "olist_encontrado": True,
                 "olist_produto_id": produto_id,
@@ -2271,13 +2421,22 @@ async def revisar_baixa_embale(request: Request):
                 "tem_falta": tem_falta,
                 "baixa_aplicada": item.baixa_aplicada or 0,
                 "vinculado": item.validado or 0,
+                "foi_balanceado": item.foi_balanceado or 0,
+                "saldo_disponivel": item.saldo_disponivel,
             })
+            db.add(item)
+
+        if not embale.revisao_salva_em:
+            embale.revisao_salva_em = revisado_em
+        db.add(embale)
+        db.commit()
 
         return JSONResponse({
             "embale_id": embale.id,
             "nome_embalde": embale.nome_embalde,
             "numero_inbound": embale.numero_inbound,
             "status": embale.status,
+            "revisao_salva_em": embale.revisao_salva_em.isoformat() if embale.revisao_salva_em else None,
             "resumo": resumo,
             "itens": revisao,
         })
@@ -2312,7 +2471,7 @@ def _aplicar_baixa_item(db, item, embale, qtd_override=None):
     if qtd_override is not None:
         qtd_baixar = float(qtd_override)
     else:
-        qtd_baixar = item.quantidade_separada or 0
+        qtd_baixar = _quantidade_planejada_full(item)
 
     if qtd_baixar <= 0:
         return {
@@ -2328,6 +2487,10 @@ def _aplicar_baixa_item(db, item, embale, qtd_override=None):
     )
 
     if sucesso:
+        if item.olist_estoque_antes is None:
+            estoque_antes = olist.obter_estoque(produto_id)
+            item.olist_estoque_antes = float((estoque_antes or {}).get("saldo") or 0)
+        item.quantidade_baixar = float(qtd_baixar)
         item.quantidade_baixada = qtd_baixar
         item.baixa_aplicada = 1
         item.data_baixa = datetime.utcnow()
@@ -2479,7 +2642,11 @@ async def vincular_item_embale(request: Request):
         item.validado = 1
         item.validacao_mensagem = None
         item.data_validacao = datetime.utcnow()
+        item.olist_estoque_antes = None
+        item.falta = None
         db.add(item)
+        embale.revisao_salva_em = None
+        db.add(embale)
 
         # Memória de vínculo (de-para): usa SKU/título do inbound como chave,
         # para casar automaticamente em inbounds futuros.
@@ -2517,6 +2684,56 @@ async def vincular_item_embale(request: Request):
             "mensagem": f"Vinculado a: {olist_nome}"
         })
 
+    except Exception as e:
+        db.rollback()
+        return JSONResponse({"erro": str(e)}, status_code=500)
+    finally:
+        db.close()
+
+
+async def ajustar_quantidade_full_embale(request: Request):
+    """
+    POST /api/embaldes/{embale_id}/itens/{item_id}/quantidade-full
+    Ajusta a quantidade planejada para ir ao FULL e persiste no banco.
+    """
+    db = SessionLocal()
+    try:
+        embale_id = int(request.path_params.get("embale_id"))
+        item_id = int(request.path_params.get("item_id"))
+        data = await request.json()
+        quantidade_full = float(data.get("quantidade_full", 0))
+
+        if quantidade_full < 0:
+            return JSONResponse({"erro": "Quantidade do FULL nÃ£o pode ser negativa"}, status_code=400)
+
+        embale = db.query(EmbaleFU).filter(EmbaleFU.id == embale_id).first()
+        if not embale:
+            return JSONResponse({"erro": "Inbound nÃ£o encontrado"}, status_code=404)
+
+        item = next((i for i in embale.itens if i.id == item_id), None)
+        if not item:
+            return JSONResponse({"erro": "Item nÃ£o encontrado neste inbound"}, status_code=404)
+        if item.baixa_aplicada == 1:
+            return JSONResponse({"erro": "Este item jÃ¡ teve a baixa aplicada"}, status_code=400)
+
+        ja_reservado = float(item.quantidade_baixada or 0)
+        if quantidade_full < ja_reservado:
+            return JSONResponse({
+                "erro": f"NÃ£o dÃ¡ para reduzir abaixo de {ja_reservado:g}, porque essa quantidade jÃ¡ foi reservada/baixada."
+            }, status_code=400)
+
+        item.quantidade_baixar = quantidade_full
+        if item.olist_estoque_antes is not None:
+            item.falta = max(0.0, quantidade_full - float(item.olist_estoque_antes or 0))
+        db.add(item)
+        db.commit()
+
+        return JSONResponse({
+            "sucesso": True,
+            "item_id": item.id,
+            "quantidade_full": quantidade_full,
+            "snapshot": _resumo_revisao_salva_item(item),
+        })
     except Exception as e:
         db.rollback()
         return JSONResponse({"erro": str(e)}, status_code=500)
@@ -2565,8 +2782,13 @@ async def balancear_item_embale(request: Request):
         produto_id = item.olist_produto_id
         estoque_antes = olist.obter_estoque_produto(produto_id) or 0
 
-        # Quantidade a descontar do FULL
-        qtd_full = item.quantidade_separada or 0
+        # Quantidade planejada para o FULL (editavel na revisao)
+        qtd_full = _quantidade_planejada_full(item)
+
+        if qtd_full > quantidade_real:
+            return JSONResponse({
+                "erro": f"O FULL estÃ¡ planejado para {qtd_full:g} un, mas o estoque real conferido foi {quantidade_real:g}. Ajuste o valor de 'Vai pro FULL' antes do balanÃ§o."
+            }, status_code=400)
 
         # 1. Atualizar Olist para quantidade_real (balanço completo)
         # tipo="B" é ABSOLUTO na Tiny: o valor enviado VIRA o estoque atual.
@@ -2585,6 +2807,8 @@ async def balancear_item_embale(request: Request):
         baixa_resultado = _aplicar_baixa_item(db, item, embale, qtd_override=qtd_full)
 
         # 3. Atualizar o item como balanceado
+        item.quantidade_baixar = qtd_full
+        item.falta = max(0.0, qtd_full - quantidade_real)
         item.saldo_disponivel = max(0, quantidade_real - qtd_full)
         item.foi_balanceado = 1
         item.data_balanceamento = datetime.utcnow()
@@ -2805,12 +3029,13 @@ async def ml_status(request: Request):
 async def ml_anuncios(request: Request):
     """GET /api/ml/anuncios?status=active&offset=0&limit=50 — lista anúncios do ML (somente leitura)."""
     status = request.query_params.get("status", "active")
+    force_refresh = request.query_params.get("force_refresh", "").strip().lower() in {"1", "true", "yes", "sim"}
     try:
         offset = int(request.query_params.get("offset", 0))
         limit = int(request.query_params.get("limit", 50))
     except (TypeError, ValueError):
         offset, limit = 0, 50
-    resultado = ml.listar_anuncios(status=status, offset=offset, limit=limit)
+    resultado = ml.listar_anuncios(status=status, offset=offset, limit=limit, force_refresh=force_refresh)
     code = 200 if not resultado.get("erro") else 502
     return JSONResponse(resultado, status_code=code, headers={"Cache-Control": "no-store"})
 
@@ -2827,11 +3052,25 @@ async def ml_precificacao(request: Request):
     return JSONResponse(ml.precificacao(price, category_id), headers={"Cache-Control": "no-store"})
 
 
+async def ml_margens(request: Request):
+    """POST /api/ml/margens {"skus":[...]} — margem por SKU (preço/frete/tarifa reais
+    do ML, do cache). Usado pelo Catálogo para mostrar a margem dos nossos anúncios."""
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    skus = body.get("skus") if isinstance(body, dict) else None
+    if skus is not None and not isinstance(skus, list):
+        skus = None
+    return JSONResponse(ml.margens_por_sku(skus), headers={"Cache-Control": "no-store"})
+
+
 async def ml_anuncio_detalhes(request: Request):
     item_id = request.path_params.get("item_id")
     if not item_id:
         return JSONResponse({"erro": "item_id obrigatório"}, status_code=400)
-    result = ml.obter_anuncio_completo(item_id)
+    force_refresh = request.query_params.get("force_refresh", "").strip().lower() in {"1", "true", "yes", "sim"}
+    result = ml.obter_anuncio_completo(item_id, force_refresh=force_refresh)
     code = 200 if not result.get("erro") else 502
     return JSONResponse(result, status_code=code, headers={"Cache-Control": "no-store"})
 
@@ -2887,6 +3126,83 @@ async def ml_anuncio_dimensoes(request: Request):
     if not all([largura_cm, altura_cm, comprimento_cm, peso_g]):
         return JSONResponse({"erro": "Todos os campos de dimensões são obrigatórios"}, status_code=400)
     result = ml.atualizar_dimensoes(item_id, largura_cm, altura_cm, comprimento_cm, peso_g, package_type)
+    code = 200 if not result.get("erro") else int(result.get("status_code") or 502)
+    return JSONResponse(result, status_code=code)
+
+
+async def ml_anuncio_precos_quantidade(request: Request):
+    """GET lê os tiers de atacado B2B; POST cria/atualiza (lista vazia remove)."""
+    item_id = request.path_params.get("item_id")
+    if not item_id:
+        return JSONResponse({"erro": "item_id obrigatório"}, status_code=400)
+    if request.method == "GET":
+        result = ml.obter_precos_quantidade(item_id)
+        code = 200 if not result.get("erro") else 502
+        return JSONResponse(result, status_code=code, headers={"Cache-Control": "no-store"})
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"erro": "JSON inválido"}, status_code=400)
+    tiers = body.get("tiers")
+    if not isinstance(tiers, list):
+        return JSONResponse({"erro": "tiers deve ser uma lista"}, status_code=400)
+    result = ml.salvar_precos_quantidade(item_id, tiers)
+    code = 200 if not result.get("erro") else int(result.get("status_code") or 502)
+    return JSONResponse(result, status_code=code)
+
+
+async def ml_anuncio_preco_resumo(request: Request):
+    """GET — valor cheio + valor promocional efetivo do anúncio (para o balão)."""
+    item_id = request.path_params.get("item_id")
+    if not item_id:
+        return JSONResponse({"erro": "item_id obrigatório"}, status_code=400)
+    force_refresh = request.query_params.get("force_refresh", "").strip().lower() in {"1", "true", "yes", "sim"}
+    result = ml.resumo_preco(item_id, force_refresh=force_refresh)
+    code = 200 if not result.get("erro") else 502
+    return JSONResponse(result, status_code=code, headers={"Cache-Control": "no-store"})
+
+
+async def ml_sync_cache(request: Request):
+    """
+    POST /api/ml/sync
+    Atualiza o espelho local do Mercado Livre.
+    """
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+
+    item_id = str(body.get("item_id") or "").strip()
+    status = str(body.get("status") or "active").strip() or "active"
+    try:
+        offset = int(body.get("offset", 0) or 0)
+        limit = int(body.get("limit", 50) or 50)
+    except (TypeError, ValueError):
+        offset, limit = 0, 50
+
+    full = str(body.get("full") or "").strip().lower() in {"1", "true", "yes", "sim"}
+    if item_id:
+        result = ml.sync_item(item_id, force=True)
+    else:
+        # sincroniza o catálogo (incremental, ou completo se full=true) e devolve a
+        # lista já do cache + o resumo do que o sync fez (observabilidade).
+        sync = ml.sync_catalogo(status=status, force_full=full)
+        result = ml.listar_anuncios(status=status, offset=offset, limit=limit, force_refresh=False)
+        result["sync"] = sync
+    code = 200 if not result.get("erro") else 502
+    return JSONResponse(result, status_code=code, headers={"Cache-Control": "no-store"})
+
+
+async def ml_anuncio_aplicar_preco(request: Request):
+    """POST — aplica o preço base ao anúncio no Mercado Livre."""
+    item_id = request.path_params.get("item_id")
+    if not item_id:
+        return JSONResponse({"erro": "item_id obrigatório"}, status_code=400)
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"erro": "JSON inválido"}, status_code=400)
+    result = ml.aplicar_preco(item_id, body.get("preco"))
     code = 200 if not result.get("erro") else int(result.get("status_code") or 502)
     return JSONResponse(result, status_code=code)
 
@@ -3043,14 +3359,19 @@ routes = [
     Route("/api/notas-fiscais/{id:int}/frete", atualizar_frete_nota, methods=["POST"]),
     Route("/api/precos-venda", precos_venda, methods=["GET", "POST"]),
     Route("/api/ml/status", ml_status, methods=["GET"]),
+    Route("/api/ml/sync", ml_sync_cache, methods=["POST"]),
     Route("/api/ml/anuncios", ml_anuncios, methods=["GET"]),
     Route("/api/ml/anuncios/{item_id:str}", ml_anuncio_detalhes, methods=["GET"]),
     Route("/api/ml/anuncios/{item_id:str}/description", ml_anuncio_descricao, methods=["POST"]),
     Route("/api/ml/anuncios/{item_id:str}/attributes", ml_anuncio_atributos, methods=["POST"]),
     Route("/api/ml/anuncios/{item_id:str}/dimensions", ml_anuncio_dimensoes, methods=["POST"]),
+    Route("/api/ml/anuncios/{item_id:str}/precos-quantidade", ml_anuncio_precos_quantidade, methods=["GET", "POST"]),
+    Route("/api/ml/anuncios/{item_id:str}/preco-resumo", ml_anuncio_preco_resumo, methods=["GET"]),
+    Route("/api/ml/anuncios/{item_id:str}/preco", ml_anuncio_aplicar_preco, methods=["POST"]),
     Route("/api/ml/anuncios/{item_id:str}/pictures/upload", ml_anuncio_imagens_upload, methods=["POST"]),
     Route("/api/ml/anuncios/{item_id:str}/pictures", ml_anuncio_imagens_reordenar, methods=["POST"]),
     Route("/api/ml/precificacao", ml_precificacao, methods=["GET"]),
+    Route("/api/ml/margens", ml_margens, methods=["POST"]),
     Route("/api/ml/conectar", ml_conectar, methods=["GET"]),
     Route("/api/ml/callback", ml_callback, methods=["GET"]),
     Route("/api/upload-nfe", upload_nfe, methods=["POST"]),
@@ -3100,6 +3421,7 @@ routes = [
     Route("/api/embaldes/{embale_id}/confirmar-baixa", confirmar_baixa_embale, methods=["POST"]),
     Route("/api/embaldes/{embale_id}/itens/{item_id}/baixa", baixa_item_individual, methods=["POST"]),
     Route("/api/embaldes/{embale_id}/itens/{item_id}/vincular", vincular_item_embale, methods=["POST"]),
+    Route("/api/embaldes/{embale_id}/itens/{item_id}/quantidade-full", ajustar_quantidade_full_embale, methods=["POST"]),
     Route("/api/embaldes/{embale_id}/itens/{item_id}/balancear", balancear_item_embale, methods=["POST"]),
     Route("/api/embaldes/{embale_id}/encerrar", encerrar_embale, methods=["POST"]),
 ]
