@@ -111,10 +111,13 @@ export function Precificador({
   const [frete, setFrete] = useState(freteInicial ? String(freteInicial) : '')
   const [custo, setCusto] = useState(resumoSalvo?.custo ? String(resumoSalvo.custo) : (custoInicial ? String(custoInicial) : ''))
   const [imposto, setImposto] = useState(resumoSalvo?.impostoPct ? String(resumoSalvo.impostoPct) : carregarImposto())
+  const [precoOriginalLive, setPrecoOriginalLive] = useState<number>(Number(precoOriginal || precoInicial || 0))
+  const [precoPromocionalLive, setPrecoPromocionalLive] = useState<number>(Number(precoInicial || 0))
   const [classicoFee, setClassicoFee] = useState<TarifaInfo | null>(null)
   const [premiumFee, setPremiumFee] = useState<TarifaInfo | null>(null)
   const [carregandoFee, setCarregandoFee] = useState(false)
   const [carregandoFrete, setCarregandoFrete] = useState(false)
+  const [carregandoPrecoMl, setCarregandoPrecoMl] = useState(false)
   const [salvandoResumo, setSalvandoResumo] = useState(false)
   const [aplicando, setAplicando] = useState(false)
   const [aplicarMsg, setAplicarMsg] = useState<{ tipo: 'ok' | 'erro'; texto: string } | null>(null)
@@ -124,6 +127,37 @@ export function Precificador({
   useEffect(() => {
     setFrete(freteInicial ? String(freteInicial) : '')
   }, [freteInicial])
+
+  useEffect(() => {
+    if (!itemId) return
+    let ativo = true
+
+    async function carregarPrecoPromocionalAtual() {
+      setCarregandoPrecoMl(true)
+      try {
+        const r = await fetch(`${API_BASE}/api/ml/anuncios/${itemId}/preco-resumo`, { cache: 'no-store' })
+        const d = await r.json()
+        if (!ativo || !r.ok || d.erro) return
+        const original = Number(d?.cheio || precoOriginal || precoInicial || 0)
+        const promocional = Number(d?.promocional || precoInicial || 0)
+        setPrecoOriginalLive(original)
+        setPrecoPromocionalLive(promocional)
+        if (!resumoSalvo && promocional > 0) {
+          setValorVenda(String(promocional))
+        }
+      } catch {
+        if (ativo) {
+          setPrecoOriginalLive(Number(precoOriginal || precoInicial || 0))
+          setPrecoPromocionalLive(Number(precoInicial || 0))
+        }
+      } finally {
+        if (ativo) setCarregandoPrecoMl(false)
+      }
+    }
+
+    carregarPrecoPromocionalAtual()
+    return () => { ativo = false }
+  }, [itemId, precoInicial, precoOriginal, resumoSalvo])
 
   useEffect(() => {
     if (!itemId) return
@@ -195,8 +229,8 @@ export function Precificador({
 
   const buildSnapshot = (): PricingSnapshot => ({
     itemId: itemId || '',
-    precoOriginal: Number(precoOriginal || precoInicial || 0),
-    precoPromocional: Number(precoInicial || 0),
+    precoOriginal: Number(precoOriginalLive || precoOriginal || precoInicial || 0),
+    precoPromocional: Number(precoPromocionalLive || precoInicial || 0),
     valorVenda: v,
     frete: num(frete),
     custo: num(custo),
@@ -276,7 +310,7 @@ export function Precificador({
             <h3 style={{ margin: 0 }}>Precificador de Anuncio</h3>
             <div style={{ fontSize: '0.85rem', color: '#555', marginTop: '0.35rem' }}>{titulo}</div>
             <div style={{ fontSize: '0.78rem', color: '#999', marginTop: '0.15rem' }}>
-              {sku ? `SKU: ${sku}` : ''}{precoInicial ? `  |  Preco atual: ${brl(precoInicial)}` : ''}
+              {sku ? `SKU: ${sku}` : ''}{precoPromocionalLive ? `  |  Preco atual: ${brl(precoPromocionalLive)}` : ''}{carregandoPrecoMl ? '  |  sincronizando promoção ML...' : ''}
             </div>
           </div>
           <button onClick={onClose} style={{ background: 'none', border: 'none', fontSize: '1.5rem', cursor: 'pointer', color: '#999' }}>x</button>

@@ -499,11 +499,12 @@ class MLIntegration:
 
         desc = self._get(f"/items/{item_id}/description") or {}
         prices = self._get(f"/items/{item_id}/prices") or {}
-        sale_price = self._get(f"/items/{item_id}/sale_price") or {}
+        sale_price = self._get(f"/items/{item_id}/sale_price", {"quantity": 1}) or {}
         frete = self._get(f"/users/{self.user_id}/shipping_options/free", {"item_id": item_id, "verbose": "true"}) or {}
         zip_code = (((body.get("seller_address") or {}).get("zip_code")) or os.getenv("ML_DEFAULT_ZIP_CODE") or "").strip()
         shipping_options = self._get(f"/items/{item_id}/shipping_options", {"zip_code": zip_code}) if zip_code else None
-        precificacao = self.precificacao(float(body.get("price") or 0), body.get("category_id"))
+        preco_efetivo = sale_price.get("amount") if isinstance(sale_price, dict) and sale_price.get("amount") is not None else body.get("price")
+        precificacao = self.precificacao(float(preco_efetivo or 0), body.get("category_id"))
 
         atributos = []
         for attr in (body.get("attributes") or []):
