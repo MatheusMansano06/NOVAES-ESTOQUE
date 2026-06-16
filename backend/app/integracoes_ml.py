@@ -155,6 +155,7 @@ class MLIntegration:
         self.enabled = bool(self.client_id and self.client_secret)
 
         self._lock = threading.Lock()
+        self._catalog_sync_lock = threading.Lock()
         self._ultima_req = 0.0
         self._intervalo_min = 60.0 / 240.0  # margem sob o limite do ML
 
@@ -712,9 +713,11 @@ class MLIntegration:
             q = db.query(MercadoLivreItemCache)
             if status and status != "todos":
                 q = q.filter(MercadoLivreItemCache.status == status)
-            rows = q.order_by(MercadoLivreItemCache.synced_at.desc(), MercadoLivreItemCache.item_id.asc()).offset(offset).limit(limit).all()
+            # Ordenação estável (item_id) p/ paginação consistente; total vem da
+            # contagem LOCAL — o catálogo inteiro fica espelhado no cache.
+            total = q.count()
+            rows = q.order_by(MercadoLivreItemCache.item_id.asc()).offset(offset).limit(limit).all()
             anuncios = [self._cache_to_simple_item(row) for row in rows]
-            total = state.remote_total if state and state.remote_total is not None else q.count()
             return {
                 "total": total,
                 "offset": offset,
@@ -726,6 +729,7 @@ class MLIntegration:
                     "synced_at": state.synced_at.isoformat() if state and state.synced_at else None,
                     "expires_at": state.cache_expires_at.isoformat() if state and state.cache_expires_at else None,
                     "stale": not self._is_fresh(state.cache_expires_at if state else None),
+                    "sincronizando": self._catalog_sync_lock.locked(),
                 },
             }
         finally:
@@ -848,6 +852,155 @@ class MLIntegration:
                 "stale": False,
             },
         }
+
+    # ---------- sincronização de catálogo (cache-first + incremental) ----------
+    def _buscar_todos_ids(self, status: str) -> Optional[List[str]]:
+        """Todos os ids de anúncios do vendedor para um status (paginando a busca)."""
+        if not self.user_id:
+            return None
+        ids: List[str] = []
+        offset = 0
+        while True:
+            params = {"offset": offset, "limit": 100}
+            if status and status != "todos":
+                params["status"] = status
+            busca = self._get(f"/users/{self.user_id}/items/search", params)
+            if busca is None:
+                return ids or None
+            results = busca.get("results", []) or []
+            ids.extend(str(i) for i in results)
+            total = (busca.get("paging") or {}).get("total", len(ids))
+            offset += 100
+            # offset/limit da busca do ML é limitado a 1000; acima disso usar scan.
+            if not results or offset >= total or offset >= 1000:
+                break
+        return ids
+
+    def _last_updated_map(self, ids: List[str]) -> Dict[str, Optional[datetime]]:
+        """Mapa item_id -> last_updated (multiget leve, só 2 campos)."""
+        out: Dict[str, Optional[datetime]] = {}
+        ids = [str(i) for i in ids if i]
+        for i in range(0, len(ids), 20):
+            lote = ids[i:i + 20]
+            res = self._get("/items", {"ids": ",".join(lote), "attributes": "id,last_updated"})
+            if not res:
+                continue
+            for entry in res:
+                if entry.get("code") == 200 and entry.get("body"):
+                    body = entry["body"]
+                    out[str(body.get("id"))] = self._parse_dt_iso(body.get("last_updated"))
+        return out
+
+    def _sync_itens(self, db: Session, ids: List[str]) -> int:
+        """Busca o detalhe de lista (multiget) e faz upsert no cache p/ os ids dados."""
+        ids = [str(i) for i in ids if i]
+        if not ids:
+            return 0
+        atributos = "id,title,price,original_price,currency_id,available_quantity,sold_quantity,status,listing_type_id,seller_custom_field,attributes,shipping,thumbnail,permalink,category_id,pictures,sale_terms,tags,last_updated"
+        body_by_id: Dict[str, Dict[str, Any]] = {}
+        simples: List[Dict[str, Any]] = []
+        for i in range(0, len(ids), 20):
+            lote = ids[i:i + 20]
+            res = self._get("/items", {"ids": ",".join(lote), "attributes": atributos})
+            if not res:
+                continue
+            for entry in res:
+                if entry.get("code") == 200 and entry.get("body"):
+                    body = entry["body"]
+                    body_by_id[str(body.get("id"))] = body
+                    simples.append(self._simplificar_item(body))
+        custos_frete = self._custos_frete_gratis([s["id"] for s in simples if s.get("frete_gratis")])
+        n = 0
+        for s in simples:
+            body = body_by_id.get(str(s.get("id")))
+            if not body:
+                continue
+            frete = custos_frete.get(str(s.get("id")))
+            shipping_fee = {"list_cost": frete.get("valor"), "currency_id": frete.get("moeda")} if frete else None
+            row = self._upsert_item_cache(db, body, shipping_fee=shipping_fee, cache_ttl_seconds=self.LIST_CACHE_TTL_SECONDS)
+            if row.preco_promocional is None:
+                row.preco_promocional = row.preco
+            n += 1
+        return n
+
+    def sync_catalogo(self, status: str = "active", force_full: bool = False) -> Dict[str, Any]:
+        """Espelha o catálogo INTEIRO do status no cache local, mas só busca o detalhe
+        dos anúncios que realmente mudaram no ML (compara last_updated). É a base do
+        'só atualiza quando o Mercado Livre muda'. Roda no polling em segundo plano.
+        """
+        if not self.user_id:
+            return {"erro": "ML_USER_ID não configurado", "total": 0, "atualizados": 0}
+        if not self._catalog_sync_lock.acquire(blocking=False):
+            return {"skipped": True, "motivo": "sync já em andamento"}
+        try:
+            ids = self._buscar_todos_ids(status)
+            if ids is None:
+                return {"erro": "Falha ao consultar o Mercado Livre (token/conexão)", "total": 0, "atualizados": 0}
+            id_set = set(ids)
+
+            db = self._db()
+            try:
+                existentes = {
+                    r.item_id: r
+                    for r in db.query(
+                        MercadoLivreItemCache.item_id,
+                        MercadoLivreItemCache.ml_last_updated,
+                        MercadoLivreItemCache.status,
+                    ).all()
+                }
+                if force_full:
+                    mudados = list(ids)
+                else:
+                    lu_map = self._last_updated_map(ids)
+                    mudados = []
+                    for iid in ids:
+                        row = existentes.get(iid)
+                        novo = lu_map.get(iid)
+                        if row is None or row.ml_last_updated is None:
+                            mudados.append(iid)
+                        elif novo is not None and novo > row.ml_last_updated:
+                            mudados.append(iid)
+
+                # itens que saíram deste status (pausados/encerrados): re-sincroniza
+                # para atualizar o status guardado no cache.
+                sumidos = [
+                    iid for iid, row in existentes.items()
+                    if row.status == status and iid not in id_set
+                ] if status and status != "todos" else []
+
+                atualizados = 0
+                alvos = mudados + sumidos
+                for i in range(0, len(alvos), 100):
+                    atualizados += self._sync_itens(db, alvos[i:i + 100])
+                    db.commit()
+
+                self._set_sync_state(db, self._sync_scope(status), "items", status, len(ids), 0, len(ids), self.LIST_CACHE_TTL_SECONDS)
+                db.commit()
+                return {
+                    "ok": True,
+                    "status": status,
+                    "total": len(ids),
+                    "atualizados": atualizados,
+                    "recategorizados": len(sumidos),
+                    "modo": "full" if force_full else "incremental",
+                }
+            except Exception as e:
+                db.rollback()
+                print(f"[ML] sync_catalogo erro: {e}")
+                return {"erro": str(e), "total": 0, "atualizados": 0}
+            finally:
+                db.close()
+        finally:
+            self._catalog_sync_lock.release()
+
+    def _sync_catalogo_async(self, status: str = "active") -> None:
+        """Dispara sync_catalogo em thread (usado no cold start, sem travar a request)."""
+        def run():
+            try:
+                self.sync_catalogo(status=status)
+            except Exception as e:
+                print(f"[ML] sync_catalogo async erro: {e}")
+        threading.Thread(target=run, daemon=True).start()
 
     def precificacao(self, price: float, category_id: Optional[str] = None) -> Dict:
         """Tarifa de venda real do ML (Clássico=gold_special, Premium=gold_pro) p/ um preço/categoria."""
@@ -1411,23 +1564,24 @@ class MLIntegration:
         return {"ok": True, "aplicado": True, "preco_anterior": preco_anterior, "preco_novo": preco}
 
     def listar_anuncios(self, status: str = "active", offset: int = 0, limit: int = 50, force_refresh: bool = False) -> Dict:
-        db = self._db()
-        try:
-            scope = self._sync_scope(status)
-            state = self._sync_state_query(db, scope)
-            tem_cache = db.query(MercadoLivreItemCache.id).first() is not None
-            cache_fresco = bool(state and self._is_fresh(state.cache_expires_at))
-        finally:
-            db.close()
-
-        if force_refresh or not cache_fresco:
-            synced = self._sync_list_page(status=status, offset=offset, limit=limit)
-            if synced.get("erro") and tem_cache:
-                fallback = self._listar_anuncios_cache(status=status, offset=offset, limit=limit)
-                fallback["cache"]["fallback_apos_erro"] = True
-                fallback["cache"]["erro_sync"] = synced.get("erro")
-                return fallback
-            return synced
+        """Lista anúncios servindo do cache local (SQLite). Abrir a página NÃO bate
+        na API — a atualização vem do polling incremental em segundo plano.
+        force_refresh dispara uma sincronização incremental na hora.
+        """
+        if force_refresh:
+            self.sync_catalogo(status=status, force_full=False)
+        else:
+            db = self._db()
+            try:
+                q = db.query(MercadoLivreItemCache.id)
+                if status and status != "todos":
+                    q = q.filter(MercadoLivreItemCache.status == status)
+                tem_cache = q.first() is not None
+            finally:
+                db.close()
+            # cold start: cache vazio p/ este status -> popula em background e já responde
+            if not tem_cache:
+                self._sync_catalogo_async(status)
         return self._listar_anuncios_cache(status=status, offset=offset, limit=limit)
 
 

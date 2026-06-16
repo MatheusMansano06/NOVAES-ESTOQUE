@@ -2944,8 +2944,13 @@ async def ml_sync_cache(request: Request):
     except (TypeError, ValueError):
         offset, limit = 0, 50
 
+    full = str(body.get("full") or "").strip().lower() in {"1", "true", "yes", "sim"}
     if item_id:
         result = ml.sync_item(item_id, force=True)
+    elif full:
+        # rebuild completo do catálogo (re-busca o detalhe de todos os anúncios)
+        ml.sync_catalogo(status=status, force_full=True)
+        result = ml.listar_anuncios(status=status, offset=offset, limit=limit, force_refresh=False)
     else:
         result = ml.listar_anuncios(status=status, offset=offset, limit=limit, force_refresh=True)
     code = 200 if not result.get("erro") else 502
