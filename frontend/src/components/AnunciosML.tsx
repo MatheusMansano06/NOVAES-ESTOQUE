@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
-import { Precificador, type PricingSnapshot, loadPricingSummaryMap } from './Precificador'
+import { Precificador, type PricingSnapshot, loadPricingSummaryMap, loadPriceHistory, type PriceHistoryEntry } from './Precificador'
 import { MLAnuncioEditorModal } from './MLAnuncioEditorModal'
 
 const API_BASE = import.meta.env.VITE_API_URL ?? 'http://127.0.0.1:8000'
@@ -43,7 +43,7 @@ interface Anuncio {
 }
 
 interface Props { onVoltar: () => void }
-type EditorMode = 'descricao' | 'flex' | 'atacado' | 'imagens' | 'ficha' | 'dimensoes'
+type EditorMode = 'descricao' | 'imagens' | 'ficha' | 'dimensoes' | 'atacado' | 'flex'
 
 const ABAS: { id: string; label: string }[] = [
   { id: 'active', label: 'Ativos' },
@@ -59,7 +59,20 @@ const textoFrete = (a: Anuncio) => {
   return 'nao gratis / sem subsidio'
 }
 
+const logisticaInfo = (a: Anuncio): { txt: string; sub: string } => {
+  if (a.full) return { txt: 'Full', sub: 'ML armazena e envia' }
+  if (a.flex) return { txt: 'Flex', sub: 'voce envia no mesmo dia' }
+  if (a.logistica === 'cross_docking') return { txt: 'Cross-docking', sub: 'coleta agendada pelo ML' }
+  if (a.logistica === 'xd_drop_off' || a.logistica === 'drop_off') return { txt: 'Agencia', sub: 'postagem em agencia' }
+  return { txt: a.logistica || 'Padrao', sub: 'Mercado Envios' }
+}
+
 const percentual = (parte: number, total: number) => total > 0 ? ((parte / total) * 100).toFixed(2) : '0.00'
+
+interface LivePriceSummary {
+  cheio: number | null
+  promocional: number | null
+}
 
 export function AnunciosML({ onVoltar }: Props) {
   const [aba, setAba] = useState('active')
@@ -73,7 +86,6 @@ export function AnunciosML({ onVoltar }: Props) {
   const [precificando, setPrecificando] = useState<Anuncio | null>(null)
   const [editando, setEditando] = useState<{ anuncio: Anuncio; mode: EditorMode } | null>(null)
   const [resumos, setResumos] = useState<Record<string, PricingSnapshot>>({})
-  const [hoveredResumoId, setHoveredResumoId] = useState<string | null>(null)
 
   useEffect(() => {
     setResumos(loadPricingSummaryMap())
@@ -187,40 +199,35 @@ export function AnunciosML({ onVoltar }: Props) {
                       <div style={{ fontSize: '0.7rem', color: '#999' }}>Vendidos</div>
                       <div style={{ fontWeight: 700, color: '#1a1a1a' }}>{a.vendidos}</div>
                     </div>
-                    <div
-                      style={{
-                        position: 'relative',
-                        textAlign: 'right',
-                        minWidth: '120px',
-                        marginLeft: 'auto',
-                        padding: resumo ? '.45rem .6rem' : 0,
-                        borderRadius: resumo ? '12px' : 0,
-                        background: resumo ? '#f7f3ff' : 'transparent',
-                        border: resumo ? '1px solid #dfd0ff' : 'none',
-                        cursor: resumo ? 'default' : 'inherit',
-                      }}
-                      onMouseEnter={() => resumo && setHoveredResumoId(a.id)}
-                      onMouseLeave={() => setHoveredResumoId(prev => prev === a.id ? null : prev)}
-                    >
-                      {a.preco_original && a.preco_original > a.preco && (
-                        <div style={{ fontSize: '0.75rem', color: '#999', textDecoration: 'line-through' }}>{brl(a.preco_original)}</div>
-                      )}
-                      <div style={{ fontWeight: 700, fontSize: '1.05rem', color: '#1a1a1a' }}>{brl(a.preco)}</div>
-                      <div style={{ fontSize: '0.72rem', fontWeight: 600, color: corStatus(a.status) }}>{labelStatus(a.status)}</div>
-                      {resumo && (
-                        <div style={{ marginTop: '.2rem', fontSize: '.7rem', color: '#6941c6', fontWeight: 700 }}>Resumo salvo</div>
-                      )}
-                      {resumo && hoveredResumoId === a.id && (
-                        <ResumoTooltip anuncio={a} resumo={resumo} />
-                      )}
-                    </div>
+                    <PriceBubble anuncio={a} resumo={resumo} statusCor={corStatus(a.status)} statusLabel={labelStatus(a.status)} />
                   </div>
 
-                  <div style={{ marginTop: '0.9rem', paddingTop: '0.9rem', borderTop: '1px solid #f0f0f0', display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '0.75rem' }}>
-                    <InfoBox label="Frete do anuncio" valor={textoFrete(a)} detalhe={a.frete_gratis ? 'taxa direta do ML' : 'sem frete gratis'} />
-                    <InfoBox label="Preco de atacado" valor={a.preco_atacado?.valor || '--'} detalhe={a.preco_atacado?.nome || 'nao informado'} />
-                    <InfoBox label="Imagens" valor={`${a.imagens_total || 0}`} detalhe={(a.imagens_total || 0) === 1 ? 'imagem cadastrada' : 'imagens cadastradas'} />
-                    <InfoBox label="Dimensoes" valor={a.dimensoes?.texto || '--'} detalhe={a.dimensoes?.origem || 'nao retornado pelo ML'} />
+                  <div style={{ marginTop: '0.9rem', paddingTop: '0.9rem', borderTop: '1px solid #f0f0f0', display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))', gap: '0.6rem' }}>
+                    <InfoCard
+                      icon="🚚" tom="#2563eb"
+                      label="Frete do anuncio"
+                      valor={textoFrete(a)}
+                      sub={a.frete_gratis ? 'gratis (subsidio ML)' : 'por conta do comprador'}
+                    />
+                    <InfoCard
+                      icon="📍" tom="#7c4dff"
+                      label="Logistica"
+                      valor={logisticaInfo(a).txt}
+                      sub={logisticaInfo(a).sub}
+                    />
+                    <InfoCard
+                      icon="🖼️" tom="#0f9d8f"
+                      label="Imagens"
+                      valor={`${a.imagens_total || 0} ${(a.imagens_total || 0) === 1 ? 'foto' : 'fotos'}`}
+                      sub={(a.imagens_total || 0) < 3 ? 'recomendado: 3+' : 'cadastradas'}
+                    />
+                    <InfoCard
+                      icon="📦" tom="#d9730d"
+                      label="Dimensoes"
+                      valor={a.dimensoes?.texto || '--'}
+                      sub={a.full ? 'medido pelo ML (Full)' : (a.dimensoes ? 'declarado pelo vendedor' : 'nao informado')}
+                      badge={a.full ? 'travado' : undefined}
+                    />
                   </div>
 
                   <div style={{ marginTop: '.9rem', display: 'flex', gap: '.55rem', flexWrap: 'wrap' }}>
@@ -283,44 +290,140 @@ export function AnunciosML({ onVoltar }: Props) {
 }
 
 function ResumoTooltip({ anuncio, resumo }: { anuncio: Anuncio; resumo: PricingSnapshot }) {
-  const precoOriginal = resumo.precoOriginal > 0 ? resumo.precoOriginal : (anuncio.preco_original || anuncio.preco)
-  const precoPromocional = resumo.precoPromocional > 0 ? resumo.precoPromocional : anuncio.preco
+  const [live, setLive] = useState<LivePriceSummary | null>(null)
+  const historico = loadPriceHistory(anuncio.id)
+
+  useEffect(() => {
+    let ativo = true
+    fetch(`${API_BASE}/api/ml/anuncios/${anuncio.id}/preco-resumo`, { cache: 'no-store' })
+      .then(r => r.json())
+      .then(d => { if (ativo && !d.erro) setLive({ cheio: d.cheio ?? null, promocional: d.promocional ?? null }) })
+      .catch(() => { /* mantem fallback do snapshot */ })
+    return () => { ativo = false }
+  }, [anuncio.id])
+
+  const precoOriginal = live?.cheio ?? (resumo.precoOriginal > 0 ? resumo.precoOriginal : (anuncio.preco_original || anuncio.preco))
+  const precoPromocional = live?.promocional ?? (resumo.precoPromocional > 0 ? resumo.precoPromocional : anuncio.preco)
+  const temPromo = precoPromocional < precoOriginal - 0.01
 
   return (
-    <div style={{ position: 'absolute', right: 0, top: 'calc(100% + 12px)', width: '290px', background: '#4e3a73', color: '#fff', borderRadius: '8px', padding: '.9rem 1rem', boxShadow: '0 18px 32px rgba(41, 26, 77, 0.35)', zIndex: 30, textAlign: 'left' }}>
-      <LinhaResumo label="Preco Original" valor={brl(precoOriginal)} />
-      <LinhaResumo label="Preco Promocional" valor={brl(precoPromocional)} />
-      <LinhaResumo label="Frete" valor={`-${brl(resumo.frete)}`} extra={`(${percentual(resumo.frete, precoPromocional)}%)`} />
-      <LinhaResumo label="Tarifa de Venda" valor={`-${brl(resumo.tarifa)}`} extra={`(${resumo.tarifaPct.toFixed(2)}%)`} />
-      <div style={{ height: 1, background: 'rgba(255,255,255,0.22)', margin: '.55rem 0' }} />
-      <LinhaResumo label="Margem Contribuicao" valor={brl(resumo.margem)} extra={`(${resumo.margemPct.toFixed(2)}%)`} strong />
-      <div style={{ marginTop: '.55rem', fontSize: '.72rem', lineHeight: 1.45, color: '#e8dfff' }}>
-        <div>* Frete puxado direto do anuncio no Mercado Livre</div>
-        <div>* Margem calculada com base no preco promocional salvo</div>
-      </div>
-      <div style={{ position: 'absolute', top: -8, right: 32, width: 16, height: 16, background: '#4e3a73', transform: 'rotate(45deg)' }} />
+    <div style={{ position: 'absolute', right: 0, top: 'calc(100% + 10px)', width: '264px', background: '#fff', color: '#1d2939', border: '1px solid #e4e7ec', borderRadius: '10px', padding: '.85rem .95rem', boxShadow: '0 8px 24px rgba(16,24,40,.12)', zIndex: 30, textAlign: 'left' }}>
+      <LinhaResumo label="Preco original" valor={brl(precoOriginal)} risco={temPromo} />
+      <LinhaResumo label="Preco promocional" valor={brl(precoPromocional)} cor={temPromo ? '#067647' : undefined} />
+      <LinhaResumo label="Frete" valor={`-${brl(resumo.frete)}`} extra={`${percentual(resumo.frete, precoPromocional)}%`} cor="#b42318" />
+      <LinhaResumo label="Tarifa de venda" valor={`-${brl(resumo.tarifa)}`} extra={`${resumo.tarifaPct.toFixed(2)}%`} cor="#b42318" />
+      <div style={{ height: 1, background: '#eef0f3', margin: '.5rem 0' }} />
+      <LinhaResumo label="Margem contrib." valor={brl(resumo.margem)} extra={`${resumo.margemPct.toFixed(2)}%`} strong cor={resumo.margem >= 0 ? '#067647' : '#b42318'} />
+      {historico.length > 0 && (
+        <div style={{ marginTop: '.6rem', paddingTop: '.55rem', borderTop: '1px solid #eef0f3' }}>
+          <div style={{ fontSize: '.68rem', color: '#98a2b3', textTransform: 'uppercase', letterSpacing: '.03em', marginBottom: '.3rem' }}>Histórico de preço</div>
+          {historico.slice(0, 3).map((h, i) => (
+            <div key={i} style={{ display: 'flex', justifyContent: 'space-between', fontSize: '.74rem', color: '#667085', padding: '.1rem 0' }}>
+              <span>{new Date(h.data).toLocaleDateString('pt-BR')}</span>
+              <span>{brl(h.de)} → <strong style={{ color: '#1d2939' }}>{brl(h.para)}</strong></span>
+            </div>
+          ))}
+        </div>
+      )}
+      <div style={{ marginTop: '.5rem', fontSize: '.68rem', color: '#98a2b3' }}>Preços puxados ao vivo do Mercado Livre.</div>
+      <div style={{ position: 'absolute', top: -6, right: 30, width: 12, height: 12, background: '#fff', borderLeft: '1px solid #e4e7ec', borderTop: '1px solid #e4e7ec', transform: 'rotate(45deg)' }} />
     </div>
   )
 }
 
-function LinhaResumo({ label, valor, extra, strong = false }: { label: string; valor: string; extra?: string; strong?: boolean }) {
+function PriceBubble({ anuncio, resumo, statusCor, statusLabel }: { anuncio: Anuncio; resumo?: PricingSnapshot; statusCor: string; statusLabel: string }) {
+  const [hovered, setHovered] = useState(false)
+  const [live, setLive] = useState<LivePriceSummary | null>(null)
+
+  useEffect(() => {
+    let ativo = true
+    fetch(`${API_BASE}/api/ml/anuncios/${anuncio.id}/preco-resumo`, { cache: 'no-store' })
+      .then(r => r.json())
+      .then(d => {
+        if (!ativo || d.erro) return
+        setLive({ cheio: d.cheio ?? null, promocional: d.promocional ?? null })
+      })
+      .catch(() => { /* fallback para os valores da lista */ })
+    return () => { ativo = false }
+  }, [anuncio.id])
+
+  const precoOriginal = live?.cheio ?? (anuncio.preco_original || anuncio.preco)
+  const precoPromocional = live?.promocional ?? anuncio.preco
+  const temPromo = precoPromocional < precoOriginal - 0.01
+
   return (
-    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '.75rem', padding: '.18rem 0', fontSize: strong ? '.97rem' : '.86rem', fontWeight: strong ? 800 : 700 }}>
-      <span>{label}</span>
-      <span style={{ display: 'flex', gap: '.5rem', alignItems: 'center' }}>
-        <span>{valor}</span>
-        {extra && <span style={{ fontSize: '.78rem', opacity: 0.9 }}>{extra}</span>}
+    <div
+      style={{
+        position: 'relative',
+        minWidth: '148px',
+        marginLeft: 'auto',
+        padding: '.42rem .7rem .48rem',
+        borderRadius: '10px',
+        background: '#fff',
+        border: '1px solid #9fc2ff',
+        boxShadow: hovered ? '0 10px 24px rgba(52,131,250,.18)' : 'none',
+      }}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+    >
+      {temPromo && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: '.35rem', justifyContent: 'flex-start', marginBottom: '.1rem' }}>
+          <span style={{ fontSize: '.75rem' }}>🏷️</span>
+          <span style={{ fontSize: '0.78rem', color: '#98a2b3', textDecoration: 'line-through', fontWeight: 700 }}>{brl(precoOriginal)}</span>
+        </div>
+      )}
+      <div style={{ display: 'flex', alignItems: 'baseline', gap: '.42rem', flexWrap: 'wrap' }}>
+        <span style={{ fontWeight: 800, fontSize: '1.02rem', color: '#1a1a1a' }}>{brl(precoPromocional)}</span>
+        {resumo && (
+          <>
+            <span style={{ color: '#d0d5dd', fontWeight: 700 }}>|</span>
+            <span style={{ fontSize: '.92rem', color: resumo.margem >= 0 ? '#3483fa' : '#b42318', fontWeight: 800 }}>
+              {brl(resumo.margem)}
+            </span>
+            <span style={{ fontSize: '.72rem', color: resumo.margem >= 0 ? '#3483fa' : '#b42318', fontWeight: 700 }}>
+              ({resumo.margemPct.toFixed(2)} %)
+            </span>
+          </>
+        )}
+      </div>
+      <div style={{ marginTop: '.08rem', fontSize: '0.72rem', fontWeight: 700, color: statusCor, textAlign: 'right' }}>{statusLabel}</div>
+      {hovered && resumo && <ResumoTooltip anuncio={anuncio} resumo={resumo} />}
+      {hovered && !resumo && (
+        <div style={{ position: 'absolute', right: 0, top: 'calc(100% + 10px)', width: '248px', background: '#fff', color: '#1d2939', border: '1px solid #e4e7ec', borderRadius: '10px', padding: '.85rem .95rem', boxShadow: '0 8px 24px rgba(16,24,40,.12)', zIndex: 30, textAlign: 'left' }}>
+          <LinhaResumo label="Preco original" valor={brl(precoOriginal)} risco={temPromo} />
+          <LinhaResumo label="Preco promocional" valor={brl(precoPromocional)} cor={temPromo ? '#067647' : undefined} />
+          <div style={{ marginTop: '.45rem', fontSize: '.7rem', color: '#98a2b3' }}>Abra o Precificador e salve um resumo para detalhar frete, tarifa e margem.</div>
+          <div style={{ position: 'absolute', top: -6, right: 30, width: 12, height: 12, background: '#fff', borderLeft: '1px solid #e4e7ec', borderTop: '1px solid #e4e7ec', transform: 'rotate(45deg)' }} />
+        </div>
+      )}
+    </div>
+  )
+}
+
+function LinhaResumo({ label, valor, extra, strong = false, cor, risco = false }: { label: string; valor: string; extra?: string; strong?: boolean; cor?: string; risco?: boolean }) {
+  return (
+    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '.75rem', padding: '.2rem 0' }}>
+      <span style={{ fontSize: '.8rem', color: '#667085', fontWeight: strong ? 700 : 500 }}>{label}</span>
+      <span style={{ display: 'flex', gap: '.45rem', alignItems: 'baseline' }}>
+        <span style={{ fontSize: strong ? '.95rem' : '.85rem', fontWeight: strong ? 800 : 700, color: cor || '#1d2939', textDecoration: risco ? 'line-through' : 'none' }}>{valor}</span>
+        {extra && <span style={{ fontSize: '.72rem', color: '#98a2b3' }}>{extra}</span>}
       </span>
     </div>
   )
 }
 
-function InfoBox({ label, valor, detalhe }: { label: string; valor: string; detalhe?: string }) {
+function InfoCard({ icon, tom, label, valor, sub, badge }: { icon: string; tom: string; label: string; valor: string; sub?: string; badge?: string }) {
   return (
-    <div style={{ background: '#fafbfc', border: '1px solid #edf1f4', borderRadius: '8px', padding: '0.75rem 0.85rem' }}>
-      <div style={{ fontSize: '0.72rem', color: '#7a8793', marginBottom: '0.3rem' }}>{label}</div>
-      <div style={{ fontSize: '0.92rem', fontWeight: 700, color: '#16212b', lineHeight: 1.3 }}>{valor}</div>
-      {detalhe && <div style={{ fontSize: '0.75rem', color: '#8a96a3', marginTop: '0.25rem' }}>{detalhe}</div>}
+    <div style={{ position: 'relative', background: '#fff', border: '1px solid #e8edf2', borderRadius: '12px', padding: '0.7rem 0.8rem', borderLeft: `3px solid ${tom}` }}>
+      {badge && (
+        <span style={{ position: 'absolute', top: 8, right: 8, fontSize: '0.62rem', fontWeight: 700, color: '#b54708', background: '#fff4e6', border: '1px solid #fcd9a8', padding: '1px 7px', borderRadius: 999, textTransform: 'uppercase', letterSpacing: '.02em' }}>{badge}</span>
+      )}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: '0.45rem' }}>
+        <span style={{ fontSize: '0.85rem', width: 22, height: 22, display: 'flex', alignItems: 'center', justifyContent: 'center', background: `${tom}14`, borderRadius: 6 }}>{icon}</span>
+        <span style={{ fontSize: '0.68rem', fontWeight: 600, color: '#8a96a3', textTransform: 'uppercase', letterSpacing: '.03em' }}>{label}</span>
+      </div>
+      <div style={{ fontSize: '0.95rem', fontWeight: 700, color: '#16212b', lineHeight: 1.25 }}>{valor}</div>
+      {sub && <div style={{ fontSize: '0.72rem', color: '#9aa6b2', marginTop: '0.2rem' }}>{sub}</div>}
     </div>
   )
 }

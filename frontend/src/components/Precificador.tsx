@@ -69,6 +69,30 @@ function savePricingSummary(snapshot: PricingSnapshot) {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(all))
 }
 
+const HIST_KEY = 'nvs_ml_preco_hist_v1'
+
+export interface PriceHistoryEntry { data: string; de: number; para: number }
+
+export function loadPriceHistoryMap(): Record<string, PriceHistoryEntry[]> {
+  try {
+    const raw = localStorage.getItem(HIST_KEY)
+    return raw ? JSON.parse(raw) : {}
+  } catch {
+    return {}
+  }
+}
+
+export function loadPriceHistory(itemId?: string): PriceHistoryEntry[] {
+  if (!itemId) return []
+  return loadPriceHistoryMap()[itemId] || []
+}
+
+function addPriceHistory(itemId: string, entry: PriceHistoryEntry) {
+  const all = loadPriceHistoryMap()
+  all[itemId] = [entry, ...(all[itemId] || [])].slice(0, 10)
+  localStorage.setItem(HIST_KEY, JSON.stringify(all))
+}
+
 export function Precificador({
   titulo,
   sku,
@@ -92,6 +116,8 @@ export function Precificador({
   const [carregandoFee, setCarregandoFee] = useState(false)
   const [carregandoFrete, setCarregandoFrete] = useState(false)
   const [salvandoResumo, setSalvandoResumo] = useState(false)
+  const [aplicando, setAplicando] = useState(false)
+  const [aplicarMsg, setAplicarMsg] = useState<{ tipo: 'ok' | 'erro'; texto: string } | null>(null)
 
   const v = num(valorVenda)
 
@@ -167,31 +193,56 @@ export function Precificador({
   const tipoAtualLabel = tipoAtualId === 'gold_pro' ? 'Premium' : 'Classico'
   const freteDisponivel = !carregandoFrete && frete !== ''
 
+  const buildSnapshot = (): PricingSnapshot => ({
+    itemId: itemId || '',
+    precoOriginal: Number(precoOriginal || precoInicial || 0),
+    precoPromocional: Number(precoInicial || 0),
+    valorVenda: v,
+    frete: num(frete),
+    custo: num(custo),
+    impostoPct: num(imposto),
+    tarifa: calcAtual.tarifa,
+    tarifaPct: calcAtual.percentual,
+    margem: calcAtual.margem,
+    margemPct: calcAtual.pct,
+    tipoAtualId,
+    tipoAtualLabel,
+    savedAt: new Date().toISOString(),
+  })
+
   const salvarResumo = () => {
     if (!itemId) return
     setSalvandoResumo(true)
     try {
-      const snapshot: PricingSnapshot = {
-        itemId,
-        precoOriginal: Number(precoOriginal || precoInicial || 0),
-        precoPromocional: Number(precoInicial || 0),
-        valorVenda: v,
-        frete: num(frete),
-        custo: num(custo),
-        impostoPct: num(imposto),
-        tarifa: calcAtual.tarifa,
-        tarifaPct: calcAtual.percentual,
-        margem: calcAtual.margem,
-        margemPct: calcAtual.pct,
-        tipoAtualId,
-        tipoAtualLabel,
-        savedAt: new Date().toISOString(),
-      }
+      const snapshot = buildSnapshot()
       savePricingSummary(snapshot)
       onSaved?.(snapshot)
       onClose()
     } finally {
       setSalvandoResumo(false)
+    }
+  }
+
+  const aplicarPrecoAnuncio = async () => {
+    if (!itemId || v <= 0) return
+    if (!window.confirm(`Aplicar ${brl(v)} como preço de venda neste anúncio no Mercado Livre?`)) return
+    setAplicando(true)
+    setAplicarMsg(null)
+    try {
+      const r = await fetch(`${API_BASE}/api/ml/anuncios/${itemId}/preco`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ preco: v }),
+      })
+      const d = await r.json()
+      if (!r.ok || d.erro) throw new Error(d.erro || 'Falha ao aplicar o preço')
+      addPriceHistory(itemId, { data: new Date().toISOString(), de: Number(d.preco_anterior || 0), para: Number(d.preco_novo || v) })
+      setAplicarMsg({ tipo: 'ok', texto: `Preço aplicado: ${brl(Number(d.preco_novo || v))}` })
+      onSaved?.(buildSnapshot())
+    } catch (e) {
+      setAplicarMsg({ tipo: 'erro', texto: String(e instanceof Error ? e.message : e) })
+    } finally {
+      setAplicando(false)
     }
   }
 
@@ -243,17 +294,32 @@ export function Precificador({
           {coluna(true, premiumFee, tipoAtualId === 'gold_pro')}
         </div>
 
-        <div style={{ padding: '0 1.5rem 1.25rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '1rem', flexWrap: 'wrap' }}>
-          <span style={{ fontSize: '0.78rem', color: '#999' }}>
-            O frete vem direto do Mercado Livre e fica bloqueado no calculo.
-          </span>
-          <div style={{ display: 'flex', gap: '.75rem', flexWrap: 'wrap' }}>
-            <button onClick={onClose} style={{ padding: '0.6rem 1.5rem', background: '#f0f0f0', border: '1px solid #ddd', borderRadius: '6px', cursor: 'pointer', fontWeight: 600 }}>Fechar</button>
-            {itemId && (
-              <button onClick={salvarResumo} disabled={salvandoResumo || !freteDisponivel} style={{ padding: '0.6rem 1.5rem', background: '#5b3cc4', border: '1px solid #5b3cc4', color: '#fff', borderRadius: '6px', cursor: 'pointer', fontWeight: 700, opacity: salvandoResumo || !freteDisponivel ? 0.7 : 1 }}>
-                {salvandoResumo ? 'Salvando...' : 'Salvar e Fechar'}
-              </button>
-            )}
+        <div style={{ padding: '0 1.5rem 1.25rem' }}>
+          {aplicarMsg && (
+            <div style={{ marginBottom: '0.85rem', padding: '0.6rem 0.85rem', borderRadius: '8px', fontSize: '0.85rem', fontWeight: 600,
+              background: aplicarMsg.tipo === 'ok' ? '#ecfdf3' : '#fef3f2',
+              border: `1px solid ${aplicarMsg.tipo === 'ok' ? '#abefc6' : '#fecdca'}`,
+              color: aplicarMsg.tipo === 'ok' ? '#067647' : '#b42318' }}>
+              {aplicarMsg.texto}
+            </div>
+          )}
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '1rem', flexWrap: 'wrap' }}>
+            <span style={{ fontSize: '0.78rem', color: '#999' }}>
+              O frete vem direto do Mercado Livre e fica bloqueado no calculo.
+            </span>
+            <div style={{ display: 'flex', gap: '.75rem', flexWrap: 'wrap' }}>
+              <button onClick={onClose} style={{ padding: '0.6rem 1.5rem', background: '#f0f0f0', border: '1px solid #ddd', borderRadius: '6px', cursor: 'pointer', fontWeight: 600 }}>Fechar</button>
+              {itemId && (
+                <button onClick={salvarResumo} disabled={salvandoResumo || !freteDisponivel} style={{ padding: '0.6rem 1.5rem', background: '#fff', border: '1px solid #5b3cc4', color: '#5b3cc4', borderRadius: '6px', cursor: 'pointer', fontWeight: 700, opacity: salvandoResumo || !freteDisponivel ? 0.6 : 1 }}>
+                  {salvandoResumo ? 'Salvando...' : 'Salvar resumo'}
+                </button>
+              )}
+              {itemId && (
+                <button onClick={aplicarPrecoAnuncio} disabled={aplicando || v <= 0} style={{ padding: '0.6rem 1.5rem', background: '#5b3cc4', border: '1px solid #5b3cc4', color: '#fff', borderRadius: '6px', cursor: 'pointer', fontWeight: 700, opacity: aplicando || v <= 0 ? 0.6 : 1 }}>
+                  {aplicando ? 'Aplicando...' : 'Aplicar preço ao anúncio'}
+                </button>
+              )}
+            </div>
           </div>
         </div>
       </div>
