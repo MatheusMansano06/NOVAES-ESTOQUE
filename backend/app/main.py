@@ -2892,9 +2892,10 @@ async def ml_anuncio_dimensoes(request: Request):
 
 
 async def ml_anuncio_precos_quantidade(request: Request):
+    """GET lê os tiers de atacado B2B; POST cria/atualiza (lista vazia remove)."""
     item_id = request.path_params.get("item_id")
     if not item_id:
-        return JSONResponse({"erro": "item_id obrigatÃ³rio"}, status_code=400)
+        return JSONResponse({"erro": "item_id obrigatório"}, status_code=400)
     if request.method == "GET":
         result = ml.obter_precos_quantidade(item_id)
         code = 200 if not result.get("erro") else 502
@@ -2902,11 +2903,35 @@ async def ml_anuncio_precos_quantidade(request: Request):
     try:
         body = await request.json()
     except Exception:
-        return JSONResponse({"erro": "JSON invÃ¡lido"}, status_code=400)
+        return JSONResponse({"erro": "JSON inválido"}, status_code=400)
     tiers = body.get("tiers")
     if not isinstance(tiers, list):
         return JSONResponse({"erro": "tiers deve ser uma lista"}, status_code=400)
     result = ml.salvar_precos_quantidade(item_id, tiers)
+    code = 200 if not result.get("erro") else int(result.get("status_code") or 502)
+    return JSONResponse(result, status_code=code)
+
+
+async def ml_anuncio_preco_resumo(request: Request):
+    """GET — valor cheio + valor promocional efetivo do anúncio (para o balão)."""
+    item_id = request.path_params.get("item_id")
+    if not item_id:
+        return JSONResponse({"erro": "item_id obrigatório"}, status_code=400)
+    result = ml.resumo_preco(item_id)
+    code = 200 if not result.get("erro") else 502
+    return JSONResponse(result, status_code=code, headers={"Cache-Control": "no-store"})
+
+
+async def ml_anuncio_aplicar_preco(request: Request):
+    """POST — aplica o preço base ao anúncio no Mercado Livre."""
+    item_id = request.path_params.get("item_id")
+    if not item_id:
+        return JSONResponse({"erro": "item_id obrigatório"}, status_code=400)
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"erro": "JSON inválido"}, status_code=400)
+    result = ml.aplicar_preco(item_id, body.get("preco"))
     code = 200 if not result.get("erro") else int(result.get("status_code") or 502)
     return JSONResponse(result, status_code=code)
 
@@ -3069,6 +3094,8 @@ routes = [
     Route("/api/ml/anuncios/{item_id:str}/attributes", ml_anuncio_atributos, methods=["POST"]),
     Route("/api/ml/anuncios/{item_id:str}/dimensions", ml_anuncio_dimensoes, methods=["POST"]),
     Route("/api/ml/anuncios/{item_id:str}/precos-quantidade", ml_anuncio_precos_quantidade, methods=["GET", "POST"]),
+    Route("/api/ml/anuncios/{item_id:str}/preco-resumo", ml_anuncio_preco_resumo, methods=["GET"]),
+    Route("/api/ml/anuncios/{item_id:str}/preco", ml_anuncio_aplicar_preco, methods=["POST"]),
     Route("/api/ml/anuncios/{item_id:str}/pictures/upload", ml_anuncio_imagens_upload, methods=["POST"]),
     Route("/api/ml/anuncios/{item_id:str}/pictures", ml_anuncio_imagens_reordenar, methods=["POST"]),
     Route("/api/ml/precificacao", ml_precificacao, methods=["GET"]),

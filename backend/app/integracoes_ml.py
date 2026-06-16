@@ -553,10 +553,12 @@ class MLIntegration:
             "zip_code_usado": zip_code or None,
         }
 
+    # ---------- preços por quantidade (atacado B2B) ----------
     B2B_CONTEXT = "channel_marketplace,user_type_business"
     AMOSTRA_QUANTIDADES = [1, 5, 10, 25]
 
     def _preco_b2b(self, item_id: str, quantidade: int) -> Optional[float]:
+        """Preço efetivo que um comprador EMPRESA vê numa dada quantidade."""
         sp = self._get(f"/items/{item_id}/sale_price", {"context": self.B2B_CONTEXT, "quantity": quantidade})
         if isinstance(sp, dict) and sp.get("amount") is not None:
             try:
@@ -566,6 +568,13 @@ class MLIntegration:
         return None
 
     def obter_precos_quantidade(self, item_id: str) -> Dict:
+        """Preço padrão + amostra do preço B2B por quantidade.
+
+        Os preços por quantidade do ML são B2B (só comprador empresa) e a API NÃO
+        expõe um endpoint que liste os tiers configurados — só dá para observá-los
+        consultando /sale_price com contexto B2B numa quantidade. Por isso devolvemos
+        uma amostra (qty 1/5/10/25) em vez de tiers exatos.
+        """
         data = self._get(f"/items/{item_id}/prices")
         if not data:
             return {"erro": "Não foi possível ler os preços do anúncio"}
@@ -587,6 +596,11 @@ class MLIntegration:
         }
 
     def salvar_precos_quantidade(self, item_id: str, tiers: List[Dict[str, Any]]) -> Dict:
+        """Cria/atualiza os tiers de atacado B2B via POST /prices/standard/quantity.
+
+        `tiers` = [{amount, min_purchase_unit}, ...] (até 5). O preço padrão é
+        referenciado por id (obrigatório no payload). Lista vazia remove os tiers.
+        """
         data = self._get(f"/items/{item_id}/prices")
         if not data:
             return {"erro": "Não foi possível ler o preço padrão do anúncio"}
@@ -620,6 +634,11 @@ class MLIntegration:
         if not resp or resp.get("erro"):
             return resp or {"erro": "Falha ao salvar preços por quantidade"}
 
+        # O ML responde 200 (e o echo do POST devolve as faixas otimisticamente) mesmo
+        # quando NÃO aplica — ex.: anúncio com promoção/campanha ativa. A única forma
+        # confiável de confirmar é reler o preço B2B na quantidade de cada faixa.
+        # A aplicação é assíncrona (propaga em alguns segundos), então repetimos a
+        # checagem por algumas rodadas antes de concluir que falhou.
         pendentes = {int(t["conditions"]["min_purchase_unit"]): float(t["amount"]) for t in payload if t.get("conditions")}
         for tentativa in range(5):
             if not pendentes:
@@ -637,6 +656,59 @@ class MLIntegration:
                 "faltando": sorted(pendentes.keys()),
             }
         return {"ok": True, "aplicado": True, "tiers_enviados": len(payload) - 1}
+
+    # ---------- preço de venda (cheio + promocional) ----------
+    def resumo_preco(self, item_id: str) -> Dict:
+        """Valor cheio (preço base) + valor promocional efetivo (o que o consumidor paga)."""
+        body = self._get(f"/items/{item_id}", {"attributes": "id,price,base_price,catalog_listing,status"})
+        if not body:
+            return {"erro": "Anúncio não encontrado"}
+        cheio = body.get("price")
+        if cheio is None:
+            cheio = body.get("base_price")
+        sp = self._get(f"/items/{item_id}/sale_price", {"quantity": 1})
+        promocional = sp.get("amount") if isinstance(sp, dict) and sp.get("amount") is not None else cheio
+        tem_promocao = (cheio is not None and promocional is not None and float(promocional) < float(cheio) - 0.01)
+        return {
+            "cheio": cheio,
+            "promocional": promocional,
+            "tem_promocao": bool(tem_promocao),
+            "catalogo": bool(body.get("catalog_listing")),
+            "status": body.get("status"),
+        }
+
+    def aplicar_preco(self, item_id: str, preco: float) -> Dict:
+        """Aplica o preço base ao anúncio (PUT /items). Catálogo/fechado são bloqueados pelo ML.
+
+        Verifica relendo o preço, já que mudanças no ML podem não refletir de imediato.
+        Retorna também o preço anterior, para registrar histórico no cliente.
+        """
+        try:
+            preco = round(float(preco), 2)
+        except (TypeError, ValueError):
+            return {"erro": "Preço inválido"}
+        if preco <= 0:
+            return {"erro": "Preço deve ser maior que zero"}
+
+        body = self._get(f"/items/{item_id}", {"attributes": "id,price,catalog_listing,status"})
+        if not body:
+            return {"erro": "Anúncio não encontrado"}
+        preco_anterior = body.get("price")
+        if body.get("catalog_listing"):
+            return {"erro": "Este é um anúncio de catálogo: o preço é definido pelo catálogo do Mercado Livre e não pode ser alterado por aqui.", "bloqueado": True}
+        if body.get("status") == "closed":
+            return {"erro": "Anúncio finalizado: não é possível alterar o preço.", "bloqueado": True}
+
+        resp = self._request_json("PUT", f"/items/{item_id}", {"price": preco})
+        if not resp or resp.get("erro"):
+            cause = resp.get("erro") if isinstance(resp, dict) else None
+            return {"erro": cause or "Falha ao aplicar o preço no Mercado Livre", "preco_anterior": preco_anterior}
+
+        confere = self._get(f"/items/{item_id}", {"attributes": "id,price"}) or {}
+        aplicado = confere.get("price") is not None and abs(float(confere["price"]) - preco) <= 0.01
+        if not aplicado:
+            return {"erro": "O Mercado Livre não aplicou o novo preço.", "aplicado": False, "preco_anterior": preco_anterior}
+        return {"ok": True, "aplicado": True, "preco_anterior": preco_anterior, "preco_novo": preco}
 
     def atualizar_descricao(self, item_id: str, plain_text: str) -> Dict:
         return self._request_json("PUT", f"/items/{item_id}/description", {"plain_text": plain_text}) or {"erro": "Falha ao atualizar descrição"}
@@ -677,6 +749,7 @@ class MLIntegration:
 
     @staticmethod
     def _num(texto: Any) -> Optional[float]:
+        """Extrai o primeiro número de algo como '28 cm' ou '1880 g'."""
         if texto is None:
             return None
         try:
@@ -685,9 +758,15 @@ class MLIntegration:
             return None
 
     def atualizar_dimensoes(self, item_id: str, largura_cm: str, altura_cm: str, comprimento_cm: str, peso_g: str, package_type: str) -> Dict:
+        """Atualiza dimensões declaradas (SELLER_PACKAGE_*).
+
+        Em itens FULL o Mercado Livre mede o produto no galpão e ignora a alteração
+        (a API responde 200 mas não aplica). Por isso detectamos o logistic_type e
+        verificamos a persistência relendo os atributos depois da escrita.
+        """
         body = self._get(f"/items/{item_id}")
         if not body:
-            return {"erro": "AnÃºncio nÃ£o encontrado"}
+            return {"erro": "Anúncio não encontrado"}
 
         logistic = (body.get("shipping") or {}).get("logistic_type")
         if logistic == "fulfillment":
@@ -709,6 +788,7 @@ class MLIntegration:
         if not resp or resp.get("erro"):
             return resp or {"erro": "Falha ao atualizar dimensões"}
 
+        # Reler para confirmar que o ML realmente aplicou (a resposta 200 não garante).
         confere = self._get(f"/items/{item_id}", {"attributes": "attributes"}) or {}
         atuais = {a.get("id"): a.get("value_name") for a in (confere.get("attributes") or [])}
         esperado = {

@@ -4,10 +4,7 @@ const API_BASE = import.meta.env.VITE_API_URL ?? 'http://127.0.0.1:8000'
 
 type Mode = 'descricao' | 'imagens' | 'ficha' | 'dimensoes' | 'atacado' | 'flex'
 
-interface TierAtacado {
-  min_purchase_unit: number | string
-  amount: number | string
-}
+interface TierAtacado { min_purchase_unit: number | string; amount: number | string }
 
 interface AnuncioBase {
   id: string
@@ -348,6 +345,7 @@ export function MLAnuncioEditorModal({ anuncio, mode, onClose, onUpdated }: Prop
                 </div>
               </div>
             )}
+
             {mode === 'atacado' && (
               <div style={{ border: '1px solid #e5eaf3', borderRadius: 16, padding: '1rem' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '.5rem', marginBottom: '.75rem' }}>
@@ -391,7 +389,7 @@ export function MLAnuncioEditorModal({ anuncio, mode, onClose, onUpdated }: Prop
                 )}
                 <div style={{ marginTop: '.85rem', fontSize: '.75rem', color: '#98a2b3', lineHeight: 1.5 }}>
                   Salvar com a lista vazia remove todas as faixas de atacado do anúncio.<br />
-                  Atenção: anúncios com promoção/campanha ativa podem não aceitar preços por quantidade - o sistema avisa se o ML não aplicar.
+                  Atenção: anúncios com promoção/campanha ativa podem não aceitar preços por quantidade — o sistema avisa se o ML não aplicar.
                 </div>
               </div>
             )}
