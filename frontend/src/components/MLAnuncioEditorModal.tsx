@@ -2,7 +2,12 @@ import { useEffect, useMemo, useState, type CSSProperties } from 'react'
 
 const API_BASE = import.meta.env.VITE_API_URL ?? 'http://127.0.0.1:8000'
 
-type Mode = 'descricao' | 'flex' | 'atacado' | 'imagens' | 'ficha' | 'dimensoes'
+type Mode = 'descricao' | 'imagens' | 'ficha' | 'dimensoes' | 'atacado' | 'flex'
+
+interface TierAtacado {
+  min_purchase_unit: number | string
+  amount: number | string
+}
 
 interface AnuncioBase {
   id: string
@@ -76,6 +81,11 @@ export function MLAnuncioEditorModal({ anuncio, mode, onClose, onUpdated }: Prop
   const [newFiles, setNewFiles] = useState<File[]>([])
   const [attrs, setAttrs] = useState<Record<string, string>>({})
   const [dimensoes, setDimensoes] = useState({ largura: '', altura: '', comprimento: '', peso: '', packageType: 'Com embalagem adicional' })
+  const [tiers, setTiers] = useState<TierAtacado[]>([])
+  const [precoStandard, setPrecoStandard] = useState<number | null>(null)
+  const [amostraB2b, setAmostraB2b] = useState<Array<{ quantidade: number; amount: number | null }>>([])
+  const [temAtacado, setTemAtacado] = useState(false)
+  const [atacadoLoading, setAtacadoLoading] = useState(false)
 
   useEffect(() => {
     let active = true
@@ -110,9 +120,55 @@ export function MLAnuncioEditorModal({ anuncio, mode, onClose, onUpdated }: Prop
     return () => { active = false }
   }, [anuncio.id])
 
+  useEffect(() => {
+    if (mode !== 'atacado') return
+    let active = true
+    const loadAtacado = async () => {
+      setAtacadoLoading(true)
+      try {
+        const r = await fetch(`${API_BASE}/api/ml/anuncios/${anuncio.id}/precos-quantidade`, { cache: 'no-store' })
+        const d = await r.json()
+        if (!active) return
+        if (r.ok && !d.erro) {
+          setPrecoStandard(d.standard?.amount ?? null)
+          setAmostraB2b(d.amostra_b2b || [])
+          setTemAtacado(Boolean(d.tem_atacado))
+        }
+      } catch {
+        /* ignore */
+      } finally {
+        if (active) setAtacadoLoading(false)
+      }
+    }
+    loadAtacado()
+    return () => { active = false }
+  }, [mode, anuncio.id])
+
   const attrRows = useMemo(() => (detail?.attributes || []).filter(a => !a.id.startsWith('SELLER_PACKAGE_')), [detail])
-  const atacadoAtivo = useMemo(() => Boolean(detail?.tags?.includes('standard_price_by_quantity')), [detail])
-  const flexAtivo = useMemo(() => Boolean(detail?.item?.flex), [detail])
+  const dimensoesTravadas = Boolean(detail?.item?.full)
+
+  const submitAtacado = async () => {
+    setSaving(true)
+    setError('')
+    try {
+      const payload = tiers
+        .map(t => ({ min_purchase_unit: Number(t.min_purchase_unit), amount: Number(String(t.amount).replace(',', '.')) }))
+        .filter(t => t.min_purchase_unit > 1 && t.amount > 0)
+      const r = await fetch(`${API_BASE}/api/ml/anuncios/${anuncio.id}/precos-quantidade`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tiers: payload }),
+      })
+      const d = await r.json()
+      if (!r.ok || d.erro) throw new Error(d.erro || 'Falha ao salvar preços por quantidade')
+      onUpdated()
+      onClose()
+    } catch (e) {
+      setError(String(e))
+    } finally {
+      setSaving(false)
+    }
+  }
 
   const submitDescricao = async () => {
     setSaving(true)
@@ -212,11 +268,11 @@ export function MLAnuncioEditorModal({ anuncio, mode, onClose, onUpdated }: Prop
 
   const title = {
     descricao: 'Editar Descrição do Anúncio',
-    flex: 'Mercado Envios Flex',
-    atacado: 'Preços de Atacado',
     imagens: 'Gerenciar Imagens do Anúncio',
     ficha: 'Ficha Técnica do Anúncio',
     dimensoes: 'Dimensões do Anúncio',
+    atacado: 'Preços por Quantidade (Atacado B2B)',
+    flex: 'Mercado Envios Flex',
   }[mode]
 
   return (
@@ -265,7 +321,19 @@ export function MLAnuncioEditorModal({ anuncio, mode, onClose, onUpdated }: Prop
                 ))}
               </div>
             )}
-            {mode === 'dimensoes' && (
+            {mode === 'dimensoes' && dimensoesTravadas && (
+              <div style={{ border: '1px solid #fcd9a8', background: '#fff8ee', borderRadius: 16, padding: '1.1rem 1.2rem' }}>
+                <div style={{ fontWeight: 800, color: '#b54708', marginBottom: '.5rem' }}>Dimensões controladas pelo Mercado Livre (Full)</div>
+                <p style={{ margin: '0 0 .6rem', color: '#7a5b2e', lineHeight: 1.5 }}>
+                  Este anúncio usa logística <strong>Full</strong>: o galpão do Mercado Livre mede o produto fisicamente.
+                  A alteração de dimensões não é aplicada (a API responde "sucesso" mas o valor não muda).
+                </p>
+                <div style={{ fontSize: '.85rem', color: '#7a5b2e' }}>
+                  Medidas atuais (medidas pelo ML): <strong>{detail.item.dimensoes?.texto || '--'}</strong>
+                </div>
+              </div>
+            )}
+            {mode === 'dimensoes' && !dimensoesTravadas && (
               <div style={{ border: '1px solid #e5eaf3', borderRadius: 16, padding: '1rem' }}>
                 <p style={{ marginTop: 0, color: '#475467' }}>Insira as dimensões corretas para melhorar o cálculo real do frete.</p>
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: '1rem' }}>
@@ -280,30 +348,67 @@ export function MLAnuncioEditorModal({ anuncio, mode, onClose, onUpdated }: Prop
                 </div>
               </div>
             )}
-            {mode === 'flex' && (
-              <InfoPanel
-                title={flexAtivo ? 'Flex ativo neste anúncio' : 'Flex não detectado neste anúncio'}
-                lines={[
-                  `Logística atual: ${detail.item.logistica || '--'}`,
-                  `Tags de shipping: ${(detail.shipping_tags || []).join(', ') || '--'}`,
-                  'Observação: o toggle direto de Flex não está exposto pela API pública do Mercado Livre do mesmo jeito que descrição/imagens/atributos.',
-                ]}
-                link={detail.item.permalink}
-                linkLabel="Abrir anúncio no Mercado Livre"
-              />
-            )}
             {mode === 'atacado' && (
-              <InfoPanel
-                title={atacadoAtivo ? 'Preço por quantidade detectado' : 'Preço por quantidade não detectado'}
-                lines={[
-                  `Tag do anúncio: ${atacadoAtivo ? 'standard_price_by_quantity' : '--'}`,
-                  `Preço atual: ${brl(detail.sale_price?.amount || detail.item.preco)}`,
-                  `Preço base: ${brl(detail.sale_price?.regular_amount || detail.item.preco)}`,
-                  'A API pública retornou o status/tags e os preços atuais, mas não um endpoint estável de edição de atacado neste ambiente.',
-                ]}
-                link={detail.item.permalink}
-                linkLabel="Abrir anúncio no Mercado Livre"
-              />
+              <div style={{ border: '1px solid #e5eaf3', borderRadius: 16, padding: '1rem' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '.5rem', marginBottom: '.75rem' }}>
+                  <span style={{ color: '#475467' }}>Preço unitário (padrão): <strong>{brl(precoStandard ?? detail.item.preco)}</strong></span>
+                  <span style={{ fontSize: '.75rem', background: '#eef2ff', color: '#4338ca', padding: '3px 10px', borderRadius: 999, fontWeight: 700 }}>B2B · comprador empresa</span>
+                </div>
+                <p style={{ margin: '0 0 .85rem', color: '#667085', fontSize: '.85rem', lineHeight: 1.5 }}>
+                  Defina descontos por quantidade mínima. Esses preços só aparecem para <strong>compradores empresa (B2B)</strong> no Mercado Livre. Até 5 faixas.
+                </p>
+                {amostraB2b.length > 0 && (
+                  <div style={{ marginBottom: '1rem', padding: '.7rem .85rem', background: temAtacado ? '#ecfdf3' : '#f8fafc', border: `1px solid ${temAtacado ? '#abefc6' : '#e4e7ec'}`, borderRadius: 10 }}>
+                    <div style={{ fontSize: '.72rem', color: '#667085', marginBottom: '.4rem', textTransform: 'uppercase', letterSpacing: '.03em' }}>
+                      Preço B2B atual {temAtacado ? '(atacado ativo)' : '(sem desconto por quantidade)'}
+                    </div>
+                    <div style={{ display: 'flex', gap: '1.25rem', flexWrap: 'wrap' }}>
+                      {amostraB2b.map(s => (
+                        <span key={s.quantidade} style={{ fontSize: '.85rem', color: '#1d2939' }}>
+                          {s.quantidade}un: <strong>{brl(s.amount)}</strong>
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                {atacadoLoading ? <div style={{ color: '#667085' }}>Carregando preços B2B...</div> : (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '.6rem' }}>
+                    {tiers.length === 0 && <div style={{ color: '#98a2b3', fontSize: '.85rem' }}>Adicione faixas abaixo para definir descontos por quantidade.</div>}
+                    {tiers.map((t, i) => (
+                      <div key={i} style={{ display: 'flex', gap: '.6rem', alignItems: 'center', flexWrap: 'wrap' }}>
+                        <span style={{ color: '#475467', fontSize: '.85rem' }}>A partir de</span>
+                        <input type="number" min={2} value={t.min_purchase_unit} onChange={e => setTiers(prev => prev.map((x, j) => j === i ? { ...x, min_purchase_unit: e.target.value } : x))} style={{ width: 90, border: '1px solid #d0d7e6', borderRadius: 8, padding: '.5rem .6rem' }} />
+                        <span style={{ color: '#475467', fontSize: '.85rem' }}>un. →</span>
+                        <span style={{ color: '#475467', fontSize: '.85rem' }}>R$</span>
+                        <input type="text" inputMode="decimal" value={t.amount} onChange={e => setTiers(prev => prev.map((x, j) => j === i ? { ...x, amount: e.target.value } : x))} placeholder="0,00" style={{ width: 110, border: '1px solid #d0d7e6', borderRadius: 8, padding: '.5rem .6rem' }} />
+                        <button onClick={() => setTiers(prev => prev.filter((_, j) => j !== i))} style={miniBtn('#fee4e2', '#b42318')}>Remover</button>
+                      </div>
+                    ))}
+                    {tiers.length < 5 && (
+                      <button onClick={() => setTiers(prev => [...prev, { min_purchase_unit: '', amount: '' }])} style={{ alignSelf: 'flex-start', marginTop: '.3rem', border: '1px dashed #c4b5fd', background: '#f5f3ff', color: '#5b21b6', borderRadius: 10, padding: '.5rem .9rem', cursor: 'pointer', fontWeight: 700 }}>+ Adicionar faixa</button>
+                    )}
+                  </div>
+                )}
+                <div style={{ marginTop: '.85rem', fontSize: '.75rem', color: '#98a2b3', lineHeight: 1.5 }}>
+                  Salvar com a lista vazia remove todas as faixas de atacado do anúncio.<br />
+                  Atenção: anúncios com promoção/campanha ativa podem não aceitar preços por quantidade - o sistema avisa se o ML não aplicar.
+                </div>
+              </div>
+            )}
+            {mode === 'flex' && (
+              <div style={{ border: '1px solid #e5eaf3', borderRadius: 16, padding: '1.1rem 1.2rem' }}>
+                <div style={{ fontWeight: 800, color: '#1d2939', marginBottom: '.6rem' }}>
+                  {detail.item.full ? 'Full + Flex (coexistência)' : (detail.item.flex ? 'Flex ativo neste anúncio' : 'Logística: ' + (detail.item.logistica || '--'))}
+                </div>
+                <p style={{ margin: '0 0 .6rem', color: '#475467', lineHeight: 1.5 }}>
+                  Logística atual: <strong>{detail.item.logistica || '--'}</strong>. Tags de envio: {(detail.shipping_tags || []).join(', ') || '--'}.
+                </p>
+                <p style={{ margin: 0, color: '#667085', fontSize: '.85rem', lineHeight: 1.5 }}>
+                  O Flex é ativado/configurado <strong>no nível da conta</strong> (reputação, área de cobertura e endereço de coleta), não anúncio a anúncio pela API.
+                  Sua conta já está habilitada para Flex em coexistência com o Full.
+                </p>
+                {detail.item.permalink && <a href={detail.item.permalink} target="_blank" rel="noreferrer" style={{ display: 'inline-block', marginTop: '.7rem', color: '#5b3cc4', fontWeight: 700 }}>Abrir anúncio no Mercado Livre</a>}
+              </div>
             )}
 
             <div style={{ marginTop: '1.25rem', display: 'flex', justifyContent: 'flex-end', gap: '.75rem', flexWrap: 'wrap' }}>
@@ -311,7 +416,8 @@ export function MLAnuncioEditorModal({ anuncio, mode, onClose, onUpdated }: Prop
               {mode === 'descricao' && <button onClick={submitDescricao} disabled={saving} style={primaryBtn}>{saving ? 'Salvando...' : 'Salvar'}</button>}
               {mode === 'imagens' && <button onClick={submitImagens} disabled={saving} style={primaryBtn}>{saving ? 'Salvando...' : 'Salvar'}</button>}
               {mode === 'ficha' && <button onClick={submitFicha} disabled={saving} style={primaryBtn}>{saving ? 'Salvando...' : 'Salvar'}</button>}
-              {mode === 'dimensoes' && <button onClick={submitDimensoes} disabled={saving} style={primaryBtn}>{saving ? 'Salvando...' : 'Salvar'}</button>}
+              {mode === 'dimensoes' && !dimensoesTravadas && <button onClick={submitDimensoes} disabled={saving} style={primaryBtn}>{saving ? 'Salvando...' : 'Salvar'}</button>}
+              {mode === 'atacado' && <button onClick={submitAtacado} disabled={saving} style={primaryBtn}>{saving ? 'Salvando...' : 'Salvar atacado'}</button>}
             </div>
           </div>
         )}
@@ -342,16 +448,6 @@ function Metric({ label, value, detail }: { label: string; value: string; detail
       <div style={{ fontSize: '.72rem', color: '#667085' }}>{label}</div>
       <div style={{ fontWeight: 800, color: '#101828' }}>{value}</div>
       <div style={{ fontSize: '.74rem', color: '#6941c6' }}>{detail}</div>
-    </div>
-  )
-}
-
-function InfoPanel({ title, lines, link, linkLabel }: { title: string; lines: string[]; link?: string; linkLabel?: string }) {
-  return (
-    <div style={{ border: '1px solid #e4e7ec', borderRadius: 16, padding: '1rem 1.1rem', background: '#fafbff' }}>
-      <div style={{ fontWeight: 800, color: '#1d2939', marginBottom: '.75rem' }}>{title}</div>
-      {lines.map(line => <div key={line} style={{ color: '#475467', marginBottom: '.45rem' }}>{line}</div>)}
-      {link && <a href={link} target="_blank" rel="noreferrer" style={{ display: 'inline-block', marginTop: '.75rem', color: '#5b3cc4', fontWeight: 700 }}>{linkLabel || 'Abrir no ML'}</a>}
     </div>
   )
 }

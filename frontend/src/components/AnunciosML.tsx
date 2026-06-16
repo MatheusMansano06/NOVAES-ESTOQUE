@@ -225,11 +225,11 @@ export function AnunciosML({ onVoltar }: Props) {
 
                   <div style={{ marginTop: '.9rem', display: 'flex', gap: '.55rem', flexWrap: 'wrap' }}>
                     <ActionBtn label="Descricao" onClick={() => setEditando({ anuncio: a, mode: 'descricao' })} />
-                    <ActionBtn label="Flex" onClick={() => setEditando({ anuncio: a, mode: 'flex' })} />
-                    <ActionBtn label="Atacado" onClick={() => setEditando({ anuncio: a, mode: 'atacado' })} />
                     <ActionBtn label="Imagens" onClick={() => setEditando({ anuncio: a, mode: 'imagens' })} />
                     <ActionBtn label="Ficha Tecnica" onClick={() => setEditando({ anuncio: a, mode: 'ficha' })} />
                     <ActionBtn label="Dimensoes" onClick={() => setEditando({ anuncio: a, mode: 'dimensoes' })} />
+                    <ActionBtn label="Atacado B2B" onClick={() => setEditando({ anuncio: a, mode: 'atacado' })} />
+                    <ActionBtn label="Flex" onClick={() => setEditando({ anuncio: a, mode: 'flex' })} />
                     <ActionBtn label="Precificador" strong onClick={() => setPrecificando(a)} />
                   </div>
                 </div>

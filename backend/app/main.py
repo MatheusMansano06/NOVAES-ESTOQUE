@@ -2891,6 +2891,26 @@ async def ml_anuncio_dimensoes(request: Request):
     return JSONResponse(result, status_code=code)
 
 
+async def ml_anuncio_precos_quantidade(request: Request):
+    item_id = request.path_params.get("item_id")
+    if not item_id:
+        return JSONResponse({"erro": "item_id obrigatÃ³rio"}, status_code=400)
+    if request.method == "GET":
+        result = ml.obter_precos_quantidade(item_id)
+        code = 200 if not result.get("erro") else 502
+        return JSONResponse(result, status_code=code, headers={"Cache-Control": "no-store"})
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"erro": "JSON invÃ¡lido"}, status_code=400)
+    tiers = body.get("tiers")
+    if not isinstance(tiers, list):
+        return JSONResponse({"erro": "tiers deve ser uma lista"}, status_code=400)
+    result = ml.salvar_precos_quantidade(item_id, tiers)
+    code = 200 if not result.get("erro") else int(result.get("status_code") or 502)
+    return JSONResponse(result, status_code=code)
+
+
 async def ml_anuncio_imagens_upload(request: Request):
     item_id = request.path_params.get("item_id")
     form = await request.form()
@@ -3048,6 +3068,7 @@ routes = [
     Route("/api/ml/anuncios/{item_id:str}/description", ml_anuncio_descricao, methods=["POST"]),
     Route("/api/ml/anuncios/{item_id:str}/attributes", ml_anuncio_atributos, methods=["POST"]),
     Route("/api/ml/anuncios/{item_id:str}/dimensions", ml_anuncio_dimensoes, methods=["POST"]),
+    Route("/api/ml/anuncios/{item_id:str}/precos-quantidade", ml_anuncio_precos_quantidade, methods=["GET", "POST"]),
     Route("/api/ml/anuncios/{item_id:str}/pictures/upload", ml_anuncio_imagens_upload, methods=["POST"]),
     Route("/api/ml/anuncios/{item_id:str}/pictures", ml_anuncio_imagens_reordenar, methods=["POST"]),
     Route("/api/ml/precificacao", ml_precificacao, methods=["GET"]),

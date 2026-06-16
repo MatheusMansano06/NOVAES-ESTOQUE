@@ -553,6 +553,91 @@ class MLIntegration:
             "zip_code_usado": zip_code or None,
         }
 
+    B2B_CONTEXT = "channel_marketplace,user_type_business"
+    AMOSTRA_QUANTIDADES = [1, 5, 10, 25]
+
+    def _preco_b2b(self, item_id: str, quantidade: int) -> Optional[float]:
+        sp = self._get(f"/items/{item_id}/sale_price", {"context": self.B2B_CONTEXT, "quantity": quantidade})
+        if isinstance(sp, dict) and sp.get("amount") is not None:
+            try:
+                return float(sp["amount"])
+            except (TypeError, ValueError):
+                return None
+        return None
+
+    def obter_precos_quantidade(self, item_id: str) -> Dict:
+        data = self._get(f"/items/{item_id}/prices")
+        if not data:
+            return {"erro": "Não foi possível ler os preços do anúncio"}
+        prices = data.get("prices") or []
+        standard = next((p for p in prices if p.get("type") == "standard"), None)
+        amostra = [{"quantidade": q, "amount": self._preco_b2b(item_id, q)} for q in self.AMOSTRA_QUANTIDADES]
+        tem_atacado = any(
+            a["amount"] is not None and standard and a["amount"] < float(standard.get("amount") or 0) - 0.01
+            for a in amostra
+        )
+        return {
+            "standard": ({
+                "id": standard.get("id"),
+                "amount": standard.get("amount"),
+                "currency_id": standard.get("currency_id"),
+            } if standard else None),
+            "amostra_b2b": amostra,
+            "tem_atacado": tem_atacado,
+        }
+
+    def salvar_precos_quantidade(self, item_id: str, tiers: List[Dict[str, Any]]) -> Dict:
+        data = self._get(f"/items/{item_id}/prices")
+        if not data:
+            return {"erro": "Não foi possível ler o preço padrão do anúncio"}
+        prices = data.get("prices") or []
+        standard = next((p for p in prices if p.get("type") == "standard"), None)
+        if not standard or not standard.get("id"):
+            return {"erro": "Preço padrão não encontrado neste anúncio"}
+        currency = standard.get("currency_id") or "BRL"
+
+        payload: List[Dict[str, Any]] = [{"id": standard["id"]}]
+        for t in (tiers or [])[:5]:
+            amount = t.get("amount")
+            mpu = t.get("min_purchase_unit")
+            try:
+                amount = float(amount)
+                mpu = int(mpu)
+            except (TypeError, ValueError):
+                continue
+            if amount <= 0 or mpu <= 1:
+                continue
+            payload.append({
+                "amount": amount,
+                "currency_id": currency,
+                "conditions": {
+                    "context_restrictions": ["channel_marketplace", "user_type_business"],
+                    "min_purchase_unit": mpu,
+                },
+            })
+
+        resp = self._request_json("POST", f"/items/{item_id}/prices/standard/quantity", {"prices": payload})
+        if not resp or resp.get("erro"):
+            return resp or {"erro": "Falha ao salvar preços por quantidade"}
+
+        pendentes = {int(t["conditions"]["min_purchase_unit"]): float(t["amount"]) for t in payload if t.get("conditions")}
+        for tentativa in range(5):
+            if not pendentes:
+                break
+            if tentativa > 0:
+                time.sleep(2.0)
+            for mpu, esperado in list(pendentes.items()):
+                obtido = self._preco_b2b(item_id, mpu)
+                if obtido is not None and abs(obtido - esperado) <= 0.01:
+                    pendentes.pop(mpu, None)
+        if pendentes:
+            return {
+                "erro": "O Mercado Livre não aplicou as faixas de atacado. Isso costuma acontecer quando o anúncio tem uma promoção/campanha ativa que conflita com preços por quantidade.",
+                "aplicado": False,
+                "faltando": sorted(pendentes.keys()),
+            }
+        return {"ok": True, "aplicado": True, "tiers_enviados": len(payload) - 1}
+
     def atualizar_descricao(self, item_id: str, plain_text: str) -> Dict:
         return self._request_json("PUT", f"/items/{item_id}/description", {"plain_text": plain_text}) or {"erro": "Falha ao atualizar descrição"}
 
@@ -590,7 +675,28 @@ class MLIntegration:
         attrs = self._merge_attribute_values(body.get("attributes") or [], updates)
         return self._request_json("PUT", f"/items/{item_id}", {"attributes": attrs}) or {"erro": "Falha ao atualizar atributos"}
 
+    @staticmethod
+    def _num(texto: Any) -> Optional[float]:
+        if texto is None:
+            return None
+        try:
+            return float(str(texto).replace(",", ".").split()[0])
+        except (ValueError, IndexError):
+            return None
+
     def atualizar_dimensoes(self, item_id: str, largura_cm: str, altura_cm: str, comprimento_cm: str, peso_g: str, package_type: str) -> Dict:
+        body = self._get(f"/items/{item_id}")
+        if not body:
+            return {"erro": "AnÃºncio nÃ£o encontrado"}
+
+        logistic = (body.get("shipping") or {}).get("logistic_type")
+        if logistic == "fulfillment":
+            return {
+                "erro": "Dimensões controladas pelo Mercado Livre (Full). O galpão mede o produto fisicamente e a alteração não é aplicada.",
+                "locked": True,
+                "logistic_type": logistic,
+            }
+
         updates = {
             "SELLER_PACKAGE_WIDTH": {"value_name": f"{largura_cm} cm"},
             "SELLER_PACKAGE_HEIGHT": {"value_name": f"{altura_cm} cm"},
@@ -598,7 +704,27 @@ class MLIntegration:
             "SELLER_PACKAGE_WEIGHT": {"value_name": f"{peso_g} g"},
             "SELLER_PACKAGE_TYPE": {"value_name": package_type},
         }
-        return self.atualizar_atributos(item_id, updates)
+        attrs = self._merge_attribute_values(body.get("attributes") or [], updates)
+        resp = self._request_json("PUT", f"/items/{item_id}", {"attributes": attrs})
+        if not resp or resp.get("erro"):
+            return resp or {"erro": "Falha ao atualizar dimensões"}
+
+        confere = self._get(f"/items/{item_id}", {"attributes": "attributes"}) or {}
+        atuais = {a.get("id"): a.get("value_name") for a in (confere.get("attributes") or [])}
+        esperado = {
+            "SELLER_PACKAGE_WIDTH": self._num(largura_cm),
+            "SELLER_PACKAGE_HEIGHT": self._num(altura_cm),
+            "SELLER_PACKAGE_LENGTH": self._num(comprimento_cm),
+            "SELLER_PACKAGE_WEIGHT": self._num(peso_g),
+        }
+        aplicado = all(self._num(atuais.get(k)) == v for k, v in esperado.items() if v is not None)
+        if not aplicado:
+            return {
+                "erro": "O Mercado Livre não aplicou as dimensões neste anúncio (a logística pode estar travando a edição).",
+                "aplicado": False,
+                "logistic_type": logistic,
+            }
+        return {"ok": True, "aplicado": True, "logistic_type": logistic}
 
     def atualizar_imagens(self, item_id: str, pictures: List[Dict[str, str]]) -> Dict:
         payload = []
