@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
-import { Precificador, type PricingSnapshot, loadPricingSummaryMap, loadPriceHistory, type PriceHistoryEntry } from './Precificador'
+import { Precificador, type PricingSnapshot, loadPricingSummaryMap, loadPriceHistory } from './Precificador'
 import { MLAnuncioEditorModal } from './MLAnuncioEditorModal'
 
 const API_BASE = import.meta.env.VITE_API_URL ?? 'http://127.0.0.1:8000'
@@ -72,6 +72,12 @@ const percentual = (parte: number, total: number) => total > 0 ? ((parte / total
 interface LivePriceSummary {
   cheio: number | null
   promocional: number | null
+}
+
+interface LivePriceBreakdown {
+  frete: number | null
+  tarifa: number | null
+  tarifaPct: number | null
 }
 
 export function AnunciosML({ onVoltar }: Props) {
@@ -334,6 +340,8 @@ function ResumoTooltip({ anuncio, resumo }: { anuncio: Anuncio; resumo: PricingS
 function PriceBubble({ anuncio, resumo, statusCor, statusLabel }: { anuncio: Anuncio; resumo?: PricingSnapshot; statusCor: string; statusLabel: string }) {
   const [hovered, setHovered] = useState(false)
   const [live, setLive] = useState<LivePriceSummary | null>(null)
+  const [breakdown, setBreakdown] = useState<LivePriceBreakdown | null>(null)
+  const [loadingBreakdown, setLoadingBreakdown] = useState(false)
 
   useEffect(() => {
     let ativo = true
@@ -346,6 +354,27 @@ function PriceBubble({ anuncio, resumo, statusCor, statusLabel }: { anuncio: Anu
       .catch(() => { /* fallback para os valores da lista */ })
     return () => { ativo = false }
   }, [anuncio.id])
+
+  useEffect(() => {
+    if (!hovered || resumo || breakdown || loadingBreakdown) return
+    let ativo = true
+    setLoadingBreakdown(true)
+    fetch(`${API_BASE}/api/ml/anuncios/${anuncio.id}`, { cache: 'no-store' })
+      .then(r => r.json())
+      .then(d => {
+        if (!ativo || d.erro) return
+        setBreakdown({
+          frete: d?.shipping_fee?.list_cost ?? d?.item?.frete_custo ?? null,
+          tarifa: d?.tarifa_atual?.tarifa ?? null,
+          tarifaPct: d?.tarifa_atual?.percentual ?? null,
+        })
+      })
+      .catch(() => { /* fallback silencioso */ })
+      .finally(() => {
+        if (ativo) setLoadingBreakdown(false)
+      })
+    return () => { ativo = false }
+  }, [hovered, resumo, breakdown, loadingBreakdown, anuncio.id])
 
   const precoOriginal = live?.cheio ?? (anuncio.preco_original || anuncio.preco)
   const precoPromocional = live?.promocional ?? anuncio.preco
@@ -392,7 +421,19 @@ function PriceBubble({ anuncio, resumo, statusCor, statusLabel }: { anuncio: Anu
         <div style={{ position: 'absolute', right: 0, top: 'calc(100% + 10px)', width: '248px', background: '#fff', color: '#1d2939', border: '1px solid #e4e7ec', borderRadius: '10px', padding: '.85rem .95rem', boxShadow: '0 8px 24px rgba(16,24,40,.12)', zIndex: 30, textAlign: 'left' }}>
           <LinhaResumo label="Preco original" valor={brl(precoOriginal)} risco={temPromo} />
           <LinhaResumo label="Preco promocional" valor={brl(precoPromocional)} cor={temPromo ? '#067647' : undefined} />
-          <div style={{ marginTop: '.45rem', fontSize: '.7rem', color: '#98a2b3' }}>Abra o Precificador e salve um resumo para detalhar frete, tarifa e margem.</div>
+          <LinhaResumo
+            label="Frete"
+            valor={loadingBreakdown ? '...' : `-${brl(breakdown?.frete)}`}
+            extra={breakdown?.frete != null ? `${percentual(breakdown.frete, precoPromocional)}%` : undefined}
+            cor="#b42318"
+          />
+          <LinhaResumo
+            label="Tarifa de venda"
+            valor={loadingBreakdown ? '...' : `-${brl(breakdown?.tarifa)}`}
+            extra={breakdown?.tarifaPct != null ? `${breakdown.tarifaPct.toFixed(2)}%` : undefined}
+            cor="#b42318"
+          />
+          <div style={{ marginTop: '.45rem', fontSize: '.7rem', color: '#98a2b3' }}>Salve um resumo no Precificador para detalhar também a margem de contribuição.</div>
           <div style={{ position: 'absolute', top: -6, right: 30, width: 12, height: 12, background: '#fff', borderLeft: '1px solid #e4e7ec', borderTop: '1px solid #e4e7ec', transform: 'rotate(45deg)' }} />
         </div>
       )}
