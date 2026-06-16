@@ -156,7 +156,15 @@ function App() {
   const buscaTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [buscandoSKU, setBuscandoSKU] = useState(false)
   // Inbounds ativos (diagnóstico em tempo real no topo das Notas)
-  const [inboundsAtivos, setInboundsAtivos] = useState<Array<{ numero_inbound: string; data_limite: string | null; nome_embalde?: string }>>([])
+  const [inboundsAtivos, setInboundsAtivos] = useState<Array<{
+    numero_inbound: string
+    data_limite: string | null
+    nome_embalde?: string
+    total_planejado_full?: number
+    total_baixado_full?: number
+    qtd_items?: number
+    qtd_baixados?: number
+  }>>([])
   const [syncSaudavel, setSyncSaudavel] = useState(false)
   const [ultimaSincronizacao, setUltimaSincronizacao] = useState<string | null>(null)
 
@@ -172,6 +180,14 @@ function App() {
     const dt = new Date(d)
     return isNaN(dt.getTime()) ? '--:--' : dt.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
   }
+
+  const progressoBaixasInbound = (() => {
+    const planejado = inboundsAtivos.reduce((acc, inbound) => acc + Number(inbound.total_planejado_full || 0), 0)
+    const baixado = inboundsAtivos.reduce((acc, inbound) => acc + Number(inbound.total_baixado_full || 0), 0)
+    const restante = Math.max(0, planejado - baixado)
+    const percentual = planejado > 0 ? Math.round((baixado / planejado) * 100) : 0
+    return { planejado, baixado, restante, percentual }
+  })()
 
   // Carregar notas ao iniciar
   useEffect(() => {
@@ -1403,34 +1419,78 @@ function App() {
                 <h2 style={{ marginTop: 0 }}>Notas Fiscais ({notasFiltradas.length})</h2>
 
                 {/* ===== DIAGNÓSTICO DE INBOUNDS ATIVOS (TEMPO REAL) ===== */}
-                <div style={{
-                  minWidth: '260px',
-                  maxWidth: '380px',
-                  marginTop: '0.35rem',
-                  border: `2px solid ${inboundsAtivos.length > 0 ? '#d32f2f' : '#a5d6a7'}`,
-                  borderRadius: '12px',
-                  padding: '0.85rem 1rem',
-                  background: inboundsAtivos.length > 0 ? '#fff5f5' : '#f3faf3',
-                  boxShadow: inboundsAtivos.length > 0 ? '0 10px 24px rgba(211, 47, 47, 0.08)' : '0 8px 18px rgba(46, 125, 50, 0.08)'
-                }}>
-                  {inboundsAtivos.length > 0 ? (
-                    <>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', color: '#d32f2f', fontWeight: 800, fontSize: '0.78rem', letterSpacing: '0.04em', marginBottom: '0.55rem', textTransform: 'uppercase' }}>
-                        <span style={{ width: 9, height: 9, borderRadius: '50%', background: '#d32f2f', display: 'inline-block', animation: 'pulse-inbound 1.2s infinite' }} />
-                        {inboundsAtivos.length === 1 ? 'Inbound ativo' : `${inboundsAtivos.length} inbounds ativos`}
+                <div style={{ display: 'grid', gap: '0.9rem', minWidth: '260px', maxWidth: '380px', width: '100%' }}>
+                  <div style={{
+                    marginTop: '0.35rem',
+                    border: `2px solid ${inboundsAtivos.length > 0 ? '#d32f2f' : '#a5d6a7'}`,
+                    borderRadius: '12px',
+                    padding: '0.85rem 1rem',
+                    background: inboundsAtivos.length > 0 ? '#fff5f5' : '#f3faf3',
+                    boxShadow: inboundsAtivos.length > 0 ? '0 10px 24px rgba(211, 47, 47, 0.08)' : '0 8px 18px rgba(46, 125, 50, 0.08)'
+                  }}>
+                    {inboundsAtivos.length > 0 ? (
+                      <>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', color: '#d32f2f', fontWeight: 800, fontSize: '0.78rem', letterSpacing: '0.04em', marginBottom: '0.55rem', textTransform: 'uppercase' }}>
+                          <span style={{ width: 9, height: 9, borderRadius: '50%', background: '#d32f2f', display: 'inline-block', animation: 'pulse-inbound 1.2s infinite' }} />
+                          {inboundsAtivos.length === 1 ? 'Inbound ativo' : `${inboundsAtivos.length} inbounds ativos`}
+                        </div>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
+                          {inboundsAtivos.map((inb) => (
+                            <div key={inb.numero_inbound} style={{ display: 'flex', justifyContent: 'space-between', gap: '0.75rem', color: '#d32f2f', fontSize: '0.82rem', fontWeight: 700 }}>
+                              <span>#{inb.numero_inbound}</span>
+                              <span>encerra {fmtData(inb.data_limite)}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </>
+                    ) : (
+                      <div style={{ color: '#2e7d32', fontWeight: 800, fontSize: '0.85rem', textAlign: 'center', letterSpacing: '0.04em' }}>
+                        ✓ SEM INBOUND ATIVO
                       </div>
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
-                        {inboundsAtivos.map((inb) => (
-                          <div key={inb.numero_inbound} style={{ display: 'flex', justifyContent: 'space-between', gap: '0.75rem', color: '#d32f2f', fontSize: '0.82rem', fontWeight: 700 }}>
-                            <span>#{inb.numero_inbound}</span>
-                            <span>encerra {fmtData(inb.data_limite)}</span>
+                    )}
+                  </div>
+
+                  {inboundsAtivos.length > 0 && progressoBaixasInbound.planejado > 0 && (
+                    <div style={{
+                      border: '2px solid #90caf9',
+                      borderRadius: '12px',
+                      padding: '1rem',
+                      background: '#f7fbff',
+                      boxShadow: '0 10px 24px rgba(25, 118, 210, 0.08)'
+                    }}>
+                      <div style={{ color: '#1565c0', fontWeight: 800, fontSize: '0.78rem', letterSpacing: '0.04em', textTransform: 'uppercase', marginBottom: '0.75rem' }}>
+                        Progresso das baixas do inbound
+                      </div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+                        <svg width="112" height="112" viewBox="0 0 42 42" aria-label="Gráfico de pizza das baixas do inbound">
+                          <circle cx="21" cy="21" r="15.915" fill="transparent" stroke="#e3f2fd" strokeWidth="7" />
+                          <circle
+                            cx="21"
+                            cy="21"
+                            r="15.915"
+                            fill="transparent"
+                            stroke="#1976d2"
+                            strokeWidth="7"
+                            strokeDasharray={`${progressoBaixasInbound.percentual} ${100 - progressoBaixasInbound.percentual}`}
+                            strokeLinecap="round"
+                            transform="rotate(-90 21 21)"
+                          />
+                          <text x="21" y="22.5" textAnchor="middle" fontSize="7" fontWeight="700" fill="#0d47a1">
+                            {progressoBaixasInbound.percentual}%
+                          </text>
+                        </svg>
+                        <div style={{ display: 'grid', gap: '0.35rem', fontSize: '0.84rem' }}>
+                          <div style={{ color: '#0d47a1', fontWeight: 700 }}>
+                            {progressoBaixasInbound.baixado} de {progressoBaixasInbound.planejado} un
                           </div>
-                        ))}
+                          <div style={{ color: '#2e7d32' }}>
+                            Realizado: <strong>{progressoBaixasInbound.baixado}</strong>
+                          </div>
+                          <div style={{ color: '#ef6c00' }}>
+                            Pendente: <strong>{progressoBaixasInbound.restante}</strong>
+                          </div>
+                        </div>
                       </div>
-                    </>
-                  ) : (
-                    <div style={{ color: '#2e7d32', fontWeight: 800, fontSize: '0.85rem', textAlign: 'center', letterSpacing: '0.04em' }}>
-                      ✓ SEM INBOUND ATIVO
                     </div>
                   )}
                 </div>

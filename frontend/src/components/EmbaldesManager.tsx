@@ -28,7 +28,11 @@ interface Inbound {
   status: string
   qtd_items: number
   qtd_validados: number
+  qtd_baixados?: number
   total_lido?: number
+  total_planejado_full?: number
+  total_baixado_full?: number
+  revisao_salva_em?: string | null
   itens?: ItemInbound[]
 }
 
@@ -39,6 +43,7 @@ interface ItemRevisao {
   item_id: number
   titulo_anuncio: string
   sku_inbound?: string
+  quantidade_original?: number
   quantidade_full: number
   olist_encontrado: boolean
   olist_produto_id?: string | null
@@ -51,6 +56,8 @@ interface ItemRevisao {
   estoque_indisponivel?: boolean
   baixa_aplicada: number
   vinculado?: number
+  foi_balanceado?: number
+  saldo_disponivel?: number | null
 }
 
 interface Revisao {
@@ -58,6 +65,7 @@ interface Revisao {
   nome_embalde: string
   numero_inbound?: string
   status: string
+  revisao_salva_em?: string
   resumo: { total: number; encontrados: number; nao_encontrados: number; com_falta: number }
   itens: ItemRevisao[]
 }
@@ -84,6 +92,8 @@ export function EmbaldesManager() {
   const [confirmandoBaixa, setConfirmandoBaixa] = useState(false)
   const [baixandoItemId, setBaixandoItemId] = useState<number | null>(null)
   const [itensBaixados, setItensBaixados] = useState<Record<number, number>>({})
+  const [quantidadesFull, setQuantidadesFull] = useState<Record<number, string>>({})
+  const [salvandoQuantidadeId, setSalvandoQuantidadeId] = useState<number | null>(null)
   // Filtro da tabela de revisão
   type FiltroRev = 'todos' | 'vinculados' | 'nao_vinculados' | 'baixados' | 'nao_baixados'
   const [filtroRevisao, setFiltroRevisao] = useState<FiltroRev>('todos')
@@ -294,6 +304,7 @@ export function EmbaldesManager() {
       setRevisandoId(null)
       setRevisao(null)
       setDeclaracoes({})
+      setQuantidadesFull({})
       return
     }
     try {
@@ -304,9 +315,15 @@ export function EmbaldesManager() {
       setRevisao(null)
       setDeclaracoes({})
       setItensBaixados({})
+      setQuantidadesFull({})
       setFiltroRevisao('todos')
       const resposta = await api.get(`/embaldes/${id}/revisao`)
       setRevisao(resposta.data)
+      const planejadas: Record<number, string> = {}
+      for (const it of resposta.data.itens || []) {
+        planejadas[it.item_id] = String(Math.round(it.quantidade_full ?? 0))
+      }
+      setQuantidadesFull(planejadas)
       // Marca os que já foram baixados antes
       const jaBaixados: Record<number, number> = {}
       for (const it of resposta.data.itens || []) {
@@ -365,6 +382,58 @@ export function EmbaldesManager() {
       setMessage('Erro: ' + (erro.response?.data?.erro || String(erro)))
     } finally {
       setBaixandoItemId(null)
+    }
+  }
+
+  const abrirBalanceamento = (it: ItemRevisao) => {
+    setBalanceandoItem(it)
+    setQtdRealConferida('')
+  }
+
+  const salvarQuantidadeFull = async (it: ItemRevisao) => {
+    if (!revisao) return
+    const bruto = quantidadesFull[it.item_id]
+    const quantidade = Math.max(0, Number(bruto || 0))
+    if (!Number.isFinite(quantidade)) {
+      setMessage('Digite uma quantidade vÃ¡lida para o FULL')
+      return
+    }
+
+    const atual = Number(it.quantidade_full || 0)
+    if (Math.abs(atual - quantidade) < 0.0001) return
+
+    try {
+      setSalvandoQuantidadeId(it.item_id)
+      const resposta = await api.post(`/embaldes/${revisao.embale_id}/itens/${it.item_id}/quantidade-full`, {
+        quantidade_full: quantidade,
+      })
+      const snapshot: ItemRevisao | undefined = resposta.data.snapshot
+      if (snapshot) {
+        setRevisao((anterior) => anterior ? {
+          ...anterior,
+          resumo: {
+            ...anterior.resumo,
+            com_falta: anterior.itens
+              .map((itemAtual) => itemAtual.item_id === snapshot.item_id ? snapshot : itemAtual)
+              .filter((itemAtual) => itemAtual.tem_falta).length,
+          },
+          itens: anterior.itens.map((itemAtual) => itemAtual.item_id === snapshot.item_id ? snapshot : itemAtual),
+        } : anterior)
+        setQuantidadesFull((anterior) => ({ ...anterior, [it.item_id]: String(Math.round(snapshot.quantidade_full || 0)) }))
+        if (!snapshot.tem_falta) {
+          setDeclaracoes((anterior) => {
+            const novo = { ...anterior }
+            delete novo[it.item_id]
+            return novo
+          })
+        }
+      }
+      await carregarInbounds()
+    } catch (erro: any) {
+      setQuantidadesFull((anterior) => ({ ...anterior, [it.item_id]: String(Math.round(it.quantidade_full || 0)) }))
+      setMessage('Erro ao ajustar quantidade do FULL: ' + (erro.response?.data?.erro || String(erro)))
+    } finally {
+      setSalvandoQuantidadeId(null)
     }
   }
 
@@ -824,7 +893,7 @@ export function EmbaldesManager() {
                       </div>
 
                       <div style={{ fontSize: '0.85rem', color: '#666', marginBottom: '0.75rem', fontStyle: 'italic' }}>
-                        Revisão (somente leitura) — selecione quantas unidades baixar em cada item.
+                        A primeira leitura do inbound fica salva no banco. Ajuste "Vai pro FULL" quando precisar e use baixa/balanço sem revisar tudo de novo.
                       </div>
 
                       {/* Filtros */}
@@ -863,7 +932,7 @@ export function EmbaldesManager() {
                       })()}
 
                       {/* Tabela */}
-                      <div style={{ display: 'grid', gridTemplateColumns: '2.4fr 0.9fr 0.9fr 0.9fr 1.1fr 0.8fr 1fr', gap: '0.5rem', padding: '0.7rem 0.9rem', background: '#f5f5f5', borderRadius: '4px 4px 0 0', fontSize: '0.8rem', fontWeight: 'bold', color: '#555', textTransform: 'uppercase' }}>
+                      <div style={{ display: 'grid', gridTemplateColumns: '2.4fr 1fr 1.2fr 0.9fr 1.1fr 0.8fr 1.5fr', gap: '0.5rem', padding: '0.7rem 0.9rem', background: '#f5f5f5', borderRadius: '4px 4px 0 0', fontSize: '0.8rem', fontWeight: 'bold', color: '#555', textTransform: 'uppercase' }}>
                         <div>Produto / SKU</div>
                         <div style={{ textAlign: 'center' }}>Estoque Olist</div>
                         <div style={{ textAlign: 'center' }}>Vai pro FULL</div>
@@ -888,10 +957,12 @@ export function EmbaldesManager() {
                           const jaBaixado = it.baixa_aplicada === 1 || !!itensBaixados[it.item_id]
                           const vinculado = it.vinculado === 1 || !!it.olist_produto_id
                           const podeBaixar = it.olist_encontrado && !semEstoque && !jaBaixado
+                          const podeBalancear = it.olist_encontrado && !semEstoque && !jaBaixado
+                          const quantidadeEditavel = quantidadesFull[it.item_id] ?? String(Math.round(it.quantidade_full || 0))
                           return (
                             <div
                               key={it.item_id}
-                              style={{ display: 'grid', gridTemplateColumns: '2.4fr 0.9fr 0.9fr 0.9fr 1.1fr 0.8fr 1fr', gap: '0.5rem', padding: '0.8rem 0.9rem', background: jaBaixado ? '#eef7ee' : bg, borderBottom: '1px solid #f0f0f0', fontSize: '0.9rem', alignItems: 'center', opacity: jaBaixado ? 0.8 : 1 }}
+                              style={{ display: 'grid', gridTemplateColumns: '2.4fr 1fr 1.2fr 0.9fr 1.1fr 0.8fr 1.5fr', gap: '0.5rem', padding: '0.8rem 0.9rem', background: jaBaixado ? '#eef7ee' : bg, borderBottom: '1px solid #f0f0f0', fontSize: '0.9rem', alignItems: 'center', opacity: jaBaixado ? 0.8 : 1 }}
                             >
                               <div>
                                 <div style={{ fontWeight: 600, lineHeight: 1.3 }}>{it.titulo_anuncio}</div>
@@ -915,7 +986,27 @@ export function EmbaldesManager() {
                               <div style={{ textAlign: 'center', fontWeight: 'bold' }}>
                                 {naoAchado ? '—' : semEstoque ? '?' : it.estoque_atual}
                               </div>
-                              <div style={{ textAlign: 'center' }}>{Math.round(it.quantidade_full)}</div>
+                              <div style={{ textAlign: 'center' }}>
+                                {jaBaixado ? (
+                                  <strong>{Math.round(it.quantidade_full)}</strong>
+                                ) : (
+                                  <div style={{ display: 'grid', gap: '0.25rem', justifyItems: 'center' }}>
+                                    <input
+                                      type="number"
+                                      min="0"
+                                      step="1"
+                                      value={quantidadeEditavel}
+                                      onChange={(e) => setQuantidadesFull({ ...quantidadesFull, [it.item_id]: e.target.value })}
+                                      onBlur={() => salvarQuantidadeFull(it)}
+                                      onKeyDown={(e) => { if (e.key === 'Enter') salvarQuantidadeFull(it) }}
+                                      style={{ width: '78px', padding: '0.32rem', borderRadius: '4px', border: '1px solid #bbb', textAlign: 'center', fontSize: '0.9rem', fontWeight: 700 }}
+                                    />
+                                    {salvandoQuantidadeId === it.item_id && (
+                                      <span style={{ fontSize: '0.68rem', color: '#1976D2', fontWeight: 700 }}>salvando...</span>
+                                    )}
+                                  </div>
+                                )}
+                              </div>
                               <div style={{ textAlign: 'center', fontWeight: 'bold', color: '#2e7d32' }}>
                                 {naoAchado || semEstoque ? '—' : it.tem_falta ? '—' : it.resultado}
                               </div>
@@ -954,23 +1045,28 @@ export function EmbaldesManager() {
                                   >
                                     Vincular
                                   </button>
-                                ) : it.tem_falta ? (
-                                  <button
-                                    onClick={() => { setBalanceandoItem(it); setQtdRealConferida('') }}
-                                    style={{ padding: '0.3rem 0.7rem', background: '#fff', color: '#d32f2f', border: '1px solid #d32f2f', borderRadius: '4px', cursor: 'pointer', fontSize: '0.8rem', fontWeight: 'bold' }}
-                                  >
-                                    Balanço
-                                  </button>
-                                ) : podeBaixar ? (
-                                  <button
-                                    onClick={() => baixarItem(it)}
-                                    disabled={baixandoItemId === it.item_id}
-                                    style={{ padding: '0.3rem 0.7rem', background: '#fff', color: '#1976D2', border: '1px solid #1976D2', borderRadius: '4px', cursor: baixandoItemId === it.item_id ? 'wait' : 'pointer', fontSize: '0.8rem', fontWeight: 'bold' }}
-                                  >
-                                    {baixandoItemId === it.item_id ? '...' : 'Baixar'}
-                                  </button>
                                 ) : (
-                                  <span style={{ color: '#ccc', fontSize: '0.8rem' }}>—</span>
+                                  <>
+                                    {podeBalancear && (
+                                      <button
+                                        onClick={() => abrirBalanceamento(it)}
+                                        style={{ padding: '0.3rem 0.7rem', background: '#fff', color: '#d32f2f', border: '1px solid #d32f2f', borderRadius: '4px', cursor: 'pointer', fontSize: '0.8rem', fontWeight: 'bold' }}
+                                      >
+                                        Balanço
+                                      </button>
+                                    )}
+                                    {podeBaixar ? (
+                                      <button
+                                        onClick={() => baixarItem(it)}
+                                        disabled={baixandoItemId === it.item_id}
+                                        style={{ padding: '0.3rem 0.7rem', background: '#fff', color: '#1976D2', border: '1px solid #1976D2', borderRadius: '4px', cursor: baixandoItemId === it.item_id ? 'wait' : 'pointer', fontSize: '0.8rem', fontWeight: 'bold' }}
+                                      >
+                                        {baixandoItemId === it.item_id ? '...' : 'Baixar'}
+                                      </button>
+                                    ) : (
+                                      <span style={{ color: '#ccc', fontSize: '0.8rem' }}>—</span>
+                                    )}
+                                  </>
                                 )}
                               </div>
                             </div>

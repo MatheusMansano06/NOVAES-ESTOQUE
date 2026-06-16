@@ -195,6 +195,7 @@ class EmbaleFU(Base):
     data_upload = Column(DateTime, default=datetime.utcnow)
     data_limite = Column(DateTime, nullable=True)  # Quando o FULL será enviado (deadline)
     data_encerramento = Column(DateTime, nullable=True)  # Quando foi efetivamente encerrado
+    revisao_salva_em = Column(DateTime, nullable=True)  # Primeira revisao congelada
     status = Column(String(50), default="processando")  # processando, encerrado
     observacoes = Column(Text, nullable=True)
 
