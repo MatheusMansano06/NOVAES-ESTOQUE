@@ -1414,7 +1414,7 @@ function App() {
               </div>
             </div>
 
-            {inboundsAtivos.length > 0 && progressoBaixasInbound.planejado > 0 && (
+            {false && inboundsAtivos.length > 0 && progressoBaixasInbound.planejado > 0 && (
               <div className="card" style={{
                 border: '2px solid #90caf9',
                 boxShadow: '0 10px 24px rgba(25, 118, 210, 0.08)'
