@@ -1413,49 +1413,6 @@ function App() {
               </div>
             </div>
 
-            {inboundsAtivos.length > 0 && progressoBaixasInbound.planejado > 0 && (
-              <div className="card" style={{
-                border: '2px solid #90caf9',
-                boxShadow: '0 10px 24px rgba(25, 118, 210, 0.08)'
-              }}>
-                <div className="card-body" style={{ padding: '1rem' }}>
-                  <div style={{ color: '#1565c0', fontWeight: 800, fontSize: '0.78rem', letterSpacing: '0.04em', textTransform: 'uppercase', marginBottom: '0.75rem' }}>
-                    Progresso das baixas do inbound
-                  </div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
-                    <svg width="112" height="112" viewBox="0 0 42 42" aria-label="Gráfico de pizza das baixas do inbound">
-                      <circle cx="21" cy="21" r="15.915" fill="transparent" stroke="#e3f2fd" strokeWidth="7" />
-                      <circle
-                        cx="21"
-                        cy="21"
-                        r="15.915"
-                        fill="transparent"
-                        stroke="#1976d2"
-                        strokeWidth="7"
-                        strokeDasharray={`${progressoBaixasInbound.percentual} ${100 - progressoBaixasInbound.percentual}`}
-                        strokeLinecap="round"
-                        transform="rotate(-90 21 21)"
-                      />
-                      <text x="21" y="22.5" textAnchor="middle" fontSize="7" fontWeight="700" fill="#0d47a1">
-                        {progressoBaixasInbound.percentual}%
-                      </text>
-                    </svg>
-                    <div style={{ display: 'grid', gap: '0.35rem', fontSize: '0.84rem' }}>
-                      <div style={{ color: '#0d47a1', fontWeight: 700 }}>
-                        {progressoBaixasInbound.baixado} de {progressoBaixasInbound.planejado} un
-                      </div>
-                      <div style={{ color: '#2e7d32' }}>
-                        Realizado: <strong>{progressoBaixasInbound.baixado}</strong>
-                      </div>
-                      <div style={{ color: '#ef6c00' }}>
-                        Pendente: <strong>{progressoBaixasInbound.restante}</strong>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            )}
-
             {/* FILTRO + LISTA DE NOTAS */}
             <div className="card">
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '1.75rem', marginBottom: '1.5rem', flexWrap: 'wrap' }}>
@@ -1654,6 +1611,49 @@ function App() {
                 )}
               </div>
             </div>
+
+            {inboundsAtivos.length > 0 && progressoBaixasInbound.planejado > 0 && (
+              <div className="card" style={{
+                border: '2px solid #90caf9',
+                boxShadow: '0 10px 24px rgba(25, 118, 210, 0.08)'
+              }}>
+                <div className="card-body" style={{ padding: '1rem' }}>
+                  <div style={{ color: '#1565c0', fontWeight: 800, fontSize: '0.78rem', letterSpacing: '0.04em', textTransform: 'uppercase', marginBottom: '0.75rem' }}>
+                    Progresso das baixas do inbound
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+                    <svg width="112" height="112" viewBox="0 0 42 42" aria-label="Gráfico de pizza das baixas do inbound">
+                      <circle cx="21" cy="21" r="15.915" fill="transparent" stroke="#e3f2fd" strokeWidth="7" />
+                      <circle
+                        cx="21"
+                        cy="21"
+                        r="15.915"
+                        fill="transparent"
+                        stroke="#1976d2"
+                        strokeWidth="7"
+                        strokeDasharray={`${progressoBaixasInbound.percentual} ${100 - progressoBaixasInbound.percentual}`}
+                        strokeLinecap="round"
+                        transform="rotate(-90 21 21)"
+                      />
+                      <text x="21" y="22.5" textAnchor="middle" fontSize="7" fontWeight="700" fill="#0d47a1">
+                        {progressoBaixasInbound.percentual}%
+                      </text>
+                    </svg>
+                    <div style={{ display: 'grid', gap: '0.35rem', fontSize: '0.84rem' }}>
+                      <div style={{ color: '#0d47a1', fontWeight: 700 }}>
+                        {progressoBaixasInbound.baixado} de {progressoBaixasInbound.planejado} un
+                      </div>
+                      <div style={{ color: '#2e7d32' }}>
+                        Realizado: <strong>{progressoBaixasInbound.baixado}</strong>
+                      </div>
+                      <div style={{ color: '#ef6c00' }}>
+                        Pendente: <strong>{progressoBaixasInbound.restante}</strong>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
 
           {/* ===== layout antigo (4 colunas) desativado ===== */}
