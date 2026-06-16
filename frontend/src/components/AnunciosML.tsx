@@ -346,32 +346,32 @@ function ResumoTooltip({ anuncio, resumo }: { anuncio: Anuncio; resumo?: Pricing
   const margemPct = margem != null && precoPromocional > 0 ? (margem / precoPromocional) * 100 : null
 
   return (
-    <div style={{ position: 'absolute', right: 0, top: 'calc(100% + 10px)', width: '298px', background: '#4e3a73', color: '#fff', borderRadius: '8px', padding: '.9rem 1rem', boxShadow: '0 18px 32px rgba(41, 26, 77, 0.35)', zIndex: 30, textAlign: 'left' }}>
+    <div style={{ position: 'absolute', right: 0, top: 'calc(100% + 10px)', width: '304px', background: '#ffffff', color: '#1d2939', border: '1px solid #cfe0ff', borderRadius: '12px', padding: '.9rem 1rem', boxShadow: '0 14px 30px rgba(16,24,40,.14)', zIndex: 30, textAlign: 'left' }}>
       <LinhaResumo label="Preco original" valor={brl(precoOriginal)} risco={temPromo} />
       <LinhaResumo label="Preco promocional" valor={brl(precoPromocional)} cor={temPromo ? '#067647' : undefined} />
-      <LinhaResumo label="Frete" valor={frete != null ? `-${brl(frete)}` : '--'} extra={frete != null ? `${percentual(frete, precoPromocional)}%` : undefined} cor="#ffffff" />
-      <LinhaResumo label="Tarifa de venda" valor={tarifa != null ? `-${brl(tarifa)}` : '--'} extra={tarifaPct != null ? `${tarifaPct.toFixed(2)}%` : undefined} cor="#ffffff" />
-      <LinhaResumo label="Custo" valor={custo != null ? `-${brl(custo)}` : '--'} cor="#ffffff" />
-      <LinhaResumo label="Imposto" valor={imposto != null ? `-${brl(imposto)}` : '--'} extra={impostoPct ? `${impostoPct.toFixed(2)}%` : undefined} cor="#ffffff" />
-      <div style={{ height: 1, background: 'rgba(255,255,255,0.22)', margin: '.55rem 0' }} />
-      <LinhaResumo label="Marg. contribuição" valor={margem != null ? brl(margem) : '--'} extra={margemPct != null ? `${margemPct.toFixed(2)}%` : undefined} strong cor="#ffffff" />
+      <LinhaResumo label="Frete" valor={frete != null ? `-${brl(frete)}` : '--'} extra={frete != null ? `${percentual(frete, precoPromocional)}%` : undefined} cor="#b42318" />
+      <LinhaResumo label="Tarifa de venda" valor={tarifa != null ? `-${brl(tarifa)}` : '--'} extra={tarifaPct != null ? `${tarifaPct.toFixed(2)}%` : undefined} cor="#b42318" />
+      <LinhaResumo label="Custo" valor={custo != null ? `-${brl(custo)}` : '--'} cor="#b42318" />
+      <LinhaResumo label="Imposto" valor={imposto != null ? `-${brl(imposto)}` : '--'} extra={impostoPct ? `${impostoPct.toFixed(2)}%` : undefined} cor="#b42318" />
+      <div style={{ height: 1, background: '#e9eef7', margin: '.55rem 0' }} />
+      <LinhaResumo label="Marg. contribuição" valor={margem != null ? brl(margem) : '--'} extra={margemPct != null ? `${margemPct.toFixed(2)}%` : undefined} strong cor={margem != null && margem < 0 ? '#b42318' : '#3483fa'} />
       {historico.length > 0 && (
-        <div style={{ marginTop: '.6rem', paddingTop: '.55rem', borderTop: '1px solid rgba(255,255,255,0.22)' }}>
-          <div style={{ fontSize: '.68rem', color: '#d8caef', textTransform: 'uppercase', letterSpacing: '.03em', marginBottom: '.3rem' }}>Histórico de preço</div>
+        <div style={{ marginTop: '.6rem', paddingTop: '.55rem', borderTop: '1px solid #e9eef7' }}>
+          <div style={{ fontSize: '.68rem', color: '#98a2b3', textTransform: 'uppercase', letterSpacing: '.03em', marginBottom: '.3rem' }}>Histórico de preço</div>
           {historico.slice(0, 3).map((h, i) => (
-            <div key={i} style={{ display: 'flex', justifyContent: 'space-between', fontSize: '.74rem', color: '#efe7ff', padding: '.1rem 0' }}>
+            <div key={i} style={{ display: 'flex', justifyContent: 'space-between', fontSize: '.74rem', color: '#667085', padding: '.1rem 0' }}>
               <span>{new Date(h.data).toLocaleDateString('pt-BR')}</span>
-              <span>{brl(h.de)} → <strong style={{ color: '#fff' }}>{brl(h.para)}</strong></span>
+              <span>{brl(h.de)} → <strong style={{ color: '#1d2939' }}>{brl(h.para)}</strong></span>
             </div>
           ))}
         </div>
       )}
       {!resumo && (
-        <div style={{ marginTop: '.45rem', fontSize: '.68rem', color: '#d8caef' }}>
+        <div style={{ marginTop: '.45rem', fontSize: '.68rem', color: '#98a2b3' }}>
           * Frete e tarifa vêm direto do ML. Para custo/margem exatos, salve os dados no Precificador.
         </div>
       )}
-      <div style={{ position: 'absolute', top: -8, right: 32, width: 16, height: 16, background: '#4e3a73', transform: 'rotate(45deg)' }} />
+      <div style={{ position: 'absolute', top: -7, right: 32, width: 14, height: 14, background: '#ffffff', borderLeft: '1px solid #cfe0ff', borderTop: '1px solid #cfe0ff', transform: 'rotate(45deg)' }} />
     </div>
   )
 }
@@ -463,10 +463,10 @@ function PriceBubble({ anuncio, resumo, statusCor, statusLabel }: { anuncio: Anu
 function LinhaResumo({ label, valor, extra, strong = false, cor, risco = false }: { label: string; valor: string; extra?: string; strong?: boolean; cor?: string; risco?: boolean }) {
   return (
     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '.75rem', padding: '.2rem 0' }}>
-      <span style={{ fontSize: '.8rem', color: cor ? '#ffffff' : '#667085', fontWeight: strong ? 700 : 500 }}>{label}</span>
+      <span style={{ fontSize: '.8rem', color: '#667085', fontWeight: strong ? 700 : 500 }}>{label}</span>
       <span style={{ display: 'flex', gap: '.45rem', alignItems: 'baseline' }}>
         <span style={{ fontSize: strong ? '.95rem' : '.85rem', fontWeight: strong ? 800 : 700, color: cor || '#1d2939', textDecoration: risco ? 'line-through' : 'none' }}>{valor}</span>
-        {extra && <span style={{ fontSize: '.72rem', color: cor ? '#d8caef' : '#98a2b3' }}>{extra}</span>}
+        {extra && <span style={{ fontSize: '.72rem', color: '#98a2b3' }}>{extra}</span>}
       </span>
     </div>
   )
