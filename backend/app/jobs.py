@@ -241,12 +241,21 @@ def iniciar_scheduler():
             minutes=ml_intervalo,
             id='ml_sync_catalogo',
             name='Sincronização incremental de anúncios do Mercado Livre',
-            next_run_time=datetime.now(),
             max_instances=1,
             coalesce=True,
+            misfire_grace_time=3600,
         )
         scheduler.start()
         logger.info("[SCHEDULER] Agendador iniciado com sucesso")
         logger.info("[SCHEDULER] Job 'check_estoque_minimo' agendado para 08:00 todos os dias")
         logger.info("[SCHEDULER] Job 'encerrar_inbounds_vencidos' agendado a cada 1 hora")
         logger.info(f"[SCHEDULER] Job 'ml_sync_catalogo' agendado a cada {ml_intervalo} min")
+
+        # Aquece o cache logo no boot, sem depender de next_run_time (que sofre
+        # misfire) e sem bloquear o startup: dispara o sync numa thread daemon.
+        try:
+            from app.integracoes_ml import ml
+            ml._sync_catalogo_async("active")
+            logger.info("[SCHEDULER] Sync inicial de anúncios ML disparado em background")
+        except Exception as e:
+            logger.error(f"[SCHEDULER] Falha ao disparar sync inicial ML: {e}")
