@@ -510,7 +510,8 @@ export function FornecedoresManager({ onVoltar }: FornecedoresManagerProps) {
                   const freteML = anuncio?.frete ?? 0
                   const tarifaML = anuncio?.tarifa ?? 0
                   const impostoML = precoML > 0 ? precoML * impostoPct / 100 : 0
-                  const margemML = anuncio && precoML > 0 ? precoML - freteML - tarifaML - impostoML - custo : null
+                  const tarifaIndisponivel = !!anuncio && anuncio.tarifa == null
+                  const margemML = anuncio && precoML > 0 && !tarifaIndisponivel ? precoML - freteML - tarifaML - impostoML - custo : null
                   const margemPctML = margemML != null && precoML > 0 ? Math.round((margemML / precoML) * 100) : 0
                   const corMargem = (l: number | null) => l === null ? '#999' : l > 0 ? '#2e7d32' : '#c62828'
 
@@ -550,7 +551,11 @@ export function FornecedoresManager({ onVoltar }: FornecedoresManagerProps) {
                             <div style={{ marginLeft: 'auto', textAlign: 'right' }}>
                               <div style={{ fontSize: '0.72rem', color: '#666' }}>Margem de contribuição</div>
                               <div style={{ fontWeight: 700, fontSize: '1.05rem', color: corMargem(margemML) }}>
-                                {margemML === null ? '—' : `${brl(margemML)} (${margemPctML}%)`}
+                                {margemML !== null
+                                  ? `${brl(margemML)} (${margemPctML}%)`
+                                  : tarifaIndisponivel
+                                    ? <span style={{ fontSize: '0.78rem', fontWeight: 600 }}>tarifa indisponível — reconecte o ML</span>
+                                    : '—'}
                               </div>
                             </div>
                             {anuncio.permalink && (
