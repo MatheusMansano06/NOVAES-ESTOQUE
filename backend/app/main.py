@@ -726,18 +726,6 @@ async def buscar_produtos_olist(request: Request):
         print(f"[BUSCA] Buscando na Olist: {query}")
         produtos = olist.buscar_produtos(query)
 
-        # Se não encontrou produtos e não tem nenhum token configurado
-        if not produtos and not olist.get_access_token() and not olist.token_v2:
-            print("[BUSCA] Nenhum token Olist configurado")
-            return JSONResponse({
-                "produtos": [],
-                "total": 0,
-                "termo_busca": query,
-                "nao_autorizado": True,
-                "url_autorizacao": "http://localhost:8000/api/olist/conectar",
-                "mensagem": "Configure a chave OLIST_API_TOKEN_SIMPLE no .env ou conecte-se via OAuth2"
-            })
-
         if produtos:
             return JSONResponse({
                 "produtos": produtos,
@@ -746,7 +734,23 @@ async def buscar_produtos_olist(request: Request):
                 "metodo": "oauth2_v3"
             })
 
-        # Nenhum produto encontrado (mas API funcionou)
+        # Sem produtos: distinguir "Olist desconectado" de "produto realmente não existe".
+        try:
+            st = olist.status()
+        except Exception:
+            st = {}
+        if not st.get("autorizado"):
+            print("[BUSCA] Olist não autorizado — sinalizando reconexão")
+            return JSONResponse({
+                "produtos": [],
+                "total": 0,
+                "termo_busca": query,
+                "nao_autorizado": True,
+                "url_autorizacao": st.get("url_autorizacao") or "/api/olist/conectar",
+                "mensagem": "Olist desconectado — reconecte a integração para buscar produtos."
+            })
+
+        # Nenhum produto encontrado (mas a integração está ok)
         return JSONResponse({
             "produtos": [],
             "total": 0,

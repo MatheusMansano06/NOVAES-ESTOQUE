@@ -92,6 +92,7 @@ export function EmbaldesManager() {
   const [buscaTermo, setBuscaTermo] = useState('')
   const [buscaResultados, setBuscaResultados] = useState<any[]>([])
   const [buscandoOlist, setBuscandoOlist] = useState(false)
+  const [buscaNaoAutorizado, setBuscaNaoAutorizado] = useState<{ url?: string } | null>(null)
   const [vinculandoProduto, setVinculandoProduto] = useState(false)
   // Balanço de estoque
   const [balanceandoItem, setBalanceandoItem] = useState<ItemRevisao | null>(null)
@@ -372,6 +373,7 @@ export function EmbaldesManager() {
     const termo = it.sku_inbound || it.titulo_anuncio || ''
     setBuscaTermo(termo)
     setBuscaResultados([])
+    setBuscaNaoAutorizado(null)
     if (termo) buscarOlist(termo)
   }
 
@@ -379,8 +381,12 @@ export function EmbaldesManager() {
     if (!termo || termo.trim().length < 1) return
     try {
       setBuscandoOlist(true)
+      setBuscaNaoAutorizado(null)
       const resposta = await api.get('/olist/produtos', { params: { q: termo.trim() } })
       setBuscaResultados(resposta.data.produtos || [])
+      if (resposta.data.nao_autorizado) {
+        setBuscaNaoAutorizado({ url: resposta.data.url_autorizacao })
+      }
     } catch (erro: any) {
       setMessage('Erro na busca: ' + (erro.response?.data?.erro || String(erro)))
     } finally {
@@ -1176,7 +1182,13 @@ export function EmbaldesManager() {
               <div style={{ textAlign: 'center', padding: '1.5rem', color: '#666' }}>Buscando na Olist...</div>
             ) : buscaResultados.length === 0 ? (
               <div style={{ textAlign: 'center', padding: '1.5rem', color: '#999' }}>
-                {buscaTermo ? 'Nenhum anúncio encontrado. Tente outro termo.' : 'Digite um termo e busque.'}
+                {buscaNaoAutorizado ? (
+                  <span style={{ color: '#b42318' }}>
+                    ⚠️ Olist desconectado — não dá pra buscar produtos.{' '}
+                    <a href={buscaNaoAutorizado.url || '/api/olist/conectar'} target="_blank" rel="noreferrer"
+                      style={{ color: '#1976d2', fontWeight: 600 }}>Reconectar agora ↗</a>
+                  </span>
+                ) : buscaTermo ? 'Nenhum anúncio encontrado. Tente outro termo.' : 'Digite um termo e busque.'}
               </div>
             ) : (
               <div style={{ display: 'grid', gap: '0.5rem' }}>
