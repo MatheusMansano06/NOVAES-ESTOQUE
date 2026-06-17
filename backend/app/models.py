@@ -200,6 +200,28 @@ class EmbaleFU(Base):
     observacoes = Column(Text, nullable=True)
 
     itens = relationship("ItemEmbaleFU", back_populates="embalde", cascade="all, delete-orphan")
+    historico_full = relationship("HistoricoFullEmbale", back_populates="embalde", cascade="all, delete-orphan")
+
+
+class HistoricoFullEmbale(Base):
+    """
+    Histórico de mudanças na quantidade que vai pro FULL de um item do inbound.
+    Registra TODA alteração do campo "Vai pro FULL" (aumento ou redução), para
+    auditoria e para alimentar o filtro de itens alterados na revisão.
+    """
+    __tablename__ = "historico_full_embale"
+
+    id = Column(Integer, primary_key=True)
+    embale_id = Column(Integer, ForeignKey("embaldes_fu.id"), index=True)
+    item_id = Column(Integer, ForeignKey("itens_embale_fu.id"), index=True)
+    titulo_anuncio = Column(String(255))  # snapshot do título no momento da mudança
+    sku_inbound = Column(String(100), nullable=True)
+    quantidade_anterior = Column(Float, default=0)
+    quantidade_nova = Column(Float, default=0)
+    tipo = Column(String(20))  # "aumento" ou "reducao"
+    criado_em = Column(DateTime, default=datetime.utcnow, index=True)
+
+    embalde = relationship("EmbaleFU", back_populates="historico_full")
 
 
 class ItemEmbaleFU(Base):
@@ -240,6 +262,10 @@ class ItemEmbaleFU(Base):
     foi_balanceado = Column(Integer, default=0)  # 1 = foi feito balanço
     saldo_disponivel = Column(Float, nullable=True)  # Qtd real - FULL (após balanço)
     data_balanceamento = Column(DateTime, nullable=True)
+
+    # Status em espera (produto bloqueado sem mexer por fatores externos)
+    em_espera = Column(Integer, default=0)  # 1 = em espera, 0 = normal
+    data_em_espera = Column(DateTime, nullable=True)
 
     criado_em = Column(DateTime, default=datetime.utcnow)
 

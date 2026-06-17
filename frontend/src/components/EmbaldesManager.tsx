@@ -58,6 +58,8 @@ interface ItemRevisao {
   vinculado?: number
   foi_balanceado?: number
   saldo_disponivel?: number | null
+  em_espera?: number
+  tem_historico_full?: boolean
 }
 
 interface Revisao {
@@ -70,7 +72,7 @@ interface Revisao {
   itens: ItemRevisao[]
 }
 
-export function EmbaldesManager() {
+export function EmbaldesManager({ modoSeparacao = false }: { modoSeparacao?: boolean } = {}) {
   const [inbounds, setInbounds] = useState<Inbound[]>([])
   const [loading, setLoading] = useState(false)
   const [message, setMessage] = useState('')
@@ -95,8 +97,11 @@ export function EmbaldesManager() {
   const [quantidadesFull, setQuantidadesFull] = useState<Record<number, string>>({})
   const [salvandoQuantidadeId, setSalvandoQuantidadeId] = useState<number | null>(null)
   // Filtro da tabela de revisão
-  type FiltroRev = 'todos' | 'vinculados' | 'nao_vinculados' | 'baixados' | 'nao_baixados'
+  type FiltroRev = 'todos' | 'vinculados' | 'nao_vinculados' | 'baixados' | 'nao_baixados' | 'full_alterado'
   const [filtroRevisao, setFiltroRevisao] = useState<FiltroRev>('todos')
+  // Histórico de alterações da quantidade do FULL
+  const [historicoFull, setHistoricoFull] = useState<any[]>([])
+  const [mostrarHistorico, setMostrarHistorico] = useState(false)
   // Vínculo manual de item "não achado"
   const [vinculandoItem, setVinculandoItem] = useState<ItemRevisao | null>(null)
   const [buscaTermo, setBuscaTermo] = useState('')
@@ -108,6 +113,31 @@ export function EmbaldesManager() {
   const [balanceandoItem, setBalanceandoItem] = useState<ItemRevisao | null>(null)
   const [qtdRealConferida, setQtdRealConferida] = useState('')
   const [balanceandoId, setBalanceandoId] = useState<number | null>(null)
+  // Itens em espera (bloqueados por fatores externos)
+  const [itensEmEspera, setItensEmEspera] = useState<Record<number, boolean>>({})
+  const [marcandoEmEspera, setMarcandoEmEspera] = useState<number | null>(null)
+  // Modo "Lista de separação": um produto por vez, em tela cheia
+  const [sepIndex, setSepIndex] = useState(0)
+  const [skuImg, setSkuImg] = useState<Record<string, string>>({})
+
+  // Mapa SKU -> imagem do anúncio (ML), usado só no modo separação p/ mostrar a foto.
+  useEffect(() => {
+    if (!modoSeparacao) return
+    let cancelado = false
+    ;(async () => {
+      try {
+        const r = await api.get('/ml/anuncios?status=todos&offset=0&limit=1000')
+        const mapa: Record<string, string> = {}
+        for (const a of r.data?.anuncios || []) {
+          const sku = String(a.sku || '').trim().toUpperCase()
+          const img = a.imagem_principal || a.thumbnail
+          if (sku && img) mapa[sku] = img
+        }
+        if (!cancelado) setSkuImg(mapa)
+      } catch { /* foto é opcional — não trava as ações */ }
+    })()
+    return () => { cancelado = true }
+  }, [modoSeparacao])
 
   useEffect(() => {
     carregarInbounds()
@@ -275,26 +305,64 @@ export function EmbaldesManager() {
     }
   }
 
+  const NUMERO_WHATSAPP = '5519978149245'
+
   const balancearItem = async (item: ItemRevisao, embaleId: number) => {
     if (!qtdRealConferida || qtdRealConferida === '') {
       setMessage('Digite a quantidade conferida no físico')
       return
     }
 
+    // Abre a aba do WhatsApp AINDA no clique (evita bloqueio de pop-up).
+    const real = parseFloat(qtdRealConferida)
+    const vaiPraoFull = Math.round(item.quantidade_full || 0)
+    const haveraDivergencia = real < vaiPraoFull
+    let janelaWhats: Window | null = null
+    if (haveraDivergencia) janelaWhats = window.open('', '_blank')
+
     try {
       setBalanceandoId(item.item_id)
       const resultado = await api.post(`/embaldes/${embaleId}/itens/${item.item_id}/balancear`, {
-        quantidade_real: parseFloat(qtdRealConferida)
+        quantidade_real: real
       })
 
       setMessage(`Balanço realizado! ${resultado.data.mensagem}`)
+
+      // Divergência: notifica no WhatsApp (produto, qtd real e qtd que vai pro FULL)
+      if (resultado.data.tem_divergencia) {
+        const falta = Math.max(0, vaiPraoFull - real)
+        const mensagem =
+          `⚠️ DIVERGÊNCIA NO INBOUND (FULL)\n\n` +
+          `Produto: ${item.titulo_anuncio}\n` +
+          (item.sku_inbound ? `SKU: ${item.sku_inbound}\n` : '') +
+          `Quantidade real conferida: ${real}\n` +
+          `Quantidade que vai pro FULL: ${vaiPraoFull}\n` +
+          `Falta: ${falta}`
+        const url = `https://wa.me/${NUMERO_WHATSAPP}?text=${encodeURIComponent(mensagem)}`
+        if (janelaWhats) janelaWhats.location.href = url
+        else window.open(url, '_blank')
+      } else if (janelaWhats) {
+        janelaWhats.close()
+      }
+
       setBalanceandoItem(null)
       setQtdRealConferida('')
       await carregarRevisao(embaleId)
     } catch (erro: any) {
+      if (janelaWhats) janelaWhats.close()
       setMessage('Erro: ' + (erro.response?.data?.erro || String(erro)))
     } finally {
       setBalanceandoId(null)
+    }
+  }
+
+  const carregarHistoricoFull = async (embaleId: number) => {
+    try {
+      const resposta = await api.get(`/embaldes/${embaleId}/historico-full`)
+      setHistoricoFull(resposta.data.itens || [])
+      setMostrarHistorico(true)
+    } catch (erro: any) {
+      setMessage('Erro ao carregar histórico: ' + (erro.response?.data?.erro || String(erro)))
     }
   }
 
@@ -319,6 +387,7 @@ export function EmbaldesManager() {
       setFiltroRevisao('todos')
       const resposta = await api.get(`/embaldes/${id}/revisao`)
       setRevisao(resposta.data)
+      setSepIndex(0)
       const planejadas: Record<number, string> = {}
       for (const it of resposta.data.itens || []) {
         planejadas[it.item_id] = String(Math.round(it.quantidade_full ?? 0))
@@ -330,6 +399,12 @@ export function EmbaldesManager() {
         if (it.baixa_aplicada === 1) jaBaixados[it.item_id] = 1
       }
       setItensBaixados(jaBaixados)
+      // Recupera o estado "em espera" salvo no banco
+      const emEspera: Record<number, boolean> = {}
+      for (const it of resposta.data.itens || []) {
+        if (it.em_espera === 1) emEspera[it.item_id] = true
+      }
+      setItensEmEspera(emEspera)
     } catch (erro: any) {
       setMessage('Erro ao revisar: ' + (erro.response?.data?.erro || String(erro)))
       setRevisandoId(null)
@@ -360,12 +435,12 @@ export function EmbaldesManager() {
     }
   }
 
-  const baixarItem = async (it: ItemRevisao) => {
-    if (!revisao) return
+  const baixarItem = async (it: ItemRevisao): Promise<boolean> => {
+    if (!revisao) return false
     const qtd = it.tem_falta
       ? (declaracoes[it.item_id] ?? Math.round(it.estoque_atual || 0))
       : Math.round(it.quantidade_full)
-    if (!confirm(`Baixar ${qtd} un. de "${it.titulo_anuncio}" na Olist? Não há volta.`)) return
+    if (!confirm(`Baixar ${qtd} un. de "${it.titulo_anuncio}" na Olist? Não há volta.`)) return false
     try {
       setBaixandoItemId(it.item_id)
       const resposta = await api.post(`/embaldes/${revisao.embale_id}/itens/${it.item_id}/baixa`, {
@@ -375,11 +450,14 @@ export function EmbaldesManager() {
       if (r.status === 'ok' || r.status === 'ja_baixado') {
         setItensBaixados({ ...itensBaixados, [it.item_id]: r.quantidade_baixada || qtd })
         setMessage(r.mensagem || 'Baixa aplicada')
+        return true
       } else {
         setMessage(r.mensagem || r.erro || 'Não foi possível baixar')
+        return false
       }
     } catch (erro: any) {
       setMessage('Erro: ' + (erro.response?.data?.erro || String(erro)))
+      return false
     } finally {
       setBaixandoItemId(null)
     }
@@ -690,6 +768,29 @@ export function EmbaldesManager() {
       }}>
         <h3 style={{ marginTop: 0, marginBottom: '1rem', color: '#061a35' }}>Gestão de Inbounds</h3>
 
+        {message && (
+          <div style={{
+            marginBottom: '1rem',
+            padding: '0.85rem 1rem',
+            backgroundColor: message.toLowerCase().includes('erro') ? '#ffebee' : '#e8f5e9',
+            color: message.toLowerCase().includes('erro') ? '#c62828' : '#2e7d32',
+            borderRadius: '6px',
+            fontWeight: 600,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: '1rem'
+          }}>
+            <span>{message}</span>
+            <button
+              onClick={() => setMessage('')}
+              style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '1.2rem', color: 'inherit', lineHeight: 1 }}
+            >
+              ×
+            </button>
+          </div>
+        )}
+
         {/* Abas */}
         <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '1.5rem', borderBottom: '2px solid #eef3f8', flexWrap: 'wrap' }}>
           <button
@@ -875,22 +976,200 @@ export function EmbaldesManager() {
                       Consultando estoque na Olist, produto por produto... aguarde.
                     </div>
                   ) : revisao ? (
+                    modoSeparacao ? (
+                      (() => {
+                        const itens = revisao.itens
+                        const total = itens.length
+                        if (total === 0) return <div style={{ padding: '2rem', textAlign: 'center', color: '#999' }}>Este inbound não tem itens.</div>
+                        const idx = Math.min(sepIndex, total - 1)
+                        const it = itens[idx]
+                        const jaBaixado = it.baixa_aplicada === 1 || !!itensBaixados[it.item_id]
+                        const naoAchado = !it.olist_encontrado
+                        const semEstoque = it.olist_encontrado && it.estoque_indisponivel
+                        const emEspera = !!itensEmEspera[it.item_id]
+                        const podeBaixar = it.olist_encontrado && !semEstoque && !jaBaixado
+                        const podeBalancear = it.olist_encontrado && !semEstoque && !jaBaixado
+                        const vinculado = it.vinculado === 1 || !!it.olist_produto_id
+                        const img = skuImg[String(it.sku_inbound || '').trim().toUpperCase()]
+                        const quantidadeEditavel = quantidadesFull[it.item_id] ?? String(Math.round(it.quantidade_full || 0))
+                        const proximo = () => setSepIndex((i) => Math.min(i + 1, total - 1))
+                        const anterior = () => setSepIndex((i) => Math.max(i - 1, 0))
+                        const resolvidos = itens.filter((x) => x.baixa_aplicada === 1 || !!itensBaixados[x.item_id] || !!itensEmEspera[x.item_id]).length
+                        return (
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                            {/* Barra de progresso */}
+                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '1rem', flexWrap: 'wrap' }}>
+                              <div style={{ fontWeight: 700, color: '#0d47a1', fontSize: '1.05rem' }}>
+                                Produto {idx + 1} de {total}
+                              </div>
+                              <div style={{ fontSize: '0.85rem', color: '#666' }}>
+                                {resolvidos} de {total} resolvidos
+                              </div>
+                            </div>
+                            <div style={{ height: '8px', background: '#e3f2fd', borderRadius: '999px', overflow: 'hidden' }}>
+                              <div style={{ height: '100%', width: `${total > 0 ? Math.round((resolvidos / total) * 100) : 0}%`, background: '#1976D2', transition: 'width 0.3s' }} />
+                            </div>
+
+                            {/* Card grande: foto + infos */}
+                            <div style={{ display: 'grid', gridTemplateColumns: 'minmax(220px, 320px) 1fr', gap: '1.5rem', border: '1px solid #e0e0e0', borderRadius: '14px', padding: '1.5rem', background: jaBaixado ? '#eef7ee' : emEspera ? '#f5f5f5' : '#fff', alignItems: 'start' }}>
+                              <div style={{ width: '100%', aspectRatio: '1 / 1', background: '#f5f5f5', borderRadius: '12px', overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                                {img
+                                  ? <img src={img} alt={it.titulo_anuncio} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                                  : <span style={{ color: '#ccc', fontSize: '3rem' }}>📦</span>}
+                              </div>
+                              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', minWidth: 0 }}>
+                                <div>
+                                  <div style={{ fontSize: '1.25rem', fontWeight: 700, lineHeight: 1.3, color: '#1a1a1a' }}>{it.titulo_anuncio}</div>
+                                  <div style={{ marginTop: '0.4rem', display: 'flex', gap: '0.5rem', flexWrap: 'wrap', alignItems: 'center' }}>
+                                    <span style={{ fontSize: '0.9rem', color: '#555', fontWeight: 600 }}>SKU: {it.sku_inbound || '—'}</span>
+                                    <span style={{ padding: '0.15rem 0.6rem', borderRadius: '999px', fontSize: '0.75rem', fontWeight: 700, background: vinculado ? '#e8f5e9' : '#fff3e0', color: vinculado ? '#2e7d32' : '#ef6c00', border: `1px solid ${vinculado ? '#a5d6a7' : '#ffcc80'}` }}>
+                                      {vinculado ? '✓ vinculado' : 'sem vínculo'}
+                                    </span>
+                                    {jaBaixado && <span style={{ padding: '0.15rem 0.6rem', borderRadius: '999px', fontSize: '0.75rem', fontWeight: 700, background: '#e3f2fd', color: '#1565c0', border: '1px solid #90caf9' }}>↓ estoque retirado</span>}
+                                  </div>
+                                </div>
+
+                                {/* Números */}
+                                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))', gap: '0.75rem', marginTop: '0.25rem' }}>
+                                  <div style={{ background: '#f7f9fa', borderRadius: '8px', padding: '0.7rem' }}>
+                                    <div style={{ fontSize: '0.72rem', color: '#666', textTransform: 'uppercase', fontWeight: 700 }}>Estoque Olist</div>
+                                    <div style={{ fontSize: '1.2rem', fontWeight: 800, color: '#1a1a1a' }}>{naoAchado ? '—' : semEstoque ? '?' : it.estoque_atual}</div>
+                                  </div>
+                                  <div style={{ background: '#f7f9fa', borderRadius: '8px', padding: '0.7rem' }}>
+                                    <div style={{ fontSize: '0.72rem', color: '#666', textTransform: 'uppercase', fontWeight: 700 }}>Vai pro FULL</div>
+                                    {jaBaixado ? (
+                                      <div style={{ fontSize: '1.2rem', fontWeight: 800 }}>{Math.round(it.quantidade_full)}</div>
+                                    ) : (
+                                      <input
+                                        type="number" min="0" step="1"
+                                        value={quantidadeEditavel}
+                                        onChange={(e) => setQuantidadesFull({ ...quantidadesFull, [it.item_id]: e.target.value })}
+                                        onBlur={() => salvarQuantidadeFull(it)}
+                                        onKeyDown={(e) => { if (e.key === 'Enter') salvarQuantidadeFull(it) }}
+                                        disabled={emEspera}
+                                        style={{ width: '90px', padding: '0.35rem', borderRadius: '6px', border: '1px solid #bbb', textAlign: 'center', fontSize: '1.1rem', fontWeight: 800, marginTop: '0.15rem', background: emEspera ? '#f0f0f0' : '#fff' }}
+                                      />
+                                    )}
+                                  </div>
+                                  <div style={{ background: '#f7f9fa', borderRadius: '8px', padding: '0.7rem' }}>
+                                    <div style={{ fontSize: '0.72rem', color: '#666', textTransform: 'uppercase', fontWeight: 700 }}>Situação</div>
+                                    <div style={{ fontSize: '0.95rem', fontWeight: 800, marginTop: '0.25rem' }}>
+                                      {naoAchado ? <span style={{ color: '#ef6c00' }}>Não achado na Olist</span>
+                                        : semEstoque ? <span style={{ color: '#999' }}>Estoque indisponível</span>
+                                        : it.tem_falta ? <span style={{ color: '#c62828' }}>Falta {Math.round(it.falta || 0)}</span>
+                                        : <span style={{ color: '#2e7d32' }}>OK</span>}
+                                    </div>
+                                  </div>
+                                </div>
+
+                                {/* Declarar (quando há falta) */}
+                                {it.tem_falta && !jaBaixado && !naoAchado && !semEstoque && (
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', flexWrap: 'wrap' }}>
+                                    <label style={{ fontSize: '0.85rem', color: '#666', fontWeight: 700 }}>Declarar p/ baixa:</label>
+                                    <input
+                                      type="number" min="0" max={it.estoque_atual || 0}
+                                      value={declaracoes[it.item_id] ?? Math.round(it.estoque_atual || 0)}
+                                      onChange={(e) => setDeclaracoes({ ...declaracoes, [it.item_id]: parseFloat(e.target.value) || 0 })}
+                                      disabled={emEspera}
+                                      style={{ width: '80px', padding: '0.4rem', borderRadius: '6px', border: '1px solid #ddd', textAlign: 'center', fontSize: '0.95rem', background: emEspera ? '#f0f0f0' : '#fff' }}
+                                    />
+                                  </div>
+                                )}
+
+                                {/* Espera */}
+                                {!jaBaixado && (
+                                  <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.9rem', color: '#555', cursor: 'pointer', width: 'fit-content' }}>
+                                    <input
+                                      type="checkbox"
+                                      checked={emEspera}
+                                      onChange={(e) => {
+                                        const novo = { ...itensEmEspera, [it.item_id]: e.target.checked }
+                                        setItensEmEspera(novo)
+                                        setMarcandoEmEspera(it.item_id)
+                                        api.post(`/embaldes/${revisao.embale_id}/itens/${it.item_id}/em-espera`, { em_espera: e.target.checked ? 1 : 0 }).finally(() => setMarcandoEmEspera(null))
+                                      }}
+                                      disabled={marcandoEmEspera === it.item_id}
+                                      style={{ width: '18px', height: '18px', cursor: 'pointer' }}
+                                    />
+                                    Deixar em espera (bloqueia este item)
+                                  </label>
+                                )}
+
+                                {/* Ações */}
+                                <div style={{ display: 'flex', gap: '0.6rem', flexWrap: 'wrap', marginTop: '0.5rem' }}>
+                                  {emEspera ? (
+                                    <span style={{ padding: '0.6rem 1rem', color: '#999', fontWeight: 700, background: '#f0f0f0', borderRadius: '8px' }}>Bloqueado (em espera)</span>
+                                  ) : jaBaixado ? (
+                                    <span style={{ padding: '0.6rem 1rem', color: '#2e7d32', fontWeight: 700, background: '#e8f5e9', borderRadius: '8px' }}>✓ Estoque retirado</span>
+                                  ) : naoAchado ? (
+                                    <button onClick={() => abrirVinculo(it)} style={{ padding: '0.7rem 1.4rem', background: '#fff', color: '#ef6c00', border: '1px solid #ef6c00', borderRadius: '8px', cursor: 'pointer', fontWeight: 700, fontSize: '0.95rem' }}>Vincular na Olist</button>
+                                  ) : (
+                                    <>
+                                      {podeBalancear && (
+                                        <button onClick={() => abrirBalanceamento(it)} style={{ padding: '0.7rem 1.4rem', background: '#fff', color: '#d32f2f', border: '1px solid #d32f2f', borderRadius: '8px', cursor: 'pointer', fontWeight: 700, fontSize: '0.95rem' }}>Balanço</button>
+                                      )}
+                                      {podeBaixar && (
+                                        <button
+                                          onClick={async () => { const ok = await baixarItem(it); if (ok) proximo() }}
+                                          disabled={baixandoItemId === it.item_id}
+                                          style={{ padding: '0.7rem 1.4rem', background: '#1976D2', color: '#fff', border: 'none', borderRadius: '8px', cursor: baixandoItemId === it.item_id ? 'wait' : 'pointer', fontWeight: 700, fontSize: '0.95rem' }}
+                                        >
+                                          {baixandoItemId === it.item_id ? 'Baixando...' : 'Baixar na Olist'}
+                                        </button>
+                                      )}
+                                    </>
+                                  )}
+                                </div>
+                              </div>
+                            </div>
+
+                            {/* Navegação */}
+                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '1rem' }}>
+                              <button
+                                onClick={anterior}
+                                disabled={idx === 0}
+                                style={{ padding: '0.7rem 1.4rem', background: '#fff', color: idx === 0 ? '#ccc' : '#555', border: '1px solid #ddd', borderRadius: '8px', cursor: idx === 0 ? 'not-allowed' : 'pointer', fontWeight: 700 }}
+                              >
+                                ← Anterior
+                              </button>
+                              <button
+                                onClick={proximo}
+                                disabled={idx >= total - 1}
+                                style={{ padding: '0.7rem 1.8rem', background: idx >= total - 1 ? '#eee' : '#0d47a1', color: idx >= total - 1 ? '#999' : '#fff', border: 'none', borderRadius: '8px', cursor: idx >= total - 1 ? 'not-allowed' : 'pointer', fontWeight: 700, fontSize: '1rem' }}
+                              >
+                                Próximo →
+                              </button>
+                            </div>
+                          </div>
+                        )
+                      })()
+                    ) : (
                     <div>
                       {/* Resumo */}
-                      <div style={{ display: 'flex', gap: '1rem', marginBottom: '1rem', flexWrap: 'wrap' }}>
-                        <div style={{ padding: '0.6rem 1rem', background: '#e3f2fd', borderRadius: '4px', fontSize: '0.85rem' }}>
-                          Total: <strong>{revisao.resumo.total}</strong>
-                        </div>
-                        <div style={{ padding: '0.6rem 1rem', background: '#e8f5e9', borderRadius: '4px', fontSize: '0.85rem' }}>
-                          Achados na Olist: <strong>{revisao.resumo.encontrados}</strong>
-                        </div>
-                        <div style={{ padding: '0.6rem 1rem', background: '#fff3e0', borderRadius: '4px', fontSize: '0.85rem' }}>
-                          Não achados: <strong>{revisao.resumo.nao_encontrados}</strong>
-                        </div>
-                        <div style={{ padding: '0.6rem 1rem', background: '#ffebee', borderRadius: '4px', fontSize: '0.85rem' }}>
-                          Com falta: <strong>{revisao.resumo.com_falta}</strong>
-                        </div>
-                      </div>
+                      {(() => {
+                        const qtdEmEspera = revisao.itens.filter((it) => itensEmEspera[it.item_id]).length
+                        return (
+                          <div style={{ display: 'flex', gap: '1rem', marginBottom: '1rem', flexWrap: 'wrap' }}>
+                            <div style={{ padding: '0.6rem 1rem', background: '#e3f2fd', borderRadius: '4px', fontSize: '0.85rem' }}>
+                              Total: <strong>{revisao.resumo.total}</strong>
+                            </div>
+                            <div style={{ padding: '0.6rem 1rem', background: '#e8f5e9', borderRadius: '4px', fontSize: '0.85rem' }}>
+                              Achados na Olist: <strong>{revisao.resumo.encontrados}</strong>
+                            </div>
+                            <div style={{ padding: '0.6rem 1rem', background: '#fff3e0', borderRadius: '4px', fontSize: '0.85rem' }}>
+                              Não achados: <strong>{revisao.resumo.nao_encontrados}</strong>
+                            </div>
+                            <div style={{ padding: '0.6rem 1rem', background: '#ffebee', borderRadius: '4px', fontSize: '0.85rem' }}>
+                              Com falta: <strong>{revisao.resumo.com_falta}</strong>
+                            </div>
+                            {qtdEmEspera > 0 && (
+                              <div style={{ padding: '0.6rem 1rem', background: '#f3e5f5', borderRadius: '4px', fontSize: '0.85rem' }}>
+                                Em espera: <strong>{qtdEmEspera}</strong>
+                              </div>
+                            )}
+                          </div>
+                        )
+                      })()}
 
                       <div style={{ fontSize: '0.85rem', color: '#666', marginBottom: '0.75rem', fontStyle: 'italic' }}>
                         A primeira leitura do inbound fica salva no banco. Ajuste "Vai pro FULL" quando precisar e use baixa/balanço sem revisar tudo de novo.
@@ -900,15 +1179,17 @@ export function EmbaldesManager() {
                       {(() => {
                         const itBaixado = (it: ItemRevisao) => it.baixa_aplicada === 1 || !!itensBaixados[it.item_id]
                         const itVinc = (it: ItemRevisao) => it.vinculado === 1 || !!it.olist_produto_id
+                        const itFullAlterado = (it: ItemRevisao) => !!it.tem_historico_full
                         const chips: { id: FiltroRev; label: string; n: number }[] = [
                           { id: 'todos', label: 'Todos', n: revisao.itens.length },
                           { id: 'vinculados', label: 'Vinculados', n: revisao.itens.filter(itVinc).length },
                           { id: 'nao_vinculados', label: 'Não vinculados', n: revisao.itens.filter((i) => !itVinc(i)).length },
                           { id: 'baixados', label: 'Estoque retirado', n: revisao.itens.filter(itBaixado).length },
                           { id: 'nao_baixados', label: 'Ainda não retirado', n: revisao.itens.filter((i) => !itBaixado(i)).length },
+                          { id: 'full_alterado', label: 'Qtd FULL alterada', n: revisao.itens.filter(itFullAlterado).length },
                         ]
                         return (
-                          <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '0.75rem', flexWrap: 'wrap' }}>
+                          <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '0.75rem', flexWrap: 'wrap', alignItems: 'center' }}>
                             {chips.map((c) => {
                               const ativo = filtroRevisao === c.id
                               return (
@@ -927,18 +1208,29 @@ export function EmbaldesManager() {
                                 </button>
                               )
                             })}
+                            <button
+                              onClick={() => carregarHistoricoFull(revisao.embale_id)}
+                              style={{
+                                padding: '0.4rem 0.9rem', borderRadius: '999px', cursor: 'pointer',
+                                fontSize: '0.85rem', fontWeight: 600,
+                                border: '1px solid #8e24aa', background: '#fff', color: '#8e24aa',
+                              }}
+                            >
+                              📜 Histórico de alterações
+                            </button>
                           </div>
                         )
                       })()}
 
                       {/* Tabela */}
-                      <div style={{ display: 'grid', gridTemplateColumns: '2.4fr 1fr 1.2fr 0.9fr 1.1fr 0.8fr 1.5fr', gap: '0.5rem', padding: '0.7rem 0.9rem', background: '#f5f5f5', borderRadius: '4px 4px 0 0', fontSize: '0.8rem', fontWeight: 'bold', color: '#555', textTransform: 'uppercase' }}>
+                      <div style={{ display: 'grid', gridTemplateColumns: '2.4fr 1fr 1.2fr 0.9fr 1.1fr 0.8fr 0.6fr 1.5fr', gap: '0.5rem', padding: '0.7rem 0.9rem', background: '#f5f5f5', borderRadius: '4px 4px 0 0', fontSize: '0.8rem', fontWeight: 'bold', color: '#555', textTransform: 'uppercase' }}>
                         <div>Produto / SKU</div>
                         <div style={{ textAlign: 'center' }}>Estoque Olist</div>
                         <div style={{ textAlign: 'center' }}>Vai pro FULL</div>
                         <div style={{ textAlign: 'center' }}>Resultado</div>
                         <div style={{ textAlign: 'center' }}>Situação</div>
                         <div style={{ textAlign: 'center' }}>Declarar</div>
+                        <div style={{ textAlign: 'center' }}>Espera</div>
                         <div style={{ textAlign: 'center' }}>Ação</div>
                       </div>
                       <div style={{ maxHeight: '560px', overflowY: 'auto', border: '1px solid #eee', borderTop: 'none' }}>
@@ -949,6 +1241,7 @@ export function EmbaldesManager() {
                           if (filtroRevisao === 'nao_vinculados') return !vinc
                           if (filtroRevisao === 'baixados') return baixado
                           if (filtroRevisao === 'nao_baixados') return !baixado
+                          if (filtroRevisao === 'full_alterado') return !!it.tem_historico_full
                           return true
                         }).map((it) => {
                           const naoAchado = !it.olist_encontrado
@@ -962,7 +1255,7 @@ export function EmbaldesManager() {
                           return (
                             <div
                               key={it.item_id}
-                              style={{ display: 'grid', gridTemplateColumns: '2.4fr 1fr 1.2fr 0.9fr 1.1fr 0.8fr 1.5fr', gap: '0.5rem', padding: '0.8rem 0.9rem', background: jaBaixado ? '#eef7ee' : bg, borderBottom: '1px solid #f0f0f0', fontSize: '0.9rem', alignItems: 'center', opacity: jaBaixado ? 0.8 : 1 }}
+                              style={{ display: 'grid', gridTemplateColumns: '2.4fr 1fr 1.2fr 0.9fr 1.1fr 0.8fr 0.6fr 1.5fr', gap: '0.5rem', padding: '0.8rem 0.9rem', background: jaBaixado ? '#eef7ee' : bg, borderBottom: '1px solid #f0f0f0', fontSize: '0.9rem', alignItems: 'center', opacity: itensEmEspera[it.item_id] ? 0.5 : (jaBaixado ? 0.8 : 1) }}
                             >
                               <div>
                                 <div style={{ fontWeight: 600, lineHeight: 1.3 }}>{it.titulo_anuncio}</div>
@@ -999,7 +1292,8 @@ export function EmbaldesManager() {
                                       onChange={(e) => setQuantidadesFull({ ...quantidadesFull, [it.item_id]: e.target.value })}
                                       onBlur={() => salvarQuantidadeFull(it)}
                                       onKeyDown={(e) => { if (e.key === 'Enter') salvarQuantidadeFull(it) }}
-                                      style={{ width: '78px', padding: '0.32rem', borderRadius: '4px', border: '1px solid #bbb', textAlign: 'center', fontSize: '0.9rem', fontWeight: 700 }}
+                                      disabled={itensEmEspera[it.item_id]}
+                                      style={{ width: '78px', padding: '0.32rem', borderRadius: '4px', border: '1px solid #bbb', textAlign: 'center', fontSize: '0.9rem', fontWeight: 700, backgroundColor: itensEmEspera[it.item_id] ? '#f0f0f0' : '#fff', color: itensEmEspera[it.item_id] ? '#999' : '#000', cursor: itensEmEspera[it.item_id] ? 'not-allowed' : 'auto' }}
                                     />
                                     {salvandoQuantidadeId === it.item_id && (
                                       <span style={{ fontSize: '0.68rem', color: '#1976D2', fontWeight: 700 }}>salvando...</span>
@@ -1029,14 +1323,37 @@ export function EmbaldesManager() {
                                     max={it.estoque_atual || 0}
                                     value={declaracoes[it.item_id] ?? Math.round(it.estoque_atual || 0)}
                                     onChange={(e) => setDeclaracoes({ ...declaracoes, [it.item_id]: parseFloat(e.target.value) || 0 })}
-                                    style={{ width: '60px', padding: '0.3rem', borderRadius: '3px', border: '1px solid #ddd', textAlign: 'center', fontSize: '0.85rem' }}
+                                    disabled={itensEmEspera[it.item_id]}
+                                    style={{ width: '60px', padding: '0.3rem', borderRadius: '3px', border: '1px solid #ddd', textAlign: 'center', fontSize: '0.85rem', backgroundColor: itensEmEspera[it.item_id] ? '#f0f0f0' : '#fff', color: itensEmEspera[it.item_id] ? '#999' : '#000', cursor: itensEmEspera[it.item_id] ? 'not-allowed' : 'auto' }}
                                   />
                                 ) : (
                                   <span style={{ color: '#999', fontSize: '0.8rem' }}>—</span>
                                 )}
                               </div>
-                              <div style={{ textAlign: 'center', display: 'flex', gap: '0.3rem', justifyContent: 'center', flexWrap: 'wrap' }}>
+                              <div style={{ textAlign: 'center' }}>
                                 {jaBaixado ? (
+                                  <span style={{ color: '#ccc', fontSize: '0.8rem' }}>—</span>
+                                ) : (
+                                  <input
+                                    type="checkbox"
+                                    checked={itensEmEspera[it.item_id] || false}
+                                    onChange={(e) => {
+                                      const novo = { ...itensEmEspera, [it.item_id]: e.target.checked }
+                                      setItensEmEspera(novo)
+                                      if (revisao) {
+                                        setMarcandoEmEspera(it.item_id)
+                                        api.post(`/embaldes/${revisao.embale_id}/itens/${it.item_id}/em-espera`, { em_espera: e.target.checked ? 1 : 0 }).finally(() => setMarcandoEmEspera(null))
+                                      }
+                                    }}
+                                    disabled={marcandoEmEspera === it.item_id}
+                                    style={{ cursor: 'pointer', width: '18px', height: '18px' }}
+                                  />
+                                )}
+                              </div>
+                              <div style={{ textAlign: 'center', display: 'flex', gap: '0.3rem', justifyContent: 'center', flexWrap: 'wrap' }}>
+                                {itensEmEspera[it.item_id] ? (
+                                  <span style={{ color: '#999', fontWeight: 'bold', fontSize: '0.8rem' }}>Bloqueado</span>
+                                ) : jaBaixado ? (
                                   <span style={{ color: '#2e7d32', fontWeight: 'bold', fontSize: '0.8rem' }}>✓ Baixado</span>
                                 ) : naoAchado ? (
                                   <button
@@ -1088,7 +1405,7 @@ export function EmbaldesManager() {
                         </span>
                       </div>
                     </div>
-                  ) : null}
+                    )) : null}
                 </div>
               )}
 
@@ -1206,14 +1523,35 @@ export function EmbaldesManager() {
               </div>
             </div>
 
-            <div style={{ background: '#e8f5e9', padding: '0.75rem', borderRadius: '4px', marginBottom: '1rem', fontSize: '0.85rem' }}>
-              <strong>O que vai acontecer:</strong>
-              <ul style={{ margin: '0.5rem 0 0 0', paddingLeft: '1.2rem' }}>
-                <li>Olist será atualizada para {qtdRealConferida || '?'} un (corrigindo erros)</li>
-                <li>Será descontado {Math.round(balanceandoItem.quantidade_full)} un para o FULL</li>
-                <li>Sobra: {qtdRealConferida ? Math.max(0, parseInt(qtdRealConferida) - Math.round(balanceandoItem.quantidade_full)) : '?'} un disponível</li>
-              </ul>
-            </div>
+            {(() => {
+              const real = qtdRealConferida ? parseInt(qtdRealConferida) : null
+              const full = Math.round(balanceandoItem.quantidade_full)
+              const divergente = real !== null && real < full
+              if (divergente) {
+                const falta = full - (real as number)
+                return (
+                  <div style={{ background: '#fff3e0', padding: '0.75rem', borderRadius: '4px', marginBottom: '1rem', fontSize: '0.85rem', borderLeft: '4px solid #ef6c00' }}>
+                    <strong>⚠️ Vai gerar divergência:</strong>
+                    <ul style={{ margin: '0.5rem 0 0 0', paddingLeft: '1.2rem' }}>
+                      <li>Olist será corrigida para {real} un (o real que você tem)</li>
+                      <li><strong>NÃO</strong> será baixado para o FULL (faltam {falta} un para os {full} planejados)</li>
+                      <li>O item continua com divergência até você resolver</li>
+                      <li>Vou abrir o <strong>WhatsApp</strong> com a notificação (produto, qtd real e qtd que vai pro FULL)</li>
+                    </ul>
+                  </div>
+                )
+              }
+              return (
+                <div style={{ background: '#e8f5e9', padding: '0.75rem', borderRadius: '4px', marginBottom: '1rem', fontSize: '0.85rem' }}>
+                  <strong>O que vai acontecer:</strong>
+                  <ul style={{ margin: '0.5rem 0 0 0', paddingLeft: '1.2rem' }}>
+                    <li>Olist será atualizada para {qtdRealConferida || '?'} un (corrigindo erros)</li>
+                    <li>Será descontado {full} un para o FULL</li>
+                    <li>Sobra: {real !== null ? Math.max(0, real - full) : '?'} un disponível</li>
+                  </ul>
+                </div>
+              )
+            })()}
 
             <div style={{ display: 'flex', gap: '0.7rem' }}>
               <button
@@ -1230,6 +1568,53 @@ export function EmbaldesManager() {
                 Cancelar
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal de Histórico de alterações do FULL */}
+      {mostrarHistorico && (
+        <div
+          onClick={() => setMostrarHistorico(false)}
+          style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{ background: '#fff', borderRadius: '8px', padding: '1.5rem', width: '720px', maxWidth: '94vw', maxHeight: '85vh', overflowY: 'auto', boxShadow: '0 10px 40px rgba(0,0,0,0.3)' }}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start', marginBottom: '1rem' }}>
+              <h3 style={{ margin: 0, color: '#8e24aa' }}>📜 Histórico de alterações do FULL</h3>
+              <button onClick={() => setMostrarHistorico(false)} style={{ background: 'none', border: 'none', fontSize: '1.4rem', cursor: 'pointer', color: '#999', lineHeight: 1 }}>×</button>
+            </div>
+            {historicoFull.length === 0 ? (
+              <div style={{ textAlign: 'center', padding: '2rem', color: '#999' }}>
+                Nenhuma alteração de quantidade do FULL registrada neste inbound.
+              </div>
+            ) : (
+              <div style={{ display: 'grid', gap: '0.5rem' }}>
+                {historicoFull.map((h) => {
+                  const aumento = h.tipo === 'aumento'
+                  return (
+                    <div key={h.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '1rem', padding: '0.7rem 0.9rem', border: '1px solid #eee', borderRadius: '6px', borderLeft: `4px solid ${aumento ? '#2e7d32' : '#ef6c00'}` }}>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontWeight: 600, fontSize: '0.9rem' }}>{h.titulo_anuncio}</div>
+                        <div style={{ fontSize: '0.78rem', color: '#666' }}>
+                          SKU: {h.sku_inbound || '—'} · {h.criado_em ? new Date(h.criado_em).toLocaleString('pt-BR') : ''}
+                        </div>
+                      </div>
+                      <div style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
+                        <span style={{ padding: '0.15rem 0.5rem', borderRadius: '999px', fontSize: '0.72rem', fontWeight: 700, background: aumento ? '#e8f5e9' : '#fff3e0', color: aumento ? '#2e7d32' : '#ef6c00' }}>
+                          {aumento ? '▲ aumentou' : '▼ reduziu'}
+                        </span>
+                        <div style={{ fontWeight: 700, fontSize: '0.95rem', marginTop: '0.2rem' }}>
+                          {Math.round(h.quantidade_anterior)} → {Math.round(h.quantidade_nova)} un
+                        </div>
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            )}
           </div>
         </div>
       )}

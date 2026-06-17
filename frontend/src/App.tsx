@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react'
+import { type ReactNode, useState, useEffect, useRef } from 'react'
 import './App.css'
 import { ModalDetalhes } from './ModalDetalhes'
 import { ModalDetalhesNota } from './ModalDetalhesNota'
@@ -6,6 +6,7 @@ import { ModalDetalhesNotaFiscal } from './ModalDetalhesNotaFiscal'
 import { FornecedoresManager } from './components/FornecedoresManager'
 import { EmbaldesManager } from './components/EmbaldesManager'
 import { AnunciosML } from './components/AnunciosML'
+import { AppShell, type ShellNavGroup, type ShellStatusItem } from './components/AppShell'
 import { baixarMultiplosOuPdfs } from './services/api'
 
 const API_BASE = import.meta.env.VITE_API_URL ?? 'http://127.0.0.1:8000'
@@ -67,7 +68,7 @@ interface ProdutoEstoque {
   }>
 }
 
-type Pagina = 'inicial' | 'conferencia' | 'produtos_nota' | 'relacionamento_produto' | 'fornecedores' | 'embaldes' | 'anuncios'
+type Pagina = 'bemvindo' | 'inicial' | 'conferencia' | 'produtos_nota' | 'relacionamento_produto' | 'fornecedores' | 'embaldes' | 'anuncios' | 'notas-fiscais' | 'divergencias'
 
 interface Divergencia {
   item_id: number
@@ -82,9 +83,24 @@ interface Divergencia {
   data_registro: string
 }
 
+interface MlStatus {
+  autorizado?: boolean
+  credenciais_configuradas?: boolean
+  status?: string
+  url_autorizacao?: string | null
+}
+
+interface OlistStatus {
+  autorizado?: boolean
+  integrado?: boolean
+  credenciais_configuradas?: boolean
+  status?: string
+  url_autorizacao?: string | null
+}
+
 function App() {
   // Estados de navegação
-  const [pagina, setPagina] = useState<Pagina>('inicial')
+  const [pagina, setPagina] = useState<Pagina>('bemvindo')
   const [notaSelecionada, setNotaSelecionada] = useState<NotaFiscal | null>(null)
   const [produtosNota, setProdutosNota] = useState<ItemNota[]>([])
 
@@ -164,9 +180,21 @@ function App() {
     total_baixado_full?: number
     qtd_items?: number
     qtd_baixados?: number
+    qtd_em_espera?: number
   }>>([])
   const [syncSaudavel, setSyncSaudavel] = useState(false)
   const [ultimaSincronizacao, setUltimaSincronizacao] = useState<string | null>(null)
+  const [mlStatus, setMlStatus] = useState<MlStatus | null>(null)
+  const [olistStatus, setOlistStatus] = useState<OlistStatus | null>(null)
+  // Anúncios pausados sem estoque no Mercado Livre (carrossel no dashboard)
+  const [anunciosPausadosSemEstoque, setAnunciosPausadosSemEstoque] = useState<Array<{
+    id: string
+    titulo: string
+    sku: string
+    imagem_principal?: string
+    thumbnail?: string
+    permalink?: string
+  }>>([])
 
   // Formata data ISO -> dd/mm/aaaa (pt-BR)
   const fmtData = (d: string | null) => {
@@ -184,17 +212,43 @@ function App() {
   const progressoBaixasInbound = (() => {
     const planejado = inboundsAtivos.reduce((acc, inbound) => acc + Number(inbound.total_planejado_full || 0), 0)
     const baixado = inboundsAtivos.reduce((acc, inbound) => acc + Number(inbound.total_baixado_full || 0), 0)
+    const emEspera = inboundsAtivos.reduce((acc, inbound) => acc + Number(inbound.qtd_em_espera || 0), 0)
     const restante = Math.max(0, planejado - baixado)
     const percentual = planejado > 0 ? Math.round((baixado / planejado) * 100) : 0
-    return { planejado, baixado, restante, percentual }
+    return { planejado, baixado, restante, percentual, emEspera }
   })()
+
+  const loadIntegracoes = async () => {
+    try {
+      const [mlRes, olistRes] = await Promise.allSettled([
+        fetchJsonNoCache(`${API_BASE}/api/ml/status`),
+        fetchJsonNoCache(`${API_BASE}/api/olist/status`),
+      ])
+
+      if (mlRes.status === 'fulfilled') setMlStatus(mlRes.value || null)
+      if (olistRes.status === 'fulfilled') setOlistStatus(olistRes.value || null)
+    } catch {
+      // silencioso para nao travar a interface
+    }
+  }
 
   // Carregar notas ao iniciar
   useEffect(() => {
     loadNotas(false)
     loadEstoque(false)
     loadDivergencias(false)
+    loadIntegracoes()
+    loadAnunciosPausados()
   }, [])
+
+  // Carrega anúncios pausados SEM estoque do Mercado Livre (carrossel no dashboard)
+  const loadAnunciosPausados = async () => {
+    try {
+      const data = await fetchJsonNoCache(`${API_BASE}/api/ml/anuncios?status=paused&offset=0&limit=200`)
+      const semEstoque = (data.anuncios || []).filter((a: any) => (a.disponivel ?? 0) <= 0)
+      setAnunciosPausadosSemEstoque(semEstoque)
+    } catch { /* silencioso — não quebra a tela */ }
+  }
 
   // Diagnóstico de inbounds ATIVOS em tempo real (atualiza a cada 20s).
   // Some quando o inbound é encerrado; some todos => "SEM INBOUND ATIVO".
@@ -218,6 +272,7 @@ function App() {
         loadNotas(true),
         loadEstoque(true),
         loadDivergencias(true),
+        loadIntegracoes(),
       ])
     }
 
@@ -540,6 +595,18 @@ function App() {
     } catch (err) {
       console.error('Erro ao abrir nota:', err)
     }
+  }
+
+  const abrirDetalheNotaPorClick = (e: React.MouseEvent, notaId: number) => {
+    e.preventDefault()
+    e.stopPropagation()
+    void abrirDetalheNota(notaId)
+  }
+
+  const fecharDetalheNota = () => {
+    setNotaDetalheAberta(null)
+    setAbaDetalhe('detalhes')
+    setItensSelecionadosMultiplos(new Set())
   }
 
   // Notas filtradas pela busca (nº, nome, CNPJ) e data
@@ -1248,183 +1315,258 @@ function App() {
   }
 
   // ===== PÁGINA INICIAL =====
-  if (pagina === 'inicial') {
+  // ===== TELA DE BOAS-VINDAS (sem login) =====
+  const todosItens = notas.flatMap((nota) => nota.itens || [])
+  const itensSincronizados = todosItens.filter((item) => !!item.estoque_olist_atualizado_em).length
+  const itensSemVinculo = todosItens.filter((item) => !item.olist_produto_id).length
+  const itensBloqueados = todosItens.filter((item) => item.status === 'bloqueado').length
+  const notasHoje = notas.filter((nota) => {
+    if (!nota.data_upload) return false
+    const dataUpload = new Date(nota.data_upload)
+    const hoje = new Date()
+    return dataUpload.toDateString() === hoje.toDateString()
+  }).length
+
+  const mlConectado = mlStatus?.autorizado === true
+  const olistConectado = olistStatus?.autorizado === true
+  const urlConectarML = mlStatus?.url_autorizacao || `${API_BASE}/api/ml/conectar`
+  const urlConectarOlist = olistStatus?.url_autorizacao || `${API_BASE}/api/olist/conectar`
+
+  const topStatuses: ShellStatusItem[] = [
+    {
+      label: 'Mercado Livre',
+      value: mlConectado ? 'Conectado' : 'Pendente',
+      tone: mlConectado ? 'positive' : 'warning',
+      onClick: mlConectado ? undefined : () => { window.location.href = urlConectarML },
+    },
+    {
+      label: 'Olist',
+      value: olistConectado ? 'Sincronizado' : 'Pendente',
+      tone: olistConectado ? 'positive' : 'warning',
+      onClick: olistConectado ? undefined : () => { window.location.href = urlConectarOlist },
+    },
+    {
+      label: 'Fluxo local',
+      value: syncSaudavel ? 'Operacional' : 'Verificando',
+      tone: syncSaudavel ? 'positive' : 'warning',
+    },
+  ]
+
+  const navGroups: ShellNavGroup[] = [
+    {
+      label: 'Dashboard',
+      items: [
+        { key: 'dashboard', label: 'Dashboard', icon: 'dashboard', active: pagina === 'inicial', onClick: () => setPagina('inicial') },
+        { key: 'notas', label: 'Notas fiscais', icon: 'receipt', badge: notas.length, active: pagina === 'notas-fiscais', onClick: () => setPagina('notas-fiscais') },
+        { key: 'fornecedores', label: 'Fornecedores', icon: 'users', active: pagina === 'fornecedores', onClick: () => setPagina('fornecedores') },
+      ],
+    },
+    {
+      label: 'Marketplace',
+      items: [
+        { key: 'anuncios', label: 'Anuncios ML', icon: 'megaphone', active: pagina === 'anuncios', onClick: () => setPagina('anuncios') },
+        { key: 'inbound', label: 'Inbound FULL', icon: 'truck', active: pagina === 'embaldes', badge: inboundsAtivos.length, onClick: () => setPagina('embaldes') },
+        { key: 'divergencias', label: 'Divergencias', icon: 'warning', badge: divergencias.length, active: pagina === 'divergencias', onClick: () => setPagina('divergencias') },
+      ],
+    },
+  ]
+
+  const renderComShell = (title: string, subtitle: string, conteudo: ReactNode) => (
+    <AppShell
+      title={title}
+      subtitle={subtitle}
+      navGroups={navGroups}
+      statuses={topStatuses}
+      syncTimeLabel={fmtHora(ultimaSincronizacao)}
+      primaryAction={{ label: 'Sincronizar agora', onClick: () => loadIntegracoes() }}
+    >
+      {conteudo}
+    </AppShell>
+  )
+
+  if (pagina === 'bemvindo') {
+    const features = [
+      { icon: '📄', texto: 'Notas fiscais organizadas' },
+      { icon: '🔄', texto: 'Anúncios e estoque sincronizados' },
+      { icon: '📦', texto: 'Inbound FULL com menos erro operacional' },
+    ]
     return (
-      <div className="app">
-        <header className="header">
-          <div className="container header-main-layout">
-            <div className="header-copy">
-              <h1 style={{ marginBottom: '0.35rem' }}>NVS TECH</h1>
-            <p>Sistema de Gestão Inteligente de Estoque para Operações de Logística e Marketplace</p>
-            </div>
-            <div
-              className="header-status"
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: '0.45rem',
-                padding: '0.45rem 0.9rem',
-                borderRadius: '999px',
-                border: `1px solid ${syncSaudavel ? '#8bd694' : '#f3b0b0'}`,
-                background: syncSaudavel ? 'rgba(224, 255, 228, 0.12)' : 'rgba(255, 235, 235, 0.12)',
-                color: syncSaudavel ? '#c8ffd0' : '#ffd2d2',
-                fontSize: '0.78rem',
-                fontWeight: 800,
-                letterSpacing: '0.04em',
-                textTransform: 'uppercase'
-              }}
-            >
-              <span
-                style={{
-                  width: 8,
-                  height: 8,
-                  borderRadius: '50%',
-                  background: syncSaudavel ? '#7CFC8A' : '#ff8a80',
-                  display: 'inline-block'
-                }}
-              />
-              {syncSaudavel ? 'Sincronizado' : 'Sincronizando'}
-              <span style={{ opacity: 0.85, fontSize: '0.72rem' }}>{fmtHora(ultimaSincronizacao)}</span>
+      <div style={{
+        position: 'relative',
+        zIndex: 1,
+        minHeight: '100vh',
+        display: 'grid',
+        gridTemplateColumns: '1fr 1fr',
+        background: '#fff',
+        fontFamily: 'inherit'
+      }}>
+        {/* Lateral esquerda — inteira azul */}
+        <div style={{
+          position: 'relative',
+          overflow: 'hidden',
+          background: 'linear-gradient(150deg, #0a1c44 0%, #0c2a5e 55%, #0e336f 100%)',
+          color: '#fff',
+          padding: '3.5rem 3.25rem',
+          display: 'flex',
+          flexDirection: 'column',
+          justifyContent: 'space-between'
+        }}>
+          {/* Motoqueiro ao fundo */}
+          <div style={{
+            position: 'absolute',
+            right: '-2%',
+            top: '50%',
+            transform: 'translateY(-50%)',
+            width: '60%',
+            height: '72%',
+            backgroundImage: "url('/assets/nvs-rider.jpeg')",
+            backgroundRepeat: 'no-repeat',
+            backgroundPosition: 'center',
+            backgroundSize: 'contain',
+            opacity: 0.12,
+            mixBlendMode: 'screen',
+            WebkitMaskImage: 'radial-gradient(ellipse at center, #000 30%, transparent 68%)',
+            maskImage: 'radial-gradient(ellipse at center, #000 30%, transparent 68%)',
+            pointerEvents: 'none'
+          }} />
+
+          {/* Logo (bolinha NVS TECH) — topo */}
+          <div style={{ position: 'relative', zIndex: 1 }}>
+            <div style={{
+              width: 104,
+              height: 104,
+              borderRadius: '50%',
+              background: "#ffffff url('/assets/nvs-tech-logo.jpeg') center / 82% auto no-repeat",
+              border: '3px solid rgba(255, 196, 0, 0.9)',
+              boxShadow: '0 14px 32px rgba(0, 0, 0, 0.25)'
+            }} />
+          </div>
+
+          {/* Conteúdo central — centralizado na vertical */}
+          <div style={{
+            position: 'relative',
+            zIndex: 1,
+            flex: 1,
+            display: 'flex',
+            flexDirection: 'column',
+            justifyContent: 'center'
+          }}>
+            <h1 style={{ fontSize: '2.1rem', fontWeight: 800, margin: '0 0 0.85rem 0' }}>
+              Bem-vindo de volta!
+            </h1>
+            <p style={{ fontSize: '1rem', lineHeight: 1.5, opacity: 0.85, margin: '0 0 2.5rem 0', maxWidth: '340px' }}>
+              Entre na sua conta e gerencie sua operação de marketplace.
+            </p>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
+              {features.map((f) => (
+                <div key={f.texto} style={{ display: 'flex', alignItems: 'center', gap: '0.9rem' }}>
+                  <div style={{
+                    width: 40, height: 40, borderRadius: '10px',
+                    background: 'rgba(255,255,255,0.1)',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    fontSize: '1.15rem', flexShrink: 0
+                  }}>
+                    {f.icon}
+                  </div>
+                  <span style={{ fontSize: '0.98rem', opacity: 0.95 }}>{f.texto}</span>
+                </div>
+              ))}
             </div>
           </div>
-        </header>
 
-        <main className="container main-content">
-          {message && (
-            <div className={`message ${message.includes('sucesso') ? 'success' : 'error'}`}>
-              {message}
+          <div style={{ position: 'relative', zIndex: 1, fontSize: '0.78rem', opacity: 0.6 }}>
+            © 2026 NVS TECH. Todos os direitos reservados.
+          </div>
+        </div>
+
+        {/* Lateral direita — inteira branca, com o botão */}
+        <div style={{
+          background: '#fff',
+          padding: '3rem',
+          display: 'flex',
+          flexDirection: 'column',
+          justifyContent: 'center',
+          alignItems: 'center'
+        }}>
+          <div style={{ width: '100%', maxWidth: '380px', display: 'flex', flexDirection: 'column', gap: '1.6rem' }}>
+            <div>
+              <h2 style={{ fontSize: '1.7rem', fontWeight: 800, color: '#0b2050', margin: '0 0 0.6rem 0' }}>
+                Acessar plataforma
+              </h2>
+              <p style={{ fontSize: '0.95rem', color: '#667085', lineHeight: 1.5, margin: 0 }}>
+                Tudo pronto para você gerenciar suas notas, estoque e inbound. É só entrar.
+              </p>
             </div>
-          )}
 
-          {/* ===== TELA ÚNICA: 2 colunas — Upload (esq.) | Notas (dir.) ===== */}
-          <div style={{ display: 'grid', gridTemplateColumns: 'minmax(300px, 360px) 1fr', gap: '1.5rem', alignItems: 'start' }}>
+            <button
+              type="button"
+              onClick={() => setPagina('inicial')}
+              style={{
+                width: '100%',
+                padding: '1rem',
+                background: 'linear-gradient(135deg, #1f6fff 0%, #1657d6 100%)',
+                color: '#fff',
+                border: 'none',
+                borderRadius: '10px',
+                fontSize: '1.05rem',
+                fontWeight: 800,
+                cursor: 'pointer',
+                boxShadow: '0 12px 26px rgba(31, 111, 255, 0.35)',
+                transition: 'transform 0.12s ease, box-shadow 0.12s ease'
+              }}
+              onMouseEnter={(e) => { const el = e.currentTarget; el.style.transform = 'translateY(-1px)'; el.style.boxShadow = '0 16px 32px rgba(31, 111, 255, 0.42)' }}
+              onMouseLeave={(e) => { const el = e.currentTarget; el.style.transform = 'none'; el.style.boxShadow = '0 12px 26px rgba(31, 111, 255, 0.35)' }}
+            >
+              Entrar
+            </button>
 
-            <div style={{ display: 'grid', gap: '1rem', alignContent: 'start' }}>
-            {/* UPLOAD compacto */}
-            <div className="card">
-              <h2>Upload de Nota Fiscal</h2>
-              <div className="card-body">
-                <form onSubmit={handleUpload} style={{ display: 'flex', gap: '1rem', alignItems: 'center', flexWrap: 'wrap' }}>
-                  <div
-                    onClick={() => fileInputRef.current?.click()}
-                    style={{ flex: 1, minWidth: '260px', border: '2px dashed #cfd8dc', borderRadius: '8px', padding: '1rem 1.25rem', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '0.75rem' }}
-                  >
-                    <span style={{ fontSize: '1.5rem' }}>⬆️</span>
-                    <div>
-                      <div style={{ fontWeight: 600, color: '#1a1a1a' }}>{file ? file.name : 'Selecione um arquivo XML ou PDF'}</div>
-                      <div style={{ fontSize: '0.8rem', color: '#90a4ae' }}>Clique para escolher</div>
-                    </div>
+            <div style={{ textAlign: 'center', fontSize: '0.85rem', color: '#98a2b3' }}>
+              Precisa de ajuda? <span style={{ color: '#1f6fff', fontWeight: 600 }}>Fale com o suporte</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  if (pagina === 'inicial') {
+    return renderComShell(
+      'Dashboard Operacional',
+      'Visao geral da sua operacao em tempo real.',
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+          <section className="nvs-kpi-grid" style={{ marginBottom: '1.5rem' }}>
+            {[
+              { tag: 'FN', cor: 'blue', titulo: 'Fornecedores', valor: estoque.length > 0 ? new Set(estoque.flatMap(e => e.notas_fiscais.map(n => n.fornecedor))).size : 0, helper: 'Fornecedores cadastrados' },
+              { tag: 'IT', cor: 'green', titulo: 'Itens sincronizados', valor: itensSincronizados, helper: `${todosItens.length} itens no fluxo` },
+              { tag: 'IN', cor: 'yellow', titulo: 'Inbounds ativos', valor: inboundsAtivos.length, helper: inboundsAtivos.length > 0 ? `${progressoBaixasInbound.restante} un pendente` : 'Sem inbound em aberto' },
+              { tag: 'DG', cor: 'red', titulo: 'Itens divergentes', valor: divergencias.length, helper: divergencias.length > 0 ? 'Exigem ação imediata' : 'Nenhuma divergência' },
+            ].map((item) => (
+              <div className="nvs-kpi-card" key={item.titulo}>
+                <div className="nvs-kpi-card__head">
+                  <div className={`nvs-kpi-card__icon is-${item.cor}`}>
+                    <span style={{ fontSize: '0.68rem', fontWeight: 800 }}>{item.tag}</span>
                   </div>
-                  <input ref={fileInputRef} type="file" accept=".xml,.pdf" onChange={(e) => setFile(e.target.files?.[0] || null)} disabled={loading} style={{ display: 'none' }} />
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.2rem' }}>
-                    <label style={{ fontSize: '0.72rem', color: '#90a4ae' }}>Frete (R$, opcional)</label>
-                    <input type="text" inputMode="decimal" placeholder="0,00" value={freteNota} onChange={(e) => setFreteNota(e.target.value)} disabled={loading}
-                      style={{ width: '110px', padding: '0.6rem 0.75rem', border: '1px solid #cfd8dc', borderRadius: '8px', fontSize: '0.95rem' }} />
-                  </div>
-                  <button type="submit" disabled={!file || loading} className="upload-button" style={{ whiteSpace: 'nowrap' }}>
-                    {loading ? 'Processando...' : 'Enviar NF-e'}
-                  </button>
-                </form>
-
-                {/* Botão de Fornecedores e Embaldes */}
-                <div style={{ marginTop: '1rem', paddingTop: '1rem', borderTop: '1px solid #e0e0e0', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
-                  <button
-                    onClick={() => setPagina('fornecedores')}
-                    translate="no"
-                    className="notranslate"
-                    aria-label="Fornecedores"
-                    title="Fornecedores"
-                    style={{
-                      padding: '0.75rem 1rem',
-                      background: '#fff',
-                      color: '#333',
-                      border: '1px solid #ddd',
-                      borderRadius: '4px',
-                      cursor: 'pointer',
-                      fontWeight: 600,
-                      fontSize: '0.95rem',
-                      transition: 'all 0.2s ease'
-                    }}
-                    onMouseEnter={(e) => {
-                      const el = e.currentTarget as HTMLElement
-                      el.style.background = '#f5f5f5'
-                      el.style.borderColor = '#999'
-                    }}
-                    onMouseLeave={(e) => {
-                      const el = e.currentTarget as HTMLElement
-                      el.style.background = '#fff'
-                      el.style.borderColor = '#ddd'
-                    }}
-                  >
-                    👥 Fornecedores
-                  </button>
-                  <button
-                    onClick={() => setPagina('embaldes')}
-                    style={{
-                      padding: '0.75rem 1rem',
-                      background: '#fff',
-                      color: '#333',
-                      border: '1px solid #ddd',
-                      borderRadius: '4px',
-                      cursor: 'pointer',
-                      fontWeight: 600,
-                      fontSize: '0.95rem',
-                      transition: 'all 0.2s ease'
-                    }}
-                    onMouseEnter={(e) => {
-                      const el = e.currentTarget as HTMLElement
-                      el.style.background = '#f5f5f5'
-                      el.style.borderColor = '#999'
-                    }}
-                    onMouseLeave={(e) => {
-                      const el = e.currentTarget as HTMLElement
-                      el.style.background = '#fff'
-                      el.style.borderColor = '#ddd'
-                    }}
-                  >
-                    Inbound
-                  </button>
-                  <button
-                    onClick={() => setPagina('anuncios')}
-                    style={{
-                      padding: '0.75rem 1rem',
-                      background: '#fff',
-                      color: '#333',
-                      border: '1px solid #ddd',
-                      borderRadius: '4px',
-                      cursor: 'pointer',
-                      fontWeight: 600,
-                      fontSize: '0.95rem',
-                      transition: 'all 0.2s ease'
-                    }}
-                    onMouseEnter={(e) => {
-                      const el = e.currentTarget as HTMLElement
-                      el.style.background = '#f5f5f5'
-                      el.style.borderColor = '#999'
-                    }}
-                    onMouseLeave={(e) => {
-                      const el = e.currentTarget as HTMLElement
-                      el.style.background = '#fff'
-                      el.style.borderColor = '#ddd'
-                    }}
-                  >
-                    🛒 Anúncios ML
-                  </button>
+                  <span className="nvs-kpi-card__label">{item.titulo}</span>
                 </div>
+                <div className="nvs-kpi-card__value">{item.valor}</div>
+                <div className="nvs-kpi-card__helper">{item.helper}</div>
               </div>
-            </div>
+            ))}
+          </section>
 
-            {false && inboundsAtivos.length > 0 && progressoBaixasInbound.planejado > 0 && (
+          <section style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1.5rem', marginBottom: '1.5rem', alignItems: 'start' }}>
+            {inboundsAtivos.length > 0 && progressoBaixasInbound.planejado > 0 && (
               <div className="card" style={{
                 border: '2px solid #90caf9',
                 boxShadow: '0 10px 24px rgba(25, 118, 210, 0.08)'
               }}>
                 <div className="card-body" style={{ padding: '1rem' }}>
                   <div style={{ color: '#1565c0', fontWeight: 800, fontSize: '0.78rem', letterSpacing: '0.04em', textTransform: 'uppercase', marginBottom: '0.75rem' }}>
-                    Progresso das baixas do inbound
+                    Progresso do inbound realizado
                   </div>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
-                    <svg width="112" height="112" viewBox="0 0 42 42" aria-label="Gráfico de pizza das baixas do inbound">
+                    <svg width="112" height="112" viewBox="0 0 42 42" aria-label="Progresso do inbound">
                       <circle cx="21" cy="21" r="15.915" fill="transparent" stroke="#e3f2fd" strokeWidth="7" />
                       <circle
                         cx="21"
@@ -1451,94 +1593,164 @@ function App() {
                       <div style={{ color: '#ef6c00' }}>
                         Pendente: <strong>{progressoBaixasInbound.restante}</strong>
                       </div>
+                      {progressoBaixasInbound.emEspera > 0 && (
+                        <div style={{ color: '#8e24aa' }}>
+                          Em espera: <strong>{progressoBaixasInbound.emEspera}</strong>
+                        </div>
+                      )}
                     </div>
                   </div>
                 </div>
               </div>
             )}
+
+            <div className="card" style={{
+              border: '2px solid #ffd54f',
+              boxShadow: '0 10px 24px rgba(255, 152, 0, 0.08)'
+            }}>
+              <div className="card-body" style={{ padding: '1rem' }}>
+                <div style={{ color: '#e65100', fontWeight: 800, fontSize: '0.78rem', letterSpacing: '0.04em', textTransform: 'uppercase', marginBottom: '0.75rem' }}>
+                  Notas sem estar 100% para Olist
+                </div>
+                <div style={{ display: 'grid', gap: '0.75rem' }}>
+                  <div style={{ fontSize: '1.75rem', fontWeight: 800, color: '#e65100' }}>
+                    {notasFiltradas.filter(n => n.status === 'em andamento').length}
+                  </div>
+                  <div style={{ fontSize: '0.82rem', color: '#666' }}>
+                    Notas em andamento
+                  </div>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          {/* CARROSSEL: anúncios pausados SEM estoque no Mercado Livre */}
+          <section className="card" style={{ marginBottom: '1.5rem' }}>
+            <div className="card-body" style={{ padding: '1.25rem' }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1rem', flexWrap: 'wrap', gap: '0.5rem' }}>
+                <div style={{ color: '#c62828', fontWeight: 800, fontSize: '0.82rem', letterSpacing: '0.04em', textTransform: 'uppercase' }}>
+                  Produtos pausados sem estoque no Mercado Livre
+                </div>
+                <span style={{ fontSize: '0.8rem', color: '#999', fontWeight: 600 }}>
+                  {anunciosPausadosSemEstoque.length} {anunciosPausadosSemEstoque.length === 1 ? 'anúncio' : 'anúncios'}
+                </span>
+              </div>
+              {anunciosPausadosSemEstoque.length === 0 ? (
+                <p style={{ color: '#999', fontSize: '0.9rem', padding: '1rem 0' }}>
+                  Nenhum anúncio pausado sem estoque no momento. 🎉
+                </p>
+              ) : (
+                <div style={{ display: 'flex', gap: '1rem', overflowX: 'auto', paddingBottom: '0.75rem', scrollbarWidth: 'thin' }}>
+                  {anunciosPausadosSemEstoque.map(a => (
+                    <a
+                      key={a.id}
+                      href={a.permalink || '#'}
+                      target="_blank"
+                      rel="noreferrer"
+                      style={{
+                        flexShrink: 0,
+                        width: '160px',
+                        textDecoration: 'none',
+                        color: 'inherit',
+                        border: '1px solid #ffcdd2',
+                        borderRadius: '12px',
+                        overflow: 'hidden',
+                        background: '#fff',
+                        transition: 'box-shadow 0.2s, transform 0.2s',
+                      }}
+                      onMouseEnter={e => { e.currentTarget.style.boxShadow = '0 8px 20px rgba(198, 40, 40, 0.18)'; e.currentTarget.style.transform = 'translateY(-2px)' }}
+                      onMouseLeave={e => { e.currentTarget.style.boxShadow = 'none'; e.currentTarget.style.transform = 'translateY(0)' }}
+                    >
+                      <div style={{ width: '160px', height: '160px', background: '#f5f5f5', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
+                        {(a.imagem_principal || a.thumbnail)
+                          ? <img src={a.imagem_principal || a.thumbnail} alt={a.titulo} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                          : <span style={{ color: '#ccc', fontSize: '2rem' }}>📦</span>}
+                      </div>
+                      <div style={{ padding: '0.6rem 0.7rem' }}>
+                        <div style={{ fontSize: '0.78rem', fontWeight: 700, color: '#1a1a1a', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={a.sku}>
+                          {a.sku || 'sem SKU'}
+                        </div>
+                        <div style={{ fontSize: '0.7rem', color: '#999', marginTop: '0.2rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={a.titulo}>
+                          {a.titulo}
+                        </div>
+                      </div>
+                    </a>
+                  ))}
+                </div>
+              )}
+            </div>
+          </section>
+
+      </div>
+    )
+  }
+
+  // ===== PÁGINA NOTAS FISCAIS =====
+  if (pagina === 'notas-fiscais') {
+    return renderComShell(
+      'Notas Fiscais',
+      'Gerenciar upload e lista completa',
+      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(300px, 360px) 1fr', gap: '1.5rem', alignItems: 'start' }}>
+        <div style={{ display: 'grid', gap: '1rem', alignContent: 'start' }}>
+          <div className="card">
+              <h2>Upload de Nota Fiscal</h2>
+              <div className="card-body">
+                <form onSubmit={handleUpload} style={{ display: 'flex', gap: '1rem', alignItems: 'center', flexWrap: 'wrap' }}>
+                  <div
+                    onClick={() => fileInputRef.current?.click()}
+                    style={{ flex: 1, minWidth: '260px', border: '2px dashed #cfd8dc', borderRadius: '8px', padding: '1rem 1.25rem', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '0.75rem' }}
+                  >
+                    <span style={{ fontSize: '1.5rem' }}>⬆️</span>
+                    <div>
+                      <div style={{ fontWeight: 600, color: '#1a1a1a' }}>{file ? file.name : 'Selecione um arquivo XML ou PDF'}</div>
+                      <div style={{ fontSize: '0.8rem', color: '#90a4ae' }}>Clique para escolher</div>
+                    </div>
+                  </div>
+                  <input ref={fileInputRef} type="file" accept=".xml,.pdf" onChange={(e) => setFile(e.target.files?.[0] || null)} disabled={loading} style={{ display: 'none' }} />
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.2rem' }}>
+                    <label style={{ fontSize: '0.72rem', color: '#90a4ae' }}>Frete (R$, opcional)</label>
+                    <input type="text" inputMode="decimal" placeholder="0,00" value={freteNota} onChange={(e) => setFreteNota(e.target.value)} disabled={loading}
+                      style={{ width: '110px', padding: '0.6rem 0.75rem', border: '1px solid #cfd8dc', borderRadius: '8px', fontSize: '0.95rem' }} />
+                  </div>
+                  <button type="submit" disabled={!file || loading} className="upload-button" style={{ whiteSpace: 'nowrap' }}>
+                    {loading ? 'Processando...' : 'Enviar NF-e'}
+                  </button>
+                </form>
+
+              </div>
+            </div>
+
             </div>
 
             {/* FILTRO + LISTA DE NOTAS */}
             <div className="card">
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '1.75rem', marginBottom: '1.5rem', flexWrap: 'wrap' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '1.5rem', marginBottom: '1rem', flexWrap: 'wrap' }}>
                 <h2 style={{ marginTop: 0 }}>Notas Fiscais ({notasFiltradas.length})</h2>
 
-                {/* ===== DIAGNÓSTICO DE INBOUNDS ATIVOS (TEMPO REAL) ===== */}
-                <div style={{ display: 'grid', gap: '0.9rem', minWidth: '260px', maxWidth: '380px', width: '100%' }}>
+                {/* ===== AVISO INBOUND ATIVO ===== */}
+                {inboundsAtivos.length > 0 && (
                   <div style={{
-                    marginTop: '0.35rem',
                     border: `2px solid ${inboundsAtivos.length > 0 ? '#d32f2f' : '#a5d6a7'}`,
                     borderRadius: '12px',
                     padding: '0.85rem 1rem',
                     background: inboundsAtivos.length > 0 ? '#fff5f5' : '#f3faf3',
-                    boxShadow: inboundsAtivos.length > 0 ? '0 10px 24px rgba(211, 47, 47, 0.08)' : '0 8px 18px rgba(46, 125, 50, 0.08)'
+                    boxShadow: inboundsAtivos.length > 0 ? '0 10px 24px rgba(211, 47, 47, 0.08)' : '0 8px 18px rgba(46, 125, 50, 0.08)',
+                    minWidth: '260px'
                   }}>
-                    {inboundsAtivos.length > 0 ? (
-                      <>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', color: '#d32f2f', fontWeight: 800, fontSize: '0.78rem', letterSpacing: '0.04em', marginBottom: '0.55rem', textTransform: 'uppercase' }}>
-                          <span style={{ width: 9, height: 9, borderRadius: '50%', background: '#d32f2f', display: 'inline-block', animation: 'pulse-inbound 1.2s infinite' }} />
-                          {inboundsAtivos.length === 1 ? 'Inbound ativo' : `${inboundsAtivos.length} inbounds ativos`}
-                        </div>
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
-                          {inboundsAtivos.map((inb) => (
-                            <div key={inb.numero_inbound} style={{ display: 'flex', justifyContent: 'space-between', gap: '0.75rem', color: '#d32f2f', fontSize: '0.82rem', fontWeight: 700 }}>
-                              <span>#{inb.numero_inbound}</span>
-                              <span>encerra {fmtData(inb.data_limite)}</span>
-                            </div>
-                          ))}
-                        </div>
-                      </>
-                    ) : (
-                      <div style={{ color: '#2e7d32', fontWeight: 800, fontSize: '0.85rem', textAlign: 'center', letterSpacing: '0.04em' }}>
-                        ✓ SEM INBOUND ATIVO
-                      </div>
-                    )}
-                  </div>
-
-                  {false && inboundsAtivos.length > 0 && progressoBaixasInbound.planejado > 0 && (
-                    <div style={{
-                      border: '2px solid #90caf9',
-                      borderRadius: '12px',
-                      padding: '1rem',
-                      background: '#f7fbff',
-                      boxShadow: '0 10px 24px rgba(25, 118, 210, 0.08)'
-                    }}>
-                      <div style={{ color: '#1565c0', fontWeight: 800, fontSize: '0.78rem', letterSpacing: '0.04em', textTransform: 'uppercase', marginBottom: '0.75rem' }}>
-                        Progresso das baixas do inbound
-                      </div>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
-                        <svg width="112" height="112" viewBox="0 0 42 42" aria-label="Gráfico de pizza das baixas do inbound">
-                          <circle cx="21" cy="21" r="15.915" fill="transparent" stroke="#e3f2fd" strokeWidth="7" />
-                          <circle
-                            cx="21"
-                            cy="21"
-                            r="15.915"
-                            fill="transparent"
-                            stroke="#1976d2"
-                            strokeWidth="7"
-                            strokeDasharray={`${progressoBaixasInbound.percentual} ${100 - progressoBaixasInbound.percentual}`}
-                            strokeLinecap="round"
-                            transform="rotate(-90 21 21)"
-                          />
-                          <text x="21" y="22.5" textAnchor="middle" fontSize="7" fontWeight="700" fill="#0d47a1">
-                            {progressoBaixasInbound.percentual}%
-                          </text>
-                        </svg>
-                        <div style={{ display: 'grid', gap: '0.35rem', fontSize: '0.84rem' }}>
-                          <div style={{ color: '#0d47a1', fontWeight: 700 }}>
-                            {progressoBaixasInbound.baixado} de {progressoBaixasInbound.planejado} un
-                          </div>
-                          <div style={{ color: '#2e7d32' }}>
-                            Realizado: <strong>{progressoBaixasInbound.baixado}</strong>
-                          </div>
-                          <div style={{ color: '#ef6c00' }}>
-                            Pendente: <strong>{progressoBaixasInbound.restante}</strong>
-                          </div>
-                        </div>
-                      </div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', color: '#d32f2f', fontWeight: 800, fontSize: '0.78rem', letterSpacing: '0.04em', marginBottom: '0.55rem', textTransform: 'uppercase' }}>
+                      <span style={{ width: 9, height: 9, borderRadius: '50%', background: '#d32f2f', display: 'inline-block', animation: 'pulse-inbound 1.2s infinite' }} />
+                      {inboundsAtivos.length === 1 ? 'Inbound ativo' : `${inboundsAtivos.length} inbounds ativos`}
                     </div>
-                  )}
-                </div>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
+                      {inboundsAtivos.map((inb) => (
+                        <div key={inb.numero_inbound} style={{ display: 'flex', justifyContent: 'space-between', gap: '0.75rem', color: '#d32f2f', fontSize: '0.82rem', fontWeight: 700 }}>
+                          <span>#{inb.numero_inbound}</span>
+                          <span>encerra {fmtData(inb.data_limite)}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
               <div className="card-body">
                 <div style={{ display: 'flex', gap: '0.75rem', marginBottom: '1.25rem', flexWrap: 'wrap' }}>
@@ -1620,7 +1832,7 @@ function App() {
                       return (
                         <div
                           key={nota.id}
-                          onClick={() => !isSelected && abrirDetalheNota(nota.id)}
+                          onClick={(e) => { if (!isSelected) abrirDetalheNotaPorClick(e, nota.id) }}
                           style={{ display: 'flex', alignItems: 'center', gap: '1rem', padding: '0.85rem 1.1rem', cursor: 'pointer', background: isSelected ? '#e3f2fd' : '#fff', borderTop: idx > 0 ? '1px solid #eef2f4' : 'none', transition: 'background .15s', borderLeft: isSelected ? '4px solid #2196F3' : 'none' }}
                           onMouseEnter={(e) => { if (!isSelected) e.currentTarget.style.background = '#f5f9ff' }}
                           onMouseLeave={(e) => { if (!isSelected) e.currentTarget.style.background = '#fff' }}
@@ -1657,918 +1869,330 @@ function App() {
               </div>
             </div>
 
-            {inboundsAtivos.length > 0 && progressoBaixasInbound.planejado > 0 && (
-              <div className="card" style={{
-                border: '2px solid #90caf9',
-                boxShadow: '0 10px 24px rgba(25, 118, 210, 0.08)'
-              }}>
-                <div className="card-body" style={{ padding: '1rem' }}>
-                  <div style={{ color: '#1565c0', fontWeight: 800, fontSize: '0.78rem', letterSpacing: '0.04em', textTransform: 'uppercase', marginBottom: '0.75rem' }}>
-                    Progresso das baixas do inbound
-                  </div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
-                    <svg width="112" height="112" viewBox="0 0 42 42" aria-label="Gráfico de pizza das baixas do inbound">
-                      <circle cx="21" cy="21" r="15.915" fill="transparent" stroke="#e3f2fd" strokeWidth="7" />
-                      <circle
-                        cx="21"
-                        cy="21"
-                        r="15.915"
-                        fill="transparent"
-                        stroke="#1976d2"
-                        strokeWidth="7"
-                        strokeDasharray={`${progressoBaixasInbound.percentual} ${100 - progressoBaixasInbound.percentual}`}
-                        strokeLinecap="round"
-                        transform="rotate(-90 21 21)"
-                      />
-                      <text x="21" y="22.5" textAnchor="middle" fontSize="7" fontWeight="700" fill="#0d47a1">
-                        {progressoBaixasInbound.percentual}%
-                      </text>
-                    </svg>
-                    <div style={{ display: 'grid', gap: '0.35rem', fontSize: '0.84rem' }}>
-                      <div style={{ color: '#0d47a1', fontWeight: 700 }}>
-                        {progressoBaixasInbound.baixado} de {progressoBaixasInbound.planejado} un
-                      </div>
-                      <div style={{ color: '#2e7d32' }}>
-                        Realizado: <strong>{progressoBaixasInbound.baixado}</strong>
-                      </div>
-                      <div style={{ color: '#ef6c00' }}>
-                        Pendente: <strong>{progressoBaixasInbound.restante}</strong>
-                      </div>
+            {notaDetalheAberta && (
+              <div
+                className="modal-overlay"
+                onMouseDown={(e) => {
+                  if (e.target === e.currentTarget) {
+                    fecharDetalheNota()
+                  }
+                }}
+                style={{ padding: '20px' }}
+              >
+                <div
+                  className="modal-content"
+                  onClick={(e) => e.stopPropagation()}
+                  style={{
+                    width: '95vw',
+                    maxWidth: '1200px',
+                    maxHeight: '90vh',
+                    height: '90vh',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    overflow: 'hidden',
+                    padding: '0',
+                  }}
+                >
+                  <div className="modal-header" style={{ padding: '1.5rem 2rem' }}>
+                    <div>
+                      <h2 style={{ margin: 0, color: '#1a1a1a', fontSize: '1.5rem', fontWeight: 600 }}>
+                        NOTA FISCAL ELETRÔNICA
+                      </h2>
+                      <p style={{ margin: '0.5rem 0 0 0', color: '#666', fontSize: '0.95rem' }}>
+                        NF #{notaDetalheAberta.numero_nf} - Série {notaDetalheAberta.serie || '—'}
+                      </p>
                     </div>
+                    <button
+                      className="modal-close"
+                      onClick={fecharDetalheNota}
+                      style={{ width: '50px', height: '50px', fontSize: '2rem', padding: 0 }}
+                    >
+                      ×
+                    </button>
+                  </div>
+
+                  <div style={{ flex: 1, overflowY: 'auto', padding: '2rem' }}>
+                    <div style={{ display: 'flex', gap: '0.75rem', marginBottom: '1.5rem', flexWrap: 'wrap' }}>
+                      {[
+                        { key: 'detalhes', label: 'Detalhes' },
+                        { key: 'conferencia', label: 'Conferência' },
+                        { key: 'divergencias', label: `Divergências (${divergenciasDaNota(notaDetalheAberta).length})` },
+                      ].map((tab) => {
+                        const ativa = abaDetalhe === tab.key
+                        return (
+                          <button
+                            key={tab.key}
+                            onClick={() => setAbaDetalhe(tab.key as typeof abaDetalhe)}
+                            style={{
+                              padding: '0.65rem 1rem',
+                              borderRadius: '999px',
+                              border: ativa ? 'none' : '1px solid #d0d7de',
+                              background: ativa ? '#1976D2' : '#fff',
+                              color: ativa ? '#fff' : '#455a64',
+                              fontWeight: 700,
+                              cursor: 'pointer',
+                            }}
+                          >
+                            {tab.label}
+                          </button>
+                        )
+                      })}
+                    </div>
+
+                    {abaDetalhe === 'detalhes' && (
+                      <div style={{ display: 'grid', gap: '1rem' }}>
+                        <div style={{ background: '#f9f9f9', border: '2px solid #007acc', padding: '2rem', borderRadius: '8px' }}>
+                          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '2rem' }}>
+                            <div>
+                              <p style={{ color: '#007acc', fontSize: '0.8rem', fontWeight: 700, textTransform: 'uppercase', marginBottom: '0.5rem' }}>
+                                Fornecedor
+                              </p>
+                              <h3 style={{ color: '#1a1a1a', fontSize: '1.2rem', fontWeight: 700, margin: '0 0 1rem 0' }}>
+                                {notaDetalheAberta.fornecedor}
+                              </h3>
+
+                              <div style={{ marginBottom: '1rem' }}>
+                                <p style={{ color: '#999', fontSize: '0.8rem', fontWeight: 700, marginBottom: '0.25rem' }}>CNPJ</p>
+                                <p style={{ color: '#1a1a1a', fontSize: '0.95rem', margin: 0 }}>{notaDetalheAberta.cnpj || 'N/A'}</p>
+                              </div>
+
+                              <div>
+                                <p style={{ color: '#999', fontSize: '0.8rem', fontWeight: 700, marginBottom: '0.25rem' }}>ENDEREÇO</p>
+                                <p style={{ color: '#1a1a1a', fontSize: '0.95rem', margin: 0 }}>{notaDetalheAberta.endereco || 'N/A'}</p>
+                              </div>
+                            </div>
+
+                            <div>
+                              <div style={{ marginBottom: '1rem' }}>
+                                <p style={{ color: '#999', fontSize: '0.8rem', fontWeight: 700, marginBottom: '0.25rem' }}>DATA DE EMISSÃO</p>
+                                <p style={{ color: '#1a1a1a', fontSize: '1.1rem', fontWeight: 600, margin: 0 }}>
+                                  {notaDetalheAberta.data_emissao
+                                    ? new Date(notaDetalheAberta.data_emissao).toLocaleDateString('pt-BR', {
+                                        year: 'numeric',
+                                        month: 'long',
+                                        day: 'numeric',
+                                      })
+                                    : 'N/A'}
+                                </p>
+                              </div>
+
+                              <div style={{ marginBottom: '1rem' }}>
+                                <p style={{ color: '#999', fontSize: '0.8rem', fontWeight: 700, marginBottom: '0.25rem' }}>STATUS</p>
+                                <p style={{
+                                  color: '#155724',
+                                  fontSize: '0.95rem',
+                                  fontWeight: 600,
+                                  display: 'inline-block',
+                                  background: '#f0f9f6',
+                                  padding: '0.5rem 1rem',
+                                  borderRadius: '4px',
+                                  border: '1px solid #c8e6c9',
+                                  margin: 0,
+                                }}>
+                                  {notaDetalheAberta.status?.toUpperCase() || 'PROCESSADO'}
+                                </p>
+                              </div>
+
+                              <div>
+                                <p style={{ color: '#999', fontSize: '0.8rem', fontWeight: 700, marginBottom: '0.25rem' }}>QUANTIDADE DE ITENS</p>
+                                <p style={{ color: '#1a1a1a', fontSize: '1.3rem', fontWeight: 700, margin: 0 }}>
+                                  {notaDetalheAberta.itens?.length || 0}
+                                </p>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+
+                        <div style={{ marginBottom: '2rem' }}>
+                          <h3 style={{ color: '#1a1a1a', marginBottom: '1rem', fontSize: '1.1rem', fontWeight: 600 }}>
+                            Produtos
+                          </h3>
+
+                          <div style={{ borderCollapse: 'collapse', width: '100%', border: '1px solid #e0e0e0', borderRadius: '6px', overflow: 'hidden' }}>
+                            <div style={{
+                              background: '#007acc',
+                              color: 'white',
+                              display: 'grid',
+                              gridTemplateColumns: '2fr 1fr 1fr 1fr 1.2fr',
+                              gap: '1rem',
+                              padding: '1rem',
+                              fontWeight: 600,
+                              fontSize: '0.9rem',
+                            }}>
+                              <div>PRODUTO</div>
+                              <div style={{ textAlign: 'center' }}>QTD</div>
+                              <div style={{ textAlign: 'center' }}>VALOR UN.</div>
+                              <div style={{ textAlign: 'center' }}>SUBTOTAL</div>
+                              <div style={{ textAlign: 'right' }}>CÓDIGO</div>
+                            </div>
+
+                            {(notaDetalheAberta.itens || []).map((item, idx) => (
+                              <div key={item.id} style={{
+                                display: 'grid',
+                                gridTemplateColumns: '2fr 1fr 1fr 1fr 1.2fr',
+                                gap: '1rem',
+                                padding: '1rem',
+                                borderTop: idx > 0 ? '1px solid #e0e0e0' : 'none',
+                                background: idx % 2 === 0 ? '#ffffff' : '#f9f9f9',
+                                alignItems: 'center',
+                              }}>
+                                <div style={{ color: '#1a1a1a', fontWeight: 500 }}>
+                                  {item.descricao}
+                                </div>
+                                <div style={{ textAlign: 'center', color: '#1a1a1a', fontWeight: 600 }}>
+                                  {item.quantidade_nf.toFixed(0)}
+                                </div>
+                                <div style={{ textAlign: 'center', color: '#1a1a1a' }}>
+                                  R$ {item.preco_unitario.toFixed(2)}
+                                </div>
+                                <div style={{ textAlign: 'center', color: '#007acc', fontWeight: 600 }}>
+                                  R$ {(item.quantidade_nf * item.preco_unitario).toFixed(2)}
+                                </div>
+                                <div style={{ textAlign: 'right', color: '#666', fontSize: '0.9rem' }}>
+                                  {item.codigo_produto || '—'}
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+
+                        <div style={{ background: '#f5f5f5', border: '2px solid #007acc', padding: '1.5rem 2rem', borderRadius: '6px', textAlign: 'right' }}>
+                          <p style={{ color: '#999', fontSize: '0.9rem', marginBottom: '0.5rem' }}>VALOR TOTAL DA NOTA</p>
+                          <p style={{ color: '#007acc', fontSize: '2rem', fontWeight: 700, margin: 0 }}>
+                            R$ {((notaDetalheAberta.itens || []).reduce((sum, item) => sum + (item.quantidade_nf * item.preco_unitario), 0)).toFixed(2)}
+                          </p>
+                        </div>
+                      </div>
+                    )}
+
+                    {abaDetalhe === 'conferencia' && (
+                      <div style={{ display: 'grid', gap: '1rem' }}>
+                        <div style={{ background: '#f7f9fa', border: '1px solid #e0e0e0', borderRadius: '10px', padding: '1rem' }}>
+                          <div style={{ fontWeight: 700, color: '#1a1a1a', marginBottom: '0.6rem' }}>Progresso da nota</div>
+                          <BarraProgresso itens={notaDetalheAberta.itens} />
+                        </div>
+
+                        <div style={{ display: 'flex', justifyContent: 'space-between', gap: '1rem', alignItems: 'center', flexWrap: 'wrap' }}>
+                          <div style={{ color: '#607d8b', fontSize: '0.88rem' }}>
+                            Clique em `Conferir` para abrir o fluxo antigo de conferência do item.
+                          </div>
+                          <button
+                            onClick={enviarMultiplosEmMassa}
+                            disabled={itensSelecionadosMultiplos.size === 0}
+                            style={{
+                              padding: '0.65rem 1rem',
+                              background: itensSelecionadosMultiplos.size === 0 ? '#cfd8dc' : '#1976D2',
+                              color: '#fff',
+                              border: 'none',
+                              borderRadius: '8px',
+                              cursor: itensSelecionadosMultiplos.size === 0 ? 'not-allowed' : 'pointer',
+                              fontWeight: 700,
+                            }}
+                          >
+                            Enviar selecionados em massa
+                          </button>
+                        </div>
+
+                        <div style={{ border: '1px solid #e0e0e0', borderRadius: '10px', overflow: 'hidden' }}>
+                          <div style={{ display: 'grid', gridTemplateColumns: '42px minmax(240px, 1fr) 90px 120px 160px', gap: '1rem', padding: '0.9rem 1rem', background: '#f7f9fa', fontSize: '0.78rem', fontWeight: 700, color: '#78909c', textTransform: 'uppercase', alignItems: 'center' }}>
+                            <div />
+                            <div>Produto</div>
+                            <div style={{ textAlign: 'center' }}>Qtd</div>
+                            <div style={{ textAlign: 'center' }}>Status</div>
+                            <div style={{ textAlign: 'right' }}>Ação</div>
+                          </div>
+                          {(notaDetalheAberta.itens || []).map((item, idx) => {
+                            const statusItem = item.divergencia ? 'Divergência' : item.quantidade_confirmada != null ? 'Conferido' : 'Pendente'
+                            const statusColor = item.divergencia ? '#c62828' : item.quantidade_confirmada != null ? '#2e7d32' : '#ef6c00'
+                            return (
+                              <div key={item.id} style={{ display: 'grid', gridTemplateColumns: '42px minmax(240px, 1fr) 90px 120px 160px', gap: '1rem', padding: '0.95rem 1rem', borderTop: idx > 0 ? '1px solid #eef2f4' : 'none', alignItems: 'center' }}>
+                                <div style={{ display: 'flex', justifyContent: 'center' }}>
+                                  <input
+                                    type="checkbox"
+                                    checked={itensSelecionadosMultiplos.has(item.id)}
+                                    onChange={() => toggleSelecaoMultipla(item.id)}
+                                    style={{ width: '18px', height: '18px', cursor: 'pointer' }}
+                                  />
+                                </div>
+                                <div>
+                                  <div style={{ fontWeight: 700, color: '#1a1a1a' }}>{item.descricao}</div>
+                                  <div style={{ color: '#78909c', fontSize: '0.82rem' }}>Código: {item.codigo_produto || '—'}</div>
+                                </div>
+                                <div style={{ textAlign: 'center', fontWeight: 700 }}>{Math.round(item.quantidade_nf)}</div>
+                                <div style={{ textAlign: 'center', color: statusColor, fontWeight: 700, fontSize: '0.82rem' }}>{statusItem}</div>
+                                <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                                  <button
+                                    onClick={() => conferirProduto(item)}
+                                    style={{ padding: '0.55rem 0.9rem', background: '#1976D2', color: '#fff', border: 'none', borderRadius: '8px', cursor: 'pointer', fontWeight: 700 }}
+                                  >
+                                    Conferir
+                                  </button>
+                                </div>
+                              </div>
+                            )
+                          })}
+                        </div>
+                      </div>
+                    )}
+
+                    {abaDetalhe === 'divergencias' && (
+                      <div style={{ display: 'grid', gap: '1rem' }}>
+                        {divergenciasDaNota(notaDetalheAberta).length === 0 ? (
+                          <div style={{ textAlign: 'center', color: '#90a4ae', padding: '2rem 1rem', border: '1px dashed #cfd8dc', borderRadius: '10px' }}>
+                            Nenhuma divergência encontrada para esta nota.
+                          </div>
+                        ) : (
+                          divergenciasDaNota(notaDetalheAberta).map((div) => (
+                            <div key={div.item_id} style={{ padding: '1.25rem', border: '1px solid #ffccd2', borderRadius: '10px', background: '#fff7f8' }}>
+                              <div style={{ display: 'grid', gridTemplateColumns: '1fr auto', gap: '1rem', marginBottom: '0.9rem' }}>
+                                <div>
+                                  <div style={{ fontWeight: 700, color: '#1a1a1a' }}>{div.produto}</div>
+                                  <div style={{ color: '#78909c', fontSize: '0.84rem' }}>Código: {div.codigo}</div>
+                                </div>
+                                <div style={{ color: '#c62828', fontWeight: 700, fontSize: '0.82rem', textTransform: 'uppercase' }}>
+                                  {div.tipo_divergencia}
+                                </div>
+                              </div>
+                              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '0.75rem', marginBottom: '1rem' }}>
+                                <div style={{ background: '#fff', borderRadius: '8px', padding: '0.85rem' }}>
+                                  <div style={{ color: '#90a4ae', fontSize: '0.75rem', fontWeight: 700, textTransform: 'uppercase' }}>NF</div>
+                                  <div style={{ marginTop: '0.3rem', fontWeight: 700 }}>{div.quantidade_nf} un</div>
+                                </div>
+                                <div style={{ background: '#fff', borderRadius: '8px', padding: '0.85rem' }}>
+                                  <div style={{ color: '#90a4ae', fontSize: '0.75rem', fontWeight: 700, textTransform: 'uppercase' }}>Recebido</div>
+                                  <div style={{ marginTop: '0.3rem', fontWeight: 700 }}>{div.quantidade_confirmada} un</div>
+                                </div>
+                                <div style={{ background: '#fff', borderRadius: '8px', padding: '0.85rem' }}>
+                                  <div style={{ color: '#90a4ae', fontSize: '0.75rem', fontWeight: 700, textTransform: 'uppercase' }}>Diferença</div>
+                                  <div style={{ marginTop: '0.3rem', fontWeight: 700, color: '#c62828' }}>{div.quantidade_nf - div.quantidade_confirmada} un</div>
+                                </div>
+                              </div>
+                              <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
+                                <button onClick={() => vincularDivergenciaOlist(div)} style={{ padding: '0.7rem 1rem', background: '#1976D2', color: '#fff', border: 'none', borderRadius: '8px', cursor: 'pointer', fontWeight: 700 }}>Vincular na Olist</button>
+                                <button onClick={() => resolverDivergenciaItem(div.item_id)} style={{ padding: '0.7rem 1rem', background: '#2e7d32', color: '#fff', border: 'none', borderRadius: '8px', cursor: 'pointer', fontWeight: 700 }}>Marcar como resolvida</button>
+                                <button onClick={() => deletarDivergenciaItem(div.item_id)} style={{ padding: '0.7rem 1rem', background: '#fff', color: '#c62828', border: '1px solid #ef9a9a', borderRadius: '8px', cursor: 'pointer', fontWeight: 700 }}>Deletar</button>
+                              </div>
+                            </div>
+                          ))
+                        )}
+                      </div>
+                    )}
                   </div>
                 </div>
               </div>
             )}
+
+            {produtoSelecionado && (
+              <ModalDetalhesNota
+                isOpen={modalOpen}
+                onClose={() => setModalOpen(false)}
+                produto={produtoSelecionado}
+                notaNota={notaDetalheAberta}
+                onNaoConfirmado={(qtd) => irParaOlistSubirEstoque(qtd)}
+                onDivergenciaConfirmada={(qtd) => irParaOlistSubirEstoque(qtd)}
+              />
+            )}
           </div>
-
-          {/* ===== layout antigo (4 colunas) desativado ===== */}
-          <div style={{ display: 'none' }}>
-            {/* UPLOAD CARD */}
-            <div className="card">
-              <h2>Upload de Nota Fiscal</h2>
-              <div className="card-body">
-              <form onSubmit={handleUpload}>
-                <div
-                  className="upload-section"
-                  onClick={() => fileInputRef.current?.click()}
-                >
-                  <div className="upload-icon">↑</div>
-                  <h3>Selecione um arquivo</h3>
-                  <p>XML ou PDF de NF-e</p>
-                  <p style={{ fontSize: '0.85rem', color: '#6b7280' }}>
-                    {file ? file.name : 'Clique ou arraste um arquivo'}
-                  </p>
-                </div>
-
-                <div className="file-input-wrapper">
-                  <input
-                    ref={fileInputRef}
-                    type="file"
-                    accept=".xml,.pdf"
-                    onChange={(e) => setFile(e.target.files?.[0] || null)}
-                    disabled={loading}
-                    className="file-input"
-                  />
-                </div>
-
-                <button
-                  type="submit"
-                  disabled={!file || loading}
-                  className="upload-button"
-                >
-                  {loading ? 'Processando...' : 'Enviar NF-e'}
-                </button>
-              </form>
-              </div>
-            </div>
-
-            {/* COLUNA 2: NOTAS FISCAIS PROCESSADAS */}
-            <div className="card">
-              <h2>Notas Fiscais Processadas</h2>
-              <div className="card-body">
-              {notas.length === 0 ? (
-                <p style={{ color: '#666', textAlign: 'center', padding: '2rem' }}>
-                  Nenhuma nota processada
-                </p>
-              ) : (
-                <div className="notas-list">
-                  {notas.map((nota) => (
-                    <div
-                      key={nota.id}
-                      className="nota-item"
-                      onClick={() => abrirNotaSelecionada(nota.id)}
-                      style={{
-                        cursor: 'pointer',
-                        backgroundColor: notaSelecionada?.id === nota.id ? '#e3f2fd' : '#f9f9f9',
-                        borderLeftColor: notaSelecionada?.id === nota.id ? '#0d47a1' : '#007acc',
-                      }}
-                    >
-                      <div className="nota-number">NF #{nota.numero_nf}</div>
-                      <div className="nota-info">
-                        Fornecedor: <strong>{nota.fornecedor}</strong>
-                      </div>
-                      <div className="nota-info">
-                        Série: <strong>{nota.serie}</strong>
-                      </div>
-                      <div className="nota-status">{nota.status.toUpperCase()}</div>
-                      <BarraProgresso itens={nota.itens} compacto />
-                    </div>
-                  ))}
-                </div>
-              )}
-              </div>
-            </div>
-
-            {/* COLUNA 3: ESTOQUE VIRTUAL - PRÉVIA */}
-            <div className="card">
-              <h2>Estoque Virtual - Prévia</h2>
-              <div className="card-body">
-              {!notaSelecionada ? (
-                <p style={{ color: '#999', textAlign: 'center', padding: '2rem', fontSize: '0.95rem' }}>
-                  Selecione uma nota fiscal para ver a prévia
-                </p>
-              ) : (
-                <div>
-                  {/* Informações da Nota */}
-                  <div style={{ background: '#f9f9f9', padding: '1.5rem', borderRadius: '6px', marginBottom: '1.5rem' }}>
-                    <h3 style={{ color: '#1a1a1a', marginBottom: '1rem', fontSize: '1.1rem', fontWeight: '600' }}>
-                      {notaSelecionada.fornecedor}
-                    </h3>
-
-                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.75rem' }}>
-                      <span style={{ color: '#666', fontSize: '0.9rem' }}>NF:</span>
-                      <span style={{ color: '#1a1a1a', fontWeight: '600' }}>{notaSelecionada.numero_nf}</span>
-                    </div>
-
-                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.75rem' }}>
-                      <span style={{ color: '#666', fontSize: '0.9rem' }}>Série:</span>
-                      <span style={{ color: '#1a1a1a', fontWeight: '600' }}>{notaSelecionada.serie}</span>
-                    </div>
-
-                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.75rem' }}>
-                      <span style={{ color: '#666', fontSize: '0.9rem' }}>Itens:</span>
-                      <span style={{ color: '#1a1a1a', fontWeight: '600' }}>{notaSelecionada.itens?.length || 0}</span>
-                    </div>
-
-                    <div style={{ display: 'flex', justifyContent: 'space-between', paddingTop: '0.75rem', borderTop: '1px solid #e0e0e0' }}>
-                      <span style={{ color: '#666', fontSize: '0.9rem', fontWeight: '600' }}>Valor Total:</span>
-                      <span style={{ color: '#007acc', fontWeight: '700', fontSize: '1rem' }}>
-                        R$ {(notaSelecionada.itens?.reduce((sum, item) => sum + (item.quantidade_nf * item.preco_unitario), 0) || 0).toFixed(2)}
-                      </span>
-                    </div>
-                  </div>
-
-                  {/* Lista de Produtos */}
-                  <div style={{ background: '#f5f5f5', padding: '1rem', borderRadius: '6px', marginBottom: '1.5rem', maxHeight: '200px', overflowY: 'auto' }}>
-                    <p style={{ color: '#999', fontSize: '0.8rem', fontWeight: '700', marginBottom: '0.75rem', textTransform: 'uppercase' }}>
-                      Produtos ({notaSelecionada.itens?.length || 0})
-                    </p>
-                    {notaSelecionada.itens && notaSelecionada.itens.length > 0 ? (
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-                        {notaSelecionada.itens.map((item, idx) => (
-                          <div key={idx} style={{ background: '#ffffff', padding: '0.75rem', borderRadius: '4px', fontSize: '0.85rem' }}>
-                            <div style={{ color: '#1a1a1a', fontWeight: '600', marginBottom: '0.25rem' }}>
-                              {item.descricao}
-                            </div>
-                            <div style={{ color: '#666', fontSize: '0.8rem' }}>
-                              {item.quantidade_nf.toFixed(0)} un × R$ {item.preco_unitario.toFixed(2)}
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    ) : (
-                      <p style={{ color: '#999', fontSize: '0.85rem' }}>Nenhum produto</p>
-                    )}
-                  </div>
-
-                  {/* Botões */}
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-                    <button
-                      onClick={irParaConferenciaProdutos}
-                      style={{
-                        padding: '0.85rem',
-                        background: '#007acc',
-                        color: 'white',
-                        border: 'none',
-                        borderRadius: '4px',
-                        fontWeight: '600',
-                        cursor: 'pointer',
-                        fontSize: '0.9rem',
-                        transition: 'all 0.3s'
-                      }}
-                      onMouseEnter={(e) => (e.currentTarget.style.background = '#005a96')}
-                      onMouseLeave={(e) => (e.currentTarget.style.background = '#007acc')}
-                    >
-                      Ir para Conferência
-                    </button>
-
-                    <button
-                      onClick={() => setModalDetalhesNFAberto(true)}
-                      style={{
-                        padding: '0.85rem',
-                        background: '#f0f0f0',
-                        color: '#1a1a1a',
-                        border: '1px solid #e0e0e0',
-                        borderRadius: '4px',
-                        fontWeight: '600',
-                        cursor: 'pointer',
-                        fontSize: '0.9rem',
-                        transition: 'all 0.3s'
-                      }}
-                      onMouseEnter={(e) => (e.currentTarget.style.background = '#e8e8e8')}
-                      onMouseLeave={(e) => (e.currentTarget.style.background = '#f0f0f0')}
-                    >
-                      Ver Detalhes
-                    </button>
-                  </div>
-                </div>
-              )}
-              </div>
-            </div>
-
-            {/* COLUNA 4: DIVERGÊNCIAS REGISTRADAS */}
-            <div className="card">
-              <h2>Divergências Registradas</h2>
-              <div className="card-body">
-              {divergencias.length === 0 ? (
-                <p style={{ color: '#999', textAlign: 'center', padding: '2rem', fontSize: '0.95rem' }}>
-                  Nenhuma divergência registrada
-                </p>
-              ) : (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-                  {divergencias.map((div) => {
-                    let bgColor = '#e3f2fd'
-                    let borderColor = '#2196F3'
-                    let textColor = '#1565c0'
-
-                    if (div.tipo_divergencia === 'a_menos') {
-                      bgColor = '#ffebee'
-                      borderColor = '#f44336'
-                      textColor = '#c62828'
-                    } else if (div.tipo_divergencia === 'a_mais') {
-                      bgColor = '#fff3e0'
-                      borderColor = '#ff9800'
-                      textColor = '#e65100'
-                    } else if (div.tipo_divergencia === 'nao_veio') {
-                      bgColor = '#f3e5f5'
-                      borderColor = '#9c27b0'
-                      textColor = '#6a1b9a'
-                    } else if (div.tipo_divergencia === 'produto_substituido') {
-                      bgColor = '#f0f4c3'
-                      borderColor = '#cddc39'
-                      textColor = '#827717'
-                    }
-
-                    const handleResolver = async () => {
-                      const res = await fetch(API_BASE + '/api/resolver-divergencia', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ item_id: div.item_id })
-                      })
-                      if (res.ok) {
-                        alert('✅ Divergência marcada como resolvida')
-                        loadDivergencias()
-                      } else {
-                        alert('❌ Erro ao resolver')
-                      }
-                    }
-
-                    const handleDeletar = async () => {
-                      if (!window.confirm('Tem certeza que deseja deletar esta divergência?')) return
-                      const res = await fetch(API_BASE + '/api/deletar-divergencia', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ item_id: div.item_id })
-                      })
-                      if (res.ok) {
-                        alert('✅ Divergência deletada')
-                        loadDivergencias()
-                      } else {
-                        alert('❌ Erro ao deletar')
-                      }
-                    }
-
-                    return (
-                      <div
-                        key={div.item_id}
-                        style={{
-                          background: bgColor,
-                          border: `2px solid ${borderColor}`,
-                          padding: '1rem',
-                          borderRadius: '4px',
-                          fontSize: '0.85rem'
-                        }}
-                      >
-                        <div style={{ color: textColor, fontWeight: '700', marginBottom: '0.5rem' }}>
-                          NF #{div.numero_nf} - {div.tipo_divergencia.toUpperCase().replace('_', ' ')}
-                        </div>
-                        <div style={{ color: '#1a1a1a', fontWeight: '600', marginBottom: '0.25rem' }}>
-                          {div.produto}
-                        </div>
-                        <div style={{ color: '#666', fontSize: '0.8rem', marginBottom: '0.5rem' }}>
-                          Código: {div.codigo}
-                        </div>
-                        <div style={{ color: '#666', fontSize: '0.8rem', marginBottom: '0.75rem' }}>
-                          NF: {Math.round(div.quantidade_nf)} | Recebido: {Math.round(div.quantidade_confirmada)}
-                        </div>
-                        <div style={{ color: '#999', fontSize: '0.75rem', marginBottom: '0.75rem' }}>
-                          {new Date(div.data_registro).toLocaleDateString('pt-BR', {
-                            day: '2-digit',
-                            month: '2-digit',
-                            hour: '2-digit',
-                            minute: '2-digit'
-                          })}
-                        </div>
-                        <div style={{ display: 'flex', gap: '0.5rem' }}>
-                          <button
-                            onClick={handleResolver}
-                            style={{
-                              flex: 1,
-                              padding: '0.4rem 0.5rem',
-                              background: '#4caf50',
-                              color: 'white',
-                              border: 'none',
-                              borderRadius: '3px',
-                              fontSize: '0.75rem',
-                              fontWeight: '600',
-                              cursor: 'pointer'
-                            }}
-                          >
-                            ✓ Resolvida
-                          </button>
-                          <button
-                            onClick={handleDeletar}
-                            style={{
-                              flex: 1,
-                              padding: '0.4rem 0.5rem',
-                              background: '#f44336',
-                              color: 'white',
-                              border: 'none',
-                              borderRadius: '3px',
-                              fontSize: '0.75rem',
-                              fontWeight: '600',
-                              cursor: 'pointer'
-                            }}
-                          >
-                            ✗ Deletar
-                          </button>
-                        </div>
-                        {/* Botão para subir estoque do que realmente chegou */}
-                        {div.tipo_divergencia !== 'nao_veio' && Math.round(div.quantidade_confirmada) > 0 && (
-                          <button
-                            onClick={() => {
-                              setProdutoSelecionado({
-                                id: div.item_id,
-                                descricao: div.produto,
-                                codigo_produto: div.codigo,
-                                quantidade_nf: div.quantidade_confirmada,
-                                preco_unitario: 0
-                              } as any)
-                              setProdutoOlistSelecionado({
-                                id: '', sku: '', nome: '', preco: 0,
-                                estoque: 0, estoque_saldo: 0, estoque_reservado: 0
-                              })
-                              setProdutoOlistSKU('')
-                              setSugestoesSKU([])
-                              setMostrarManual(false)
-                              setPagina('relacionamento_produto')
-                            }}
-                            style={{
-                              width: '100%',
-                              marginTop: '0.5rem',
-                              padding: '0.5rem',
-                              background: '#007acc',
-                              color: 'white',
-                              border: 'none',
-                              borderRadius: '3px',
-                              fontSize: '0.78rem',
-                              fontWeight: '700',
-                              cursor: 'pointer'
-                            }}
-                          >
-                            🔗 Vincular na Olist e Subir {Math.round(div.quantidade_confirmada)} un
-                          </button>
-                        )}
-                      </div>
-                    )
-                  })}
-                </div>
-              )}
-              </div>
-            </div>
-          </div>
-          {/* SEÇÃO ESTOQUE COMPLETA */}
-          {mostrarTodosEstoque && (
-            <section className="estoque-hero">
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2rem' }}>
-                <h2>Todos os Produtos ({estoque.length})</h2>
-                <button
-                  onClick={() => setMostrarTodosEstoque(false)}
-                  style={{
-                    padding: '0.5rem 1rem',
-                    background: '#f0f0f0',
-                    border: '1px solid #e0e0e0',
-                    borderRadius: '4px',
-                    cursor: 'pointer',
-                    fontWeight: '600'
-                  }}
-                >
-                  Voltar
-                </button>
-              </div>
-
-              <div className="estoque-grid">
-                {estoque.map((produto) => (
-                  <div key={produto.id_item} className="product-card">
-                    <div className="product-header">
-                      <div className="product-name">
-                        <h3>{produto.descricao}</h3>
-                        <span className="product-code">SKU: {produto.codigo_produto}</span>
-                      </div>
-                      <div className="product-code-badge">
-                        {produto.notas_fiscais.length} NF
-                      </div>
-                    </div>
-
-                    <div className="product-stats">
-                      <div className="stat-box">
-                        <div className="stat-value">{produto.quantidade_total.toFixed(0)}</div>
-                        <div className="stat-label">Qtd Total</div>
-                      </div>
-                      <div className="stat-box">
-                        <div className="stat-value">{produto.quantidade_confirmada.toFixed(0)}</div>
-                        <div className="stat-label">Confirmada</div>
-                      </div>
-                    </div>
-
-                    <div className="price-section">
-                      <div className="price-label">Valor Total</div>
-                      <div className="price-value">
-                        R$ {(produto.quantidade_total * produto.preco_unitario).toFixed(2)}
-                      </div>
-                    </div>
-
-                    <button
-                      className="product-action"
-                      onClick={() => abrirDetalhes(produto)}
-                    >
-                      Detalhes
-                    </button>
-                  </div>
-                ))}
-              </div>
-
-              <div className="valor-total">
-                Total: {estoque.length} produto{estoque.length !== 1 ? 's' : ''} | R$ {estoque.reduce((sum, p) => sum + (p.quantidade_total * p.preco_unitario), 0).toFixed(2)}
-              </div>
-            </section>
-          )}
-
-          {/* BOTÃO DISCRETO: memória de vínculos */}
-          <div style={{ textAlign: 'center', marginTop: '2rem' }}>
-            <button
-              onClick={abrirModalVinculos}
-              style={{
-                background: 'transparent',
-                border: 'none',
-                color: '#9e9e9e',
-                fontSize: '0.8rem',
-                cursor: 'pointer',
-                textDecoration: 'underline',
-                padding: '0.5rem'
-              }}
-              onMouseEnter={(e) => (e.currentTarget.style.color = '#007acc')}
-              onMouseLeave={(e) => (e.currentTarget.style.color = '#9e9e9e')}
-            >
-              ⚙ Vínculos salvos (de-para fornecedor → Olist)
-            </button>
-          </div>
-        </main>
-
-        {/* MODAL: VÍNCULOS SALVOS */}
-        {modalVinculosAberto && (
-          <div className="modal-overlay" onClick={() => setModalVinculosAberto(false)}>
-            <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '900px', width: '90%' }}>
-              <div className="modal-header">
-                <h2>Vínculos Salvos (de-para fornecedor → Olist)</h2>
-                <button className="modal-close" onClick={() => setModalVinculosAberto(false)}>×</button>
-              </div>
-              <div className="modal-body">
-                <p style={{ color: '#666', marginBottom: '1.5rem', fontSize: '0.9rem' }}>
-                  Cada linha é um "apelido" de fornecedor que aponta para um anúncio da Olist.
-                  O mesmo anúncio pode ter vários apelidos (descrições/códigos diferentes).
-                  Esses vínculos são sugeridos automaticamente em notas futuras.
-                </p>
-                {listaVinculos.length === 0 ? (
-                  <p style={{ color: '#999', textAlign: 'center', padding: '2rem' }}>
-                    Nenhum vínculo salvo ainda. Eles são criados quando você vincula um produto à Olist.
-                  </p>
-                ) : (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', maxHeight: '55vh', overflowY: 'auto' }}>
-                    {listaVinculos.map((v) => (
-                      <div key={v.id} style={{
-                        display: 'grid',
-                        gridTemplateColumns: '1fr 1fr auto',
-                        gap: '1rem',
-                        alignItems: 'center',
-                        background: '#f9f9f9',
-                        border: '1px solid #e0e0e0',
-                        borderRadius: '6px',
-                        padding: '1rem'
-                      }}>
-                        <div>
-                          <p style={{ color: '#999', fontSize: '0.7rem', fontWeight: 700, margin: 0 }}>FORNECEDOR (NF)</p>
-                          <p style={{ color: '#1a1a1a', fontSize: '0.9rem', fontWeight: 600, margin: '0.15rem 0 0 0' }}>{v.nf_descricao}</p>
-                          <p style={{ color: '#666', fontSize: '0.75rem', margin: 0 }}>Cód: {v.nf_codigo || '-'}</p>
-                        </div>
-                        <div>
-                          <p style={{ color: '#999', fontSize: '0.7rem', fontWeight: 700, margin: 0 }}>ANÚNCIO OLIST</p>
-                          <p style={{ color: '#007acc', fontSize: '0.9rem', fontWeight: 600, margin: '0.15rem 0 0 0' }}>{v.olist_nome}</p>
-                          <p style={{ color: '#666', fontSize: '0.75rem', margin: 0 }}>SKU: {v.olist_sku} · usado {v.vezes_usado}x</p>
-                        </div>
-                        <button
-                          onClick={() => deletarVinculo(v.id)}
-                          style={{
-                            padding: '0.5rem 0.75rem', background: '#f44336', color: 'white',
-                            border: 'none', borderRadius: '4px', fontSize: '0.8rem', fontWeight: 600, cursor: 'pointer'
-                          }}
-                        >
-                          Remover
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            </div>
-          </div>
-        )}
-
-        {produtoSelecionado && (
-          <ModalDetalhes
-            isOpen={modalOpen}
-            onClose={() => setModalOpen(false)}
-            produto={produtoSelecionado}
-            onConfirm={() => {
-              setModalOpen(false)
-              loadEstoque()
-            }}
-          />
-        )}
-
-        {notaSelecionada && (
-          <ModalDetalhesNotaFiscal
-            isOpen={modalDetalhesNFAberto}
-            onClose={() => setModalDetalhesNFAberto(false)}
-            nota={notaSelecionada}
-          />
-        )}
-
-        {/* ===== MODAL DETALHE DA NOTA COM ABAS ===== */}
-        {notaDetalheAberta && (() => {
-          const nota = notaDetalheAberta
-          const st = statusNota(nota)
-          const divs = divergenciasDaNota(nota)
-          const totalValor = (nota.itens || []).reduce((s, i) => s + i.quantidade_nf * i.preco_unitario, 0)
-          const TabBtn = ({ id, label, badge }: { id: 'detalhes' | 'conferencia' | 'divergencias', label: string, badge?: number }) => (
-            <button onClick={() => setAbaDetalhe(id)} style={{
-              padding: '0.8rem 1.4rem', border: 'none', cursor: 'pointer', fontWeight: 700, fontSize: '0.9rem',
-              background: abaDetalhe === id ? '#fff' : 'transparent',
-              color: abaDetalhe === id ? '#007acc' : '#607d8b',
-              borderBottom: abaDetalhe === id ? '3px solid #007acc' : '3px solid transparent'
-            }}>
-              {label}{badge ? <span style={{ marginLeft: 6, background: '#f44336', color: '#fff', borderRadius: 999, padding: '0 7px', fontSize: '0.7rem' }}>{badge}</span> : null}
-            </button>
-          )
-          return (
-            <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: 20 }} onClick={() => setNotaDetalheAberta(null)}>
-              <div style={{ background: '#fff', borderRadius: 8, width: '95vw', maxWidth: 1200, height: '90vh', display: 'flex', flexDirection: 'column', overflow: 'hidden' }} onClick={(e) => e.stopPropagation()}>
-                {/* HEADER */}
-                <div style={{ borderBottom: '1px solid #e0e0e0', padding: '1.25rem 2rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <div>
-                    <h2 style={{ margin: 0, fontSize: '1.4rem' }}>NOTA FISCAL ELETRÔNICA</h2>
-                    <p style={{ margin: '0.3rem 0 0', color: '#666', fontSize: '0.9rem' }}>NF #{nota.numero_nf} · Série {nota.serie}</p>
-                  </div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
-                    <span style={{ background: st.bg, color: st.cor, fontWeight: 700, fontSize: '0.8rem', padding: '0.35rem 0.8rem', borderRadius: 999 }}>{st.icone} {st.label}</span>
-                    <button onClick={() => setNotaDetalheAberta(null)} style={{ background: 'none', border: 'none', fontSize: '2rem', color: '#999', cursor: 'pointer', lineHeight: 1 }}>×</button>
-                  </div>
-                </div>
-
-                {/* ABAS */}
-                <div style={{ display: 'flex', borderBottom: '1px solid #e0e0e0', background: '#f7f9fa', paddingLeft: '1rem' }}>
-                  <TabBtn id="detalhes" label="📄 Detalhes" />
-                  <TabBtn id="conferencia" label="✅ Conferência" />
-                  <TabBtn id="divergencias" label="⚠️ Divergências" badge={divs.length} />
-                </div>
-
-                {/* CONTEÚDO */}
-                <div style={{ flex: 1, overflowY: 'auto', padding: '1.5rem 2rem' }}>
-
-                  {/* ABA DETALHES */}
-                  {abaDetalhe === 'detalhes' && (
-                    <div>
-                      <div style={{ background: '#f9f9f9', border: '2px solid #007acc', padding: '1.5rem', borderRadius: 8, marginBottom: '1.5rem', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1.5rem' }}>
-                        <div>
-                          <p style={{ color: '#007acc', fontSize: '0.75rem', fontWeight: 700, textTransform: 'uppercase', margin: 0 }}>Fornecedor</p>
-                          <h3 style={{ margin: '0.25rem 0 0.75rem', color: '#1a1a1a' }}>{nota.fornecedor}</h3>
-                          <p style={{ color: '#999', fontSize: '0.75rem', fontWeight: 700, margin: 0 }}>CNPJ</p>
-                          <p style={{ color: '#1a1a1a', margin: '0 0 0.5rem' }}>{nota.cnpj || 'N/A'}</p>
-                          <p style={{ color: '#999', fontSize: '0.75rem', fontWeight: 700, margin: 0 }}>ENDEREÇO</p>
-                          <p style={{ color: '#1a1a1a', margin: 0 }}>{nota.endereco || 'N/A'}</p>
-                        </div>
-                        <div>
-                          <p style={{ color: '#999', fontSize: '0.75rem', fontWeight: 700, margin: 0 }}>DATA DE EMISSÃO</p>
-                          <p style={{ color: '#1a1a1a', fontWeight: 600, margin: '0.25rem 0 0.75rem' }}>{nota.data_emissao ? new Date(nota.data_emissao).toLocaleDateString('pt-BR', { day: 'numeric', month: 'long', year: 'numeric' }) : 'N/A'}</p>
-                          <p style={{ color: '#999', fontSize: '0.75rem', fontWeight: 700, margin: 0 }}>QUANTIDADE DE ITENS</p>
-                          <p style={{ color: '#1a1a1a', fontWeight: 700, fontSize: '1.2rem', margin: '0.25rem 0' }}>{nota.itens?.length || 0}</p>
-                        </div>
-                      </div>
-                      <h3 style={{ marginBottom: '0.75rem' }}>Produtos</h3>
-                      <div style={{ border: '1px solid #e0e0e0', borderRadius: 6, overflow: 'hidden' }}>
-                        <div style={{ background: '#007acc', color: '#fff', display: 'grid', gridTemplateColumns: '2fr 1fr 1fr 1fr 1fr', gap: '1rem', padding: '0.8rem 1rem', fontWeight: 600, fontSize: '0.85rem' }}>
-                          <div>PRODUTO</div><div style={{ textAlign: 'center' }}>QTD</div><div style={{ textAlign: 'center' }}>VALOR UN.</div><div style={{ textAlign: 'center' }}>SUBTOTAL</div><div style={{ textAlign: 'right' }}>CÓDIGO</div>
-                        </div>
-                        {(nota.itens || []).map((item, idx) => (
-                          <div key={item.id} style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr 1fr 1fr', gap: '1rem', padding: '0.8rem 1rem', borderTop: idx > 0 ? '1px solid #eee' : 'none', background: idx % 2 ? '#f9f9f9' : '#fff', fontSize: '0.85rem' }}>
-                            <div style={{ color: '#1a1a1a' }}>{item.descricao}</div>
-                            <div style={{ textAlign: 'center', fontWeight: 600 }}>{Math.round(item.quantidade_nf)}</div>
-                            <div style={{ textAlign: 'center' }}>R$ {item.preco_unitario.toFixed(2)}</div>
-                            <div style={{ textAlign: 'center', color: '#007acc', fontWeight: 600 }}>R$ {(item.quantidade_nf * item.preco_unitario).toFixed(2)}</div>
-                            <div style={{ textAlign: 'right', color: '#666' }}>{item.codigo_produto}</div>
-                          </div>
-                        ))}
-                      </div>
-                      <div style={{ background: '#f5f5f5', border: '2px solid #007acc', padding: '1rem 1.5rem', borderRadius: 6, textAlign: 'right', marginTop: '1.5rem' }}>
-                        <span style={{ color: '#999', fontSize: '0.85rem' }}>VALOR TOTAL DA NOTA </span>
-                        <span style={{ color: '#007acc', fontSize: '1.6rem', fontWeight: 700 }}>R$ {totalValor.toFixed(2)}</span>
-                      </div>
-                    </div>
-                  )}
-
-                  {/* ABA CONFERÊNCIA */}
-                  {abaDetalhe === 'conferencia' && (
-                    <div>
-                      <div style={{ background: '#fff', border: '1px solid #e0e0e0', borderRadius: 8, padding: '1rem 1.25rem', marginBottom: '1.25rem' }}>
-                        <BarraProgresso itens={nota.itens} />
-                      </div>
-                      <div style={{ marginBottom: '1rem' }}>
-                        <button onClick={() => setModalAdicionarProdutoAberto(true)} style={{ padding: '0.6rem 1.1rem', background: '#4caf50', color: '#fff', border: 'none', borderRadius: 6, fontWeight: 600, cursor: 'pointer' }}>+ Adicionar Produto Manual</button>
-                      </div>
-
-                      {/* Produtos agrupados por descrição */}
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
-                        {agruparItensPorDescricao(nota.itens || []).map((grupo) => {
-                          const temSelecionados = grupo.selecionados.length > 0
-                          const multi = grupo.items.length > 1
-                          // Grupo de 1 registro sempre aberto; multi-registro só se expandido
-                          const expandido = !multi || gruposExpandidos.has(grupo.descricao)
-                          // Resumo de status para mostrar no cabeçalho (sem precisar abrir)
-                          const qSubidos = grupo.items.filter(i => i.estoque_olist_atualizado_em).length
-                          const qConf = grupo.items.filter(i => (i.quantidade_confirmada !== null && i.quantidade_confirmada !== undefined) && !i.estoque_olist_atualizado_em).length
-                          const qFalta = grupo.items.length - qSubidos - qConf
-                          const toggleExpandir = () => {
-                            const novo = new Set(gruposExpandidos)
-                            if (novo.has(grupo.descricao)) novo.delete(grupo.descricao)
-                            else novo.add(grupo.descricao)
-                            setGruposExpandidos(novo)
-                          }
-                          return (
-                            <div key={grupo.descricao} style={{ border: temSelecionados ? '2px solid #2196F3' : '1px solid #e0e0e0', borderRadius: 8, overflow: 'hidden', background: temSelecionados ? '#e3f2fd' : '#fff' }}>
-                              {/* Header do grupo */}
-                              <div style={{ background: temSelecionados ? '#bbdefb' : '#f5f5f5', padding: '1rem 1.25rem', borderBottom: '1px solid #e0e0e0', display: 'flex', alignItems: 'center', gap: '1rem', justifyContent: 'space-between', flexWrap: 'wrap' }}>
-                                <div
-                                  style={{ flex: 1, minWidth: '250px', display: 'flex', alignItems: 'center', gap: '0.6rem', cursor: multi ? 'pointer' : 'default' }}
-                                  onClick={multi ? toggleExpandir : undefined}
-                                >
-                                  {multi && (
-                                    <span
-                                      style={{ fontSize: '0.9rem', color: '#555', transition: 'transform 0.15s', transform: expandido ? 'rotate(90deg)' : 'rotate(0deg)', userSelect: 'none' }}
-                                      aria-label={expandido ? 'Recolher' : 'Expandir'}
-                                    >▶</span>
-                                  )}
-                                  <div>
-                                    <div style={{ fontWeight: 700, color: '#1a1a1a', fontSize: '1rem' }}>{grupo.descricao}</div>
-                                    <div style={{ color: '#666', fontSize: '0.85rem' }}>
-                                      {grupo.items.length} registro{grupo.items.length !== 1 ? 's' : ''} · Total: {Math.round(grupo.totalQtd)} un
-                                      {grupo.selecionados.length > 0 && <span style={{ color: '#2196F3', fontWeight: 700, marginLeft: '0.5rem' }}>· {grupo.selecionados.length} selecionado{grupo.selecionados.length !== 1 ? 's' : ''}</span>}
-                                    </div>
-                                    {multi && (
-                                      <div style={{ display: 'flex', gap: '0.4rem', marginTop: '0.35rem', flexWrap: 'wrap' }}>
-                                        {qSubidos > 0 && <span style={{ background: '#e8f5e9', color: '#2e7d32', fontSize: '0.68rem', fontWeight: 700, padding: '0.1rem 0.45rem', borderRadius: 999 }}>✅ {qSubidos} subido{qSubidos !== 1 ? 's' : ''}</span>}
-                                        {qConf > 0 && <span style={{ background: '#e3f2fd', color: '#1565c0', fontSize: '0.68rem', fontWeight: 700, padding: '0.1rem 0.45rem', borderRadius: 999 }}>🔄 {qConf} conferido{qConf !== 1 ? 's' : ''}</span>}
-                                        {qFalta > 0 && <span style={{ background: '#fff3e0', color: '#e65100', fontSize: '0.68rem', fontWeight: 700, padding: '0.1rem 0.45rem', borderRadius: 999 }}>🆕 {qFalta} a conferir</span>}
-                                        <span style={{ color: '#2196F3', fontSize: '0.68rem', fontWeight: 700 }}>{expandido ? '· clique para recolher' : '· clique para ver todos'}</span>
-                                      </div>
-                                    )}
-                                  </div>
-                                </div>
-                                <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
-                                  {grupo.items.length > 1 && grupo.selecionados.length > 0 && (
-                                    <button
-                                      onClick={() => {
-                                        if (!notaDetalheAberta) return
-                                        const primeiroItem = grupo.selecionados[0]
-                                        const qtdTotal = grupo.selecionados.reduce((s, i) => s + i.quantidade_nf, 0)
-                                        const msg = `Confirmar envio em massa?\n\nProduto: ${grupo.descricao}\nQuantidade de registros: ${grupo.selecionados.length}\nQuantidade total: ${Math.round(qtdTotal)} unidades\n\nOs registros serão agrupados e enviados como uma única entrada para a Olist.`
-                                        if (!window.confirm(msg)) return
-
-                                        setProdutoSelecionado({
-                                          id_item: primeiroItem.id,
-                                          // IDs de TODOS os registros do grupo (subida em massa)
-                                          // para marcar todos como subidos, nao so o primeiro
-                                          ids_massa: grupo.selecionados.map(i => i.id),
-                                          descricao: grupo.descricao,
-                                          codigo_produto: primeiroItem.codigo_produto,
-                                          quantidade_total: qtdTotal,
-                                          quantidade_nf: qtdTotal,
-                                          quantidade_confirmada: qtdTotal,
-                                          preco_unitario: primeiroItem.preco_unitario,
-                                          notas_fiscais: grupo.selecionados.map(i => ({
-                                            numero_nf: notaDetalheAberta.numero_nf || '',
-                                            serie: notaDetalheAberta.serie || '',
-                                            fornecedor: notaDetalheAberta.fornecedor || '',
-                                            quantidade: i.quantidade_nf
-                                          }))
-                                        } as any)
-                                        setItensSelecionadosMultiplos(new Set())
-                                        setModalOpen(true)
-                                      }}
-                                      style={{ padding: '0.4rem 0.8rem', background: '#2196F3', color: '#fff', border: 'none', borderRadius: 4, fontSize: '0.75rem', fontWeight: 600, cursor: 'pointer', whiteSpace: 'nowrap' }}
-                                    >
-                                      📦 {grupo.selecionados.length} em Massa
-                                    </button>
-                                  )}
-                                  {grupo.items.length > 1 && (
-                                    <button
-                                      onClick={() => {
-                                        const novo = new Set(itensSelecionadosMultiplos)
-                                        const todosSelecionados = grupo.items.every(i => novo.has(i.id))
-                                        grupo.items.forEach(i => {
-                                          if (todosSelecionados) novo.delete(i.id)
-                                          else novo.add(i.id)
-                                        })
-                                        setItensSelecionadosMultiplos(novo)
-                                      }}
-                                      style={{ padding: '0.4rem 0.8rem', background: temSelecionados ? '#1976D2' : '#e0e0e0', color: temSelecionados ? '#fff' : '#666', border: 'none', borderRadius: 4, fontSize: '0.75rem', fontWeight: 600, cursor: 'pointer', whiteSpace: 'nowrap' }}
-                                    >
-                                      {grupo.items.every(i => itensSelecionadosMultiplos.has(i.id)) ? '✓ Desselecionar' : '☐ Selecionar'}
-                                    </button>
-                                  )}
-                                </div>
-                              </div>
-
-                              {/* Items do grupo (so quando expandido) */}
-                              {expandido && (
-                              <div>
-                                {grupo.items.map((item, idx) => {
-                                  const subido = !!item.estoque_olist_atualizado_em
-                                  const conferido = item.quantidade_confirmada !== null && item.quantidade_confirmada !== undefined
-                                  const selecionado = itensSelecionadosMultiplos.has(item.id)
-                                  return (
-                                    <div
-                                      key={item.id}
-                                      style={{
-                                        display: 'grid',
-                                        gridTemplateColumns: grupo.items.length > 1 ? '30px 1fr auto' : '1fr auto',
-                                        gap: '1rem',
-                                        alignItems: 'center',
-                                        padding: '1rem 1.25rem',
-                                        borderTop: idx > 0 ? '1px solid #eee' : 'none',
-                                        background: selecionado ? '#e3f2fd' : idx % 2 === 0 ? '#fff' : '#fafafa'
-                                      }}
-                                    >
-                                      {/* Checkbox */}
-                                      {grupo.items.length > 1 && (
-                                        <input
-                                          type="checkbox"
-                                          checked={selecionado}
-                                          onChange={() => toggleSelecaoMultipla(item.id)}
-                                          style={{ width: '18px', height: '18px', cursor: 'pointer' }}
-                                        />
-                                      )}
-
-                                      {/* Info */}
-                                      <div>
-                                        <div style={{ fontWeight: 600, color: '#1a1a1a' }}>
-                                          {grupo.items.length > 1 && <span style={{ color: '#999', marginRight: '0.5rem' }}>({grupo.items.indexOf(item) + 1})</span>}
-                                          {Math.round(item.quantidade_nf)} un
-                                        </div>
-                                        <div style={{ color: '#90a4ae', fontSize: '0.8rem' }}>
-                                          Cód: {item.codigo_produto}{conferido ? ` · Recebido: ${Math.round(item.quantidade_confirmada as number)}` : ''}
-                                        </div>
-                                        <div style={{ marginTop: 4 }}>
-                                          {subido
-                                            ? <span style={{ background: '#e8f5e9', color: '#2e7d32', fontSize: '0.7rem', fontWeight: 700, padding: '0.15rem 0.5rem', borderRadius: 999 }}>✅ Subido na Olist</span>
-                                            : conferido
-                                              ? <span style={{ background: '#e3f2fd', color: '#1565c0', fontSize: '0.7rem', fontWeight: 700, padding: '0.15rem 0.5rem', borderRadius: 999 }}>🔄 Conferido</span>
-                                              : <span style={{ background: '#fff3e0', color: '#e65100', fontSize: '0.7rem', fontWeight: 700, padding: '0.15rem 0.5rem', borderRadius: 999 }}>🆕 A conferir</span>}
-                                        </div>
-                                      </div>
-
-                                      {/* Botão Conferir */}
-                                      <button
-                                        onClick={() => conferirProduto(item)}
-                                        style={{ padding: '0.6rem 1rem', background: '#007acc', color: '#fff', border: 'none', borderRadius: 6, fontWeight: 600, cursor: 'pointer', whiteSpace: 'nowrap', fontSize: '0.85rem' }}
-                                      >
-                                        Conferir
-                                      </button>
-                                    </div>
-                                  )
-                                })}
-                              </div>
-                              )}
-                            </div>
-                          )
-                        })}
-                      </div>
-                    </div>
-                  )}
-
-                  {/* ABA DIVERGÊNCIAS */}
-                  {abaDetalhe === 'divergencias' && (
-                    <div>
-                      {divs.length === 0 ? (
-                        <p style={{ color: '#999', textAlign: 'center', padding: '2rem' }}>Nenhuma divergência registrada nesta nota.</p>
-                      ) : (
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-                          {divs.map((div) => (
-                            <div key={div.item_id} style={{ border: '2px solid #f44336', background: '#ffebee', borderRadius: 8, padding: '1rem 1.25rem' }}>
-                              <div style={{ color: '#c62828', fontWeight: 700, marginBottom: 4 }}>{div.tipo_divergencia.toUpperCase().replace('_', ' ')}</div>
-                              <div style={{ fontWeight: 600, color: '#1a1a1a' }}>{div.produto}</div>
-                              <div style={{ color: '#666', fontSize: '0.8rem', marginBottom: '0.75rem' }}>Cód: {div.codigo} · NF: {Math.round(div.quantidade_nf)} · Recebido: {Math.round(div.quantidade_confirmada)}</div>
-                              <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
-                                <button onClick={() => resolverDivergenciaItem(div.item_id)} style={{ padding: '0.4rem 0.8rem', background: '#4caf50', color: '#fff', border: 'none', borderRadius: 4, fontSize: '0.78rem', fontWeight: 600, cursor: 'pointer' }}>✓ Resolvida</button>
-                                <button onClick={() => deletarDivergenciaItem(div.item_id)} style={{ padding: '0.4rem 0.8rem', background: '#f44336', color: '#fff', border: 'none', borderRadius: 4, fontSize: '0.78rem', fontWeight: 600, cursor: 'pointer' }}>✗ Deletar</button>
-                                {div.tipo_divergencia !== 'nao_veio' && Math.round(div.quantidade_confirmada) > 0 && (
-                                  <button onClick={() => vincularDivergenciaOlist(div)} style={{ padding: '0.4rem 0.8rem', background: '#007acc', color: '#fff', border: 'none', borderRadius: 4, fontSize: '0.78rem', fontWeight: 700, cursor: 'pointer' }}>🔗 Vincular na Olist e Subir {Math.round(div.quantidade_confirmada)} un</button>
-                                )}
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  )}
-                </div>
-
-                {/* FOOTER */}
-                <div style={{ borderTop: '1px solid #e0e0e0', padding: '1rem 2rem', display: 'flex', justifyContent: 'flex-end' }}>
-                  <button onClick={() => setNotaDetalheAberta(null)} style={{ padding: '0.7rem 1.5rem', background: '#007acc', color: '#fff', border: 'none', borderRadius: 4, fontWeight: 600, cursor: 'pointer' }}>Fechar</button>
-                </div>
-              </div>
-            </div>
-          )
-        })()}
-
-        {/* Modal de conferência de produto (aberto pela aba Conferência) */}
-        {produtoSelecionado && notaDetalheAberta && (
-          <ModalDetalhesNota
-            isOpen={modalOpen}
-            onClose={() => setModalOpen(false)}
-            produto={produtoSelecionado as any}
-            notaNota={notaDetalheAberta}
-            onNaoConfirmado={(qtd) => irParaOlistSubirEstoque(qtd)}
-            onDivergenciaConfirmada={(qtd) => irParaOlistSubirEstoque(qtd)}
-          />
-        )}
-
-        {/* Modal adicionar produto manual (aba Conferência) */}
-        {modalAdicionarProdutoAberto && notaDetalheAberta && (
-          <div className="modal-overlay" onClick={() => setModalAdicionarProdutoAberto(false)}>
-            <div className="modal-content" onClick={(e) => e.stopPropagation()}>
-              <div className="modal-header">
-                <h2>Adicionar Produto Manual</h2>
-                <button className="modal-close" onClick={() => setModalAdicionarProdutoAberto(false)}>×</button>
-              </div>
-              <div className="modal-body">
-                <div className="form-group">
-                  <label className="form-label">Código do Produto</label>
-                  <input type="text" className="form-input" value={novoProduto.codigo} onChange={(e) => setNovoProduto({ ...novoProduto, codigo: e.target.value })} placeholder="Ex: 001234" />
-                </div>
-                <div className="form-group">
-                  <label className="form-label">Descrição do Produto</label>
-                  <input type="text" className="form-input" value={novoProduto.descricao} onChange={(e) => setNovoProduto({ ...novoProduto, descricao: e.target.value })} placeholder="Ex: Produto XYZ" />
-                </div>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
-                  <div className="form-group">
-                    <label className="form-label">Quantidade</label>
-                    <input type="text" className="form-input" value={novoProduto.quantidade} onChange={(e) => { const v = e.target.value; if (v === '' || !isNaN(parseFloat(v))) setNovoProduto({ ...novoProduto, quantidade: parseFloat(v) || 0 }) }} placeholder="0" />
-                  </div>
-                  <div className="form-group">
-                    <label className="form-label">Preço Unitário (R$)</label>
-                    <input type="text" className="form-input" value={novoProduto.preco} onChange={(e) => { const v = e.target.value; if (v === '' || !isNaN(parseFloat(v))) setNovoProduto({ ...novoProduto, preco: parseFloat(v) || 0 }) }} placeholder="0.00" />
-                  </div>
-                </div>
-                <div className="button-group">
-                  <button className="btn btn-secondary" onClick={() => setModalAdicionarProdutoAberto(false)}>Cancelar</button>
-                  <button className="btn btn-primary" onClick={handleAdicionarProduto}>Adicionar Produto</button>
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
-      </div>
     )
   }
 
@@ -2906,7 +2530,9 @@ function App() {
 
   // ===== PÁGINA DE FORNECEDORES =====
   if (pagina === 'fornecedores') {
-    return (
+    return renderComShell(
+      'Central de fornecedores',
+      'Visao historica de fornecedores, catalogo e margens cruzadas.',
       <FornecedoresManager
         onVoltar={voltarParaInicial}
       />
@@ -2915,7 +2541,72 @@ function App() {
 
   // ===== PÁGINA DE ANÚNCIOS (MERCADO LIVRE) =====
   if (pagina === 'anuncios') {
-    return <AnunciosML onVoltar={voltarParaInicial} />
+    return renderComShell(
+      'Painel Mercado Livre',
+      'Acompanhe anuncios, estoque, imagens, precificacao e dimensoes.',
+      <AnunciosML onVoltar={voltarParaInicial} />
+    )
+  }
+
+  // ===== PÁGINA DE DIVERGÊNCIAS =====
+  if (pagina === 'divergencias') {
+    return renderComShell(
+      'Divergências',
+      'Produtos com divergências entre nota fiscal e estoque recebido',
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+        <button onClick={voltarParaInicial} style={{ marginBottom: '1rem', padding: '0.75rem 1.5rem', background: '#f0f0f0', border: '1px solid #ddd', borderRadius: '4px', cursor: 'pointer', fontWeight: 600, width: 'fit-content' }}>← Voltar</button>
+
+        {divergencias.length === 0 ? (
+          <div style={{ textAlign: 'center', padding: '2rem', color: '#999' }}>
+            <p>Nenhuma divergência encontrada.</p>
+          </div>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+            {divergencias.map(div => {
+              return (
+                <div key={div.item_id} style={{ padding: '1.5rem', border: '1px solid #ffb3ba', borderRadius: '8px', background: '#fff5f6' }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '2rem', marginBottom: '1rem' }}>
+                    <div>
+                      <div style={{ fontSize: '0.8rem', color: '#666', marginBottom: '0.5rem' }}>PRODUTO</div>
+                      <div style={{ fontWeight: 600, fontSize: '1rem', marginBottom: '0.25rem' }}>{div.produto}</div>
+                      <div style={{ fontSize: '0.85rem', color: '#999' }}>Código: {div.codigo}</div>
+                    </div>
+                    <div>
+                      <div style={{ fontSize: '0.8rem', color: '#666', marginBottom: '0.5rem' }}>NOTA FISCAL</div>
+                      <div style={{ fontWeight: 600, fontSize: '1rem' }}>#{div.numero_nf || 'N/A'}</div>
+                      <div style={{ fontSize: '0.85rem', color: '#999' }}>{div.fornecedor || 'Fornecedor desconhecido'}</div>
+                    </div>
+                  </div>
+
+                  <div style={{ background: 'white', padding: '1rem', borderRadius: '6px', marginBottom: '1rem' }}>
+                    <div style={{ fontSize: '0.8rem', color: '#666', marginBottom: '0.75rem', fontWeight: 600, textTransform: 'uppercase' }}>Divergência</div>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '1rem', fontSize: '0.9rem' }}>
+                      <div>
+                        <span style={{ color: '#666' }}>Quantidade NF:</span>
+                        <div style={{ fontWeight: 600, color: '#1a1a1a' }}>{div.quantidade_nf} un</div>
+                      </div>
+                      <div>
+                        <span style={{ color: '#666' }}>Recebido:</span>
+                        <div style={{ fontWeight: 600, color: div.quantidade_confirmada !== div.quantidade_nf ? '#ff6b6b' : '#2e7d32' }}>{div.quantidade_confirmada} un</div>
+                      </div>
+                      <div>
+                        <span style={{ color: '#666' }}>Diferença:</span>
+                        <div style={{ fontWeight: 600, color: '#ff6b6b' }}>{div.quantidade_nf - div.quantidade_confirmada} un</div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div style={{ display: 'flex', gap: '0.75rem' }}>
+                    <button onClick={() => resolverDivergenciaItem(div.item_id)} style={{ flex: 1, padding: '0.75rem', background: '#2e7d32', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 600 }}>✓ Marcar como resolvida</button>
+                    <button onClick={() => deletarDivergenciaItem(div.item_id)} style={{ flex: 1, padding: '0.75rem', background: '#ff6b6b', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 600 }}>🗑️ Deletar</button>
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        )}
+      </div>
+    )
   }
 
   // ===== PÁGINA DE CONFERÊNCIA =====
@@ -3731,7 +3422,9 @@ function App() {
 
   // ===== PÁGINA EMBALDES =====
   if (pagina === 'embaldes') {
-    return (
+    return renderComShell(
+      'Operacao de inbound FULL',
+      'Receba PDFs de inbound, revise o FULL e acompanhe baixas.',
       <div className="app">
         <header className="header">
           <div className="container">
