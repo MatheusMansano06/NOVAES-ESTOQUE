@@ -179,6 +179,15 @@ function App() {
   const [ultimaSincronizacao, setUltimaSincronizacao] = useState<string | null>(null)
   const [mlStatus, setMlStatus] = useState<MlStatus | null>(null)
   const [olistStatus, setOlistStatus] = useState<OlistStatus | null>(null)
+  // Anúncios pausados sem estoque no Mercado Livre (carrossel no dashboard)
+  const [anunciosPausadosSemEstoque, setAnunciosPausadosSemEstoque] = useState<Array<{
+    id: string
+    titulo: string
+    sku: string
+    imagem_principal?: string
+    thumbnail?: string
+    permalink?: string
+  }>>([])
 
   // Formata data ISO -> dd/mm/aaaa (pt-BR)
   const fmtData = (d: string | null) => {
@@ -222,7 +231,17 @@ function App() {
     loadEstoque(false)
     loadDivergencias(false)
     loadIntegracoes()
+    loadAnunciosPausados()
   }, [])
+
+  // Carrega anúncios pausados SEM estoque do Mercado Livre (carrossel no dashboard)
+  const loadAnunciosPausados = async () => {
+    try {
+      const data = await fetchJsonNoCache(`${API_BASE}/api/ml/anuncios?status=paused&offset=0&limit=200`)
+      const semEstoque = (data.anuncios || []).filter((a: any) => (a.disponivel ?? 0) <= 0)
+      setAnunciosPausadosSemEstoque(semEstoque)
+    } catch { /* silencioso — não quebra a tela */ }
+  }
 
   // Diagnóstico de inbounds ATIVOS em tempo real (atualiza a cada 20s).
   // Some quando o inbound é encerrado; some todos => "SEM INBOUND ATIVO".
@@ -1585,6 +1604,63 @@ function App() {
                   </div>
                 </div>
               </div>
+            </div>
+          </section>
+
+          {/* CARROSSEL: anúncios pausados SEM estoque no Mercado Livre */}
+          <section className="card" style={{ marginBottom: '1.5rem' }}>
+            <div className="card-body" style={{ padding: '1.25rem' }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1rem', flexWrap: 'wrap', gap: '0.5rem' }}>
+                <div style={{ color: '#c62828', fontWeight: 800, fontSize: '0.82rem', letterSpacing: '0.04em', textTransform: 'uppercase' }}>
+                  Produtos pausados sem estoque no Mercado Livre
+                </div>
+                <span style={{ fontSize: '0.8rem', color: '#999', fontWeight: 600 }}>
+                  {anunciosPausadosSemEstoque.length} {anunciosPausadosSemEstoque.length === 1 ? 'anúncio' : 'anúncios'}
+                </span>
+              </div>
+              {anunciosPausadosSemEstoque.length === 0 ? (
+                <p style={{ color: '#999', fontSize: '0.9rem', padding: '1rem 0' }}>
+                  Nenhum anúncio pausado sem estoque no momento. 🎉
+                </p>
+              ) : (
+                <div style={{ display: 'flex', gap: '1rem', overflowX: 'auto', paddingBottom: '0.75rem', scrollbarWidth: 'thin' }}>
+                  {anunciosPausadosSemEstoque.map(a => (
+                    <a
+                      key={a.id}
+                      href={a.permalink || '#'}
+                      target="_blank"
+                      rel="noreferrer"
+                      style={{
+                        flexShrink: 0,
+                        width: '160px',
+                        textDecoration: 'none',
+                        color: 'inherit',
+                        border: '1px solid #ffcdd2',
+                        borderRadius: '12px',
+                        overflow: 'hidden',
+                        background: '#fff',
+                        transition: 'box-shadow 0.2s, transform 0.2s',
+                      }}
+                      onMouseEnter={e => { e.currentTarget.style.boxShadow = '0 8px 20px rgba(198, 40, 40, 0.18)'; e.currentTarget.style.transform = 'translateY(-2px)' }}
+                      onMouseLeave={e => { e.currentTarget.style.boxShadow = 'none'; e.currentTarget.style.transform = 'translateY(0)' }}
+                    >
+                      <div style={{ width: '160px', height: '160px', background: '#f5f5f5', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
+                        {(a.imagem_principal || a.thumbnail)
+                          ? <img src={a.imagem_principal || a.thumbnail} alt={a.titulo} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                          : <span style={{ color: '#ccc', fontSize: '2rem' }}>📦</span>}
+                      </div>
+                      <div style={{ padding: '0.6rem 0.7rem' }}>
+                        <div style={{ fontSize: '0.78rem', fontWeight: 700, color: '#1a1a1a', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={a.sku}>
+                          {a.sku || 'sem SKU'}
+                        </div>
+                        <div style={{ fontSize: '0.7rem', color: '#999', marginTop: '0.2rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={a.titulo}>
+                          {a.titulo}
+                        </div>
+                      </div>
+                    </a>
+                  ))}
+                </div>
+              )}
             </div>
           </section>
 
