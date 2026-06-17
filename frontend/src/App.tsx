@@ -2698,6 +2698,138 @@ function App() {
     )
   }
 
+  // ===== PÁGINA NOTAS FISCAIS =====
+  if (pagina === 'notas-fiscais') {
+    return renderComShell(
+      'Notas Fiscais',
+      'Gerenciar upload e lista completa de notas fiscais',
+      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(300px, 360px) 1fr', gap: '1.5rem', alignItems: 'start' }}>
+        <div style={{ display: 'grid', gap: '1rem', alignContent: 'start' }}>
+          <div className="card">
+            <h2>Upload de NF-e</h2>
+            <div className="card-body">
+              <form onSubmit={handleUpload} style={{ display: 'flex', gap: '1rem', alignItems: 'center', flexWrap: 'wrap' }}>
+                <div
+                  onClick={() => fileInputRef.current?.click()}
+                  style={{ flex: 1, minWidth: '260px', border: '2px dashed #cfd8dc', borderRadius: '8px', padding: '1rem 1.25rem', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '0.75rem' }}
+                >
+                  <span style={{ fontSize: '1.5rem' }}>⬆️</span>
+                  <div>
+                    <div style={{ fontWeight: 600, color: '#1a1a1a' }}>{file ? file.name : 'XML ou PDF'}</div>
+                    <div style={{ fontSize: '0.8rem', color: '#90a4ae' }}>Clique para escolher</div>
+                  </div>
+                </div>
+                <input ref={fileInputRef} type="file" accept=".xml,.pdf" onChange={(e) => setFile(e.target.files?.[0] || null)} disabled={loading} style={{ display: 'none' }} />
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.2rem' }}>
+                  <label style={{ fontSize: '0.72rem', color: '#90a4ae' }}>Frete (R$)</label>
+                  <input type="text" inputMode="decimal" placeholder="0,00" value={freteNota} onChange={(e) => setFreteNota(e.target.value)} disabled={loading}
+                    style={{ width: '110px', padding: '0.6rem 0.75rem', border: '1px solid #cfd8dc', borderRadius: '8px', fontSize: '0.95rem' }} />
+                </div>
+                <button type="submit" disabled={!file || loading} className="upload-button" style={{ whiteSpace: 'nowrap' }}>
+                  {loading ? '...' : 'Enviar'}
+                </button>
+              </form>
+            </div>
+          </div>
+        </div>
+
+        <div className="card">
+          <h2 style={{ marginTop: 0 }}>Notas Fiscais ({notasFiltradas.length})</h2>
+          <div className="card-body">
+            <div style={{ display: 'flex', gap: '0.75rem', marginBottom: '1.25rem', flexWrap: 'wrap' }}>
+              <input
+                type="text"
+                value={filtroBusca}
+                onChange={(e) => setFiltroBusca(e.target.value)}
+                placeholder="Buscar por nº, fornecedor, CNPJ..."
+                style={{ flex: 1, minWidth: '240px', padding: '0.7rem 0.9rem', border: '1px solid #cfd8dc', borderRadius: '6px', fontSize: '0.9rem' }}
+              />
+              <input
+                type="date"
+                value={filtroData}
+                onChange={(e) => setFiltroData(e.target.value)}
+                style={{ padding: '0.7rem 0.9rem', border: '1px solid #cfd8dc', borderRadius: '6px', fontSize: '0.9rem' }}
+              />
+              {(filtroBusca || filtroData) && (
+                <button onClick={() => { setFiltroBusca(''); setFiltroData('') }} style={{ padding: '0.7rem 1rem', background: '#f0f0f0', border: '1px solid #ddd', borderRadius: '6px', cursor: 'pointer', fontWeight: 600 }}>Limpar</button>
+              )}
+            </div>
+
+            {notasSelecionadas.size > 0 && (
+              <div style={{ background: 'linear-gradient(90deg, #2196F3 0%, #1976D2 100%)', color: 'white', padding: '1rem 1.5rem', borderRadius: '4px', marginBottom: '1rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span style={{ fontWeight: 600 }}>{notasSelecionadas.size} selecionada{notasSelecionadas.size !== 1 ? 's' : ''}</span>
+                <div style={{ display: 'flex', gap: '0.75rem' }}>
+                  <button onClick={() => baixarNotasSelecionadas('pdf')} disabled={deletando || downloadandoPdf} style={{ padding: '0.6rem 1.2rem', background: '#FF9800', color: 'white', border: 'none', borderRadius: '3px', fontWeight: 600, cursor: 'pointer', fontSize: '0.9rem' }}>📄 PDF</button>
+                  <button onClick={() => baixarNotasSelecionadas('original')} disabled={deletando || downloadandoPdf} style={{ padding: '0.6rem 1.2rem', background: '#4CAF50', color: 'white', border: 'none', borderRadius: '3px', fontWeight: 600, cursor: 'pointer', fontSize: '0.9rem' }}>📥 Original</button>
+                  <button onClick={excluirNotasSelecionadas} disabled={deletando || downloadandoPdf} style={{ padding: '0.6rem 1.2rem', background: '#f44336', color: 'white', border: 'none', borderRadius: '3px', fontWeight: 600, cursor: 'pointer', fontSize: '0.9rem' }}>🗑 Excluir</button>
+                </div>
+              </div>
+            )}
+
+            {notasFiltradas.length === 0 ? (
+              <p style={{ color: '#999', textAlign: 'center', padding: '2rem' }}>Nenhuma nota encontrada</p>
+            ) : (
+              <div style={{ border: '1px solid #e0e0e0', borderRadius: '8px', overflow: 'hidden' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', padding: '0.6rem 1.1rem', background: '#f7f9fa', borderBottom: '1px solid #e0e0e0', fontSize: '0.72rem', fontWeight: 700, color: '#90a4ae', textTransform: 'uppercase' }}>
+                  <div style={{ width: '30px' }}>
+                    <input
+                      type="checkbox"
+                      checked={notasSelecionadas.size === notasFiltradas.length && notasFiltradas.length > 0}
+                      onChange={selecionarTodasNotas}
+                      style={{ cursor: 'pointer', width: '18px', height: '18px' }}
+                    />
+                  </div>
+                  <div style={{ width: 130 }}>Status</div>
+                  <div style={{ flex: 1 }}>Nota / Fornecedor</div>
+                  <div style={{ width: 150, textAlign: 'right' }}>Emissão</div>
+                  <div style={{ width: 200 }}>Progresso (Olist)</div>
+                </div>
+                {notasFiltradas.map((nota, idx) => {
+                  const st = statusNota(nota)
+                  const isSelected = notasSelecionadas.has(nota.id)
+                  return (
+                    <div
+                      key={nota.id}
+                      onClick={() => !isSelected && abrirDetalheNota(nota.id)}
+                      style={{ display: 'flex', alignItems: 'center', gap: '1rem', padding: '0.85rem 1.1rem', cursor: 'pointer', background: isSelected ? '#e3f2fd' : '#fff', borderTop: idx > 0 ? '1px solid #eef2f4' : 'none', transition: 'background .15s', borderLeft: isSelected ? '4px solid #2196F3' : 'none' }}
+                      onMouseEnter={(e) => { if (!isSelected) e.currentTarget.style.background = '#f5f9ff' }}
+                      onMouseLeave={(e) => { if (!isSelected) e.currentTarget.style.background = '#fff' }}
+                    >
+                      <div style={{ width: '30px', display: 'flex', justifyContent: 'center' }}>
+                        <input
+                          type="checkbox"
+                          checked={isSelected}
+                          onChange={() => toggleSelecaoNota(nota.id)}
+                          onClick={(e) => e.stopPropagation()}
+                          style={{ cursor: 'pointer', width: '18px', height: '18px' }}
+                        />
+                      </div>
+                      <div style={{ width: 130 }}>
+                        <span style={{ background: st.bg, color: st.cor, fontWeight: 700, fontSize: '0.68rem', padding: '0.25rem 0.55rem', borderRadius: '999px', whiteSpace: 'nowrap' }}>{st.icone} {st.label}</span>
+                      </div>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontWeight: 700, color: '#1a1a1a', fontSize: '0.92rem' }}>NF #{nota.numero_nf}</div>
+                        <div style={{ color: '#607d8b', fontSize: '0.82rem', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                          {nota.fornecedor}{nota.cnpj ? ` · CNPJ ${nota.cnpj}` : ''} · {nota.itens?.length || 0} itens
+                        </div>
+                      </div>
+                      <div style={{ width: 150, textAlign: 'right', color: '#90a4ae', fontSize: '0.82rem', whiteSpace: 'nowrap' }}>
+                        {nota.data_emissao ? new Date(nota.data_emissao).toLocaleDateString('pt-BR') : 's/ data'}
+                      </div>
+                      <div style={{ width: 200 }}>
+                        <BarraProgresso itens={nota.itens} compacto />
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    )
+  }
+
   // ===== PÁGINA DE PRODUTOS DA NOTA =====
   if (pagina === 'produtos_nota' && notaSelecionada && produtosNota.length > 0) {
     return (
