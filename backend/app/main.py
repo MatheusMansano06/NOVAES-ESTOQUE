@@ -2843,14 +2843,15 @@ async def balancear_item_embale(request: Request):
         if tem_divergencia:
             # Corrige a Olist mas NÃO baixa. Mantém divergência (falta) para o
             # operador resolver e dispara a notificação no WhatsApp (no frontend).
+            # Sem baixa, a Olist agora vale exatamente o real conferido.
+            estoque_depois = float(quantidade_real)
+            item.olist_estoque_antes = estoque_depois  # snapshot da revisão lê isto
             item.falta = max(0.0, qtd_full - quantidade_real)
             item.saldo_disponivel = 0
             item.foi_balanceado = 1
             item.data_balanceamento = datetime.utcnow()
             db.add(item)
             db.commit()
-
-            estoque_depois = (olist.obter_estoque(produto_id, usar_cache=False) or {}).get("saldo", 0) or 0
             return JSONResponse({
                 "item_id": item.id,
                 "titulo": item.titulo_anuncio,
@@ -2870,17 +2871,18 @@ async def balancear_item_embale(request: Request):
         # 2. Aplicar baixa do FULL automaticamente
         baixa_resultado = _aplicar_baixa_item(db, item, embale, qtd_override=qtd_full)
 
-        # 3. Atualizar o item como balanceado
+        # 3. Atualizar o item como balanceado.
+        # Olist foi setada para quantidade_real (absoluto) e depois baixou qtd_full,
+        # então o saldo final é (real - full).
+        estoque_depois = max(0.0, float(quantidade_real) - qtd_full)
         item.quantidade_baixar = qtd_full
+        item.olist_estoque_antes = estoque_depois  # snapshot da revisão lê isto
         item.falta = max(0.0, qtd_full - quantidade_real)
         item.saldo_disponivel = max(0, quantidade_real - qtd_full)
         item.foi_balanceado = 1
         item.data_balanceamento = datetime.utcnow()
         db.add(item)
         db.commit()
-
-        # Obter estoque DEPOIS
-        estoque_depois = (olist.obter_estoque(produto_id, usar_cache=False) or {}).get("saldo", 0) or 0
 
         return JSONResponse({
             "item_id": item.id,
