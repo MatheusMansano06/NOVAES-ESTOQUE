@@ -108,6 +108,9 @@ export function EmbaldesManager() {
   const [balanceandoItem, setBalanceandoItem] = useState<ItemRevisao | null>(null)
   const [qtdRealConferida, setQtdRealConferida] = useState('')
   const [balanceandoId, setBalanceandoId] = useState<number | null>(null)
+  // Itens em espera (bloqueados por fatores externos)
+  const [itensEmEspera, setItensEmEspera] = useState<Record<number, boolean>>({})
+  const [marcandoEmEspera, setMarcandoEmEspera] = useState<number | null>(null)
 
   useEffect(() => {
     carregarInbounds()
@@ -932,13 +935,14 @@ export function EmbaldesManager() {
                       })()}
 
                       {/* Tabela */}
-                      <div style={{ display: 'grid', gridTemplateColumns: '2.4fr 1fr 1.2fr 0.9fr 1.1fr 0.8fr 1.5fr', gap: '0.5rem', padding: '0.7rem 0.9rem', background: '#f5f5f5', borderRadius: '4px 4px 0 0', fontSize: '0.8rem', fontWeight: 'bold', color: '#555', textTransform: 'uppercase' }}>
+                      <div style={{ display: 'grid', gridTemplateColumns: '2.4fr 1fr 1.2fr 0.9fr 1.1fr 0.8fr 0.7fr 1.5fr', gap: '0.5rem', padding: '0.7rem 0.9rem', background: '#f5f5f5', borderRadius: '4px 4px 0 0', fontSize: '0.8rem', fontWeight: 'bold', color: '#555', textTransform: 'uppercase' }}>
                         <div>Produto / SKU</div>
                         <div style={{ textAlign: 'center' }}>Estoque Olist</div>
                         <div style={{ textAlign: 'center' }}>Vai pro FULL</div>
                         <div style={{ textAlign: 'center' }}>Resultado</div>
                         <div style={{ textAlign: 'center' }}>Situação</div>
                         <div style={{ textAlign: 'center' }}>Declarar</div>
+                        <div style={{ textAlign: 'center' }}>Espera</div>
                         <div style={{ textAlign: 'center' }}>Ação</div>
                       </div>
                       <div style={{ maxHeight: '560px', overflowY: 'auto', border: '1px solid #eee', borderTop: 'none' }}>
@@ -962,7 +966,7 @@ export function EmbaldesManager() {
                           return (
                             <div
                               key={it.item_id}
-                              style={{ display: 'grid', gridTemplateColumns: '2.4fr 1fr 1.2fr 0.9fr 1.1fr 0.8fr 1.5fr', gap: '0.5rem', padding: '0.8rem 0.9rem', background: jaBaixado ? '#eef7ee' : bg, borderBottom: '1px solid #f0f0f0', fontSize: '0.9rem', alignItems: 'center', opacity: jaBaixado ? 0.8 : 1 }}
+                              style={{ display: 'grid', gridTemplateColumns: '2.4fr 1fr 1.2fr 0.9fr 1.1fr 0.8fr 0.7fr 1.5fr', gap: '0.5rem', padding: '0.8rem 0.9rem', background: jaBaixado ? '#eef7ee' : bg, borderBottom: '1px solid #f0f0f0', fontSize: '0.9rem', alignItems: 'center', opacity: itensEmEspera[it.item_id] ? 0.5 : (jaBaixado ? 0.8 : 1) }}
                             >
                               <div>
                                 <div style={{ fontWeight: 600, lineHeight: 1.3 }}>{it.titulo_anuncio}</div>
@@ -1035,8 +1039,32 @@ export function EmbaldesManager() {
                                   <span style={{ color: '#999', fontSize: '0.8rem' }}>—</span>
                                 )}
                               </div>
+                              <div style={{ textAlign: 'center' }}>
+                                <label style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', gap: '0.3rem' }}>
+                                  <input
+                                    type="checkbox"
+                                    checked={itensEmEspera[it.item_id] || false}
+                                    onChange={(e) => {
+                                      const novo = { ...itensEmEspera, [it.item_id]: e.target.checked }
+                                      setItensEmEspera(novo)
+                                      if (e.target.checked && revisao) {
+                                        setMarcandoEmEspera(it.item_id)
+                                        api.post(`/embaldes/${revisao.embale_id}/itens/${it.item_id}/em-espera`, { em_espera: 1 }).finally(() => setMarcandoEmEspera(null))
+                                      } else if (!e.target.checked && revisao) {
+                                        setMarcandoEmEspera(it.item_id)
+                                        api.post(`/embaldes/${revisao.embale_id}/itens/${it.item_id}/em-espera`, { em_espera: 0 }).finally(() => setMarcandoEmEspera(null))
+                                      }
+                                    }}
+                                    disabled={marcandoEmEspera === it.item_id}
+                                    style={{ cursor: 'pointer' }}
+                                  />
+                                  <span style={{ fontSize: '0.7rem', color: '#666', fontWeight: 600 }}>⏸</span>
+                                </label>
+                              </div>
                               <div style={{ textAlign: 'center', display: 'flex', gap: '0.3rem', justifyContent: 'center', flexWrap: 'wrap' }}>
-                                {jaBaixado ? (
+                                {itensEmEspera[it.item_id] ? (
+                                  <span style={{ color: '#ff6f00', fontWeight: 'bold', fontSize: '0.8rem' }}>Em espera</span>
+                                ) : jaBaixado ? (
                                   <span style={{ color: '#2e7d32', fontWeight: 'bold', fontSize: '0.8rem' }}>✓ Baixado</span>
                                 ) : naoAchado ? (
                                   <button
