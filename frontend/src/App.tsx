@@ -1312,8 +1312,8 @@ function App() {
       label: 'Dashboard',
       items: [
         { key: 'dashboard', label: 'Dashboard', icon: 'dashboard', active: pagina === 'inicial', onClick: () => setPagina('inicial') },
-        { key: 'notas', label: 'Notas fiscais', icon: 'receipt', badge: notas.length, onClick: () => setPagina('inicial') },
-        { key: 'estoque', label: 'Estoque', icon: 'box', badge: estoque.length, onClick: () => setPagina('inicial') },
+        { key: 'notas', label: 'Notas fiscais', icon: 'receipt', badge: notas.length, active: pagina === 'notas-fiscais', onClick: () => setPagina('notas-fiscais') },
+        { key: 'estoque', label: 'Estoque', icon: 'box', badge: estoque.length, active: pagina === 'inicial', onClick: () => setPagina('inicial') },
         { key: 'fornecedores', label: 'Fornecedores', icon: 'users', active: pagina === 'fornecedores', onClick: () => setPagina('fornecedores') },
       ],
     },
@@ -1322,7 +1322,7 @@ function App() {
       items: [
         { key: 'anuncios', label: 'Anuncios ML', icon: 'megaphone', active: pagina === 'anuncios', onClick: () => setPagina('anuncios') },
         { key: 'inbound', label: 'Inbound FULL', icon: 'truck', active: pagina === 'embaldes', badge: inboundsAtivos.length, onClick: () => setPagina('embaldes') },
-        { key: 'divergencias', label: 'Divergencias', icon: 'warning', badge: divergencias.length, onClick: () => setPagina('inicial') },
+        { key: 'divergencias', label: 'Divergencias', icon: 'warning', badge: divergencias.length, active: pagina === 'inicial', onClick: () => setPagina('inicial') },
       ],
     },
   ]
