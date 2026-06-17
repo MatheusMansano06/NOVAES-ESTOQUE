@@ -253,9 +253,7 @@ body::after {
   min-height: 100vh;
   display: grid;
   grid-template-columns: 268px minmax(0, 1fr);
-  background:
-    radial-gradient(circle at top left, rgba(8, 120, 255, 0.12), transparent 28%),
-    linear-gradient(180deg, #f7fbff 0%, #edf4fb 100%);
+  background: #ffffff;
 }
 
 .nvs-shell.is-collapsed {

@@ -1579,14 +1579,10 @@ function App() {
                 </div>
                 <div style={{ display: 'grid', gap: '0.75rem' }}>
                   <div style={{ fontSize: '1.75rem', fontWeight: 800, color: '#e65100' }}>
-                    {notasFiltradas.filter(n => {
-                      const itens = n.itens || []
-                      const itensPendentes = itens.filter(i => !i.olist_produto_id || !i.olist_sku).length
-                      return itensPendentes > 0
-                    }).length}
+                    {notasFiltradas.filter(n => n.status === 'em andamento').length}
                   </div>
                   <div style={{ fontSize: '0.82rem', color: '#666' }}>
-                    Aguardando vínculo com Olist
+                    Notas em andamento
                   </div>
                 </div>
               </div>
