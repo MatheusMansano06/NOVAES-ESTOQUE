@@ -1499,46 +1499,7 @@ function App() {
     return renderComShell(
       'Dashboard Operacional',
       'Visao geral da sua operacao em tempo real.',
-      <div className="app">
-        <header className="header">
-          <div className="container header-main-layout">
-            <div className="header-copy">
-              <h1 style={{ marginBottom: '0.35rem' }}>NVS TECH</h1>
-            <p>Sistema de Gestão Inteligente de Estoque para Operações de Logística e Marketplace</p>
-            </div>
-            <div
-              className="header-status"
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: '0.45rem',
-                padding: '0.45rem 0.9rem',
-                borderRadius: '999px',
-                border: `1px solid ${syncSaudavel ? '#8bd694' : '#f3b0b0'}`,
-                background: syncSaudavel ? 'rgba(224, 255, 228, 0.12)' : 'rgba(255, 235, 235, 0.12)',
-                color: syncSaudavel ? '#c8ffd0' : '#ffd2d2',
-                fontSize: '0.78rem',
-                fontWeight: 800,
-                letterSpacing: '0.04em',
-                textTransform: 'uppercase'
-              }}
-            >
-              <span
-                style={{
-                  width: 8,
-                  height: 8,
-                  borderRadius: '50%',
-                  background: syncSaudavel ? '#7CFC8A' : '#ff8a80',
-                  display: 'inline-block'
-                }}
-              />
-              {syncSaudavel ? 'Sincronizado' : 'Sincronizando'}
-              <span style={{ opacity: 0.85, fontSize: '0.72rem' }}>{fmtHora(ultimaSincronizacao)}</span>
-            </div>
-          </div>
-        </header>
-
-        <main className="container main-content">
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
           <section className="nvs-kpi-grid" style={{ marginBottom: '1.5rem' }}>
             {[
               { tag: 'FN', cor: 'blue', titulo: 'Fornecedores', valor: estoque.length > 0 ? new Set(estoque.flatMap(e => e.notas_fiscais.map(n => n.fornecedor))).size : 0, helper: 'Fornecedores cadastrados' },
@@ -1632,7 +1593,6 @@ function App() {
             </div>
           </section>
 
-        </main>
       </div>
     )
   }
