@@ -2142,6 +2142,8 @@ function App() {
           const nota = notaDetalheAberta
           const st = statusNota(nota)
           const divs = divergenciasDaNota(nota)
+          // IDs dos itens que têm divergência ativa (registrada e não resolvida)
+          const idsComDivergencia = new Set(divs.map((d) => d.item_id))
           const totalValor = (nota.itens || []).reduce((s, i) => s + i.quantidade_nf * i.preco_unitario, 0)
           const TabBtn = ({ id, label, badge }: { id: 'detalhes' | 'conferencia' | 'divergencias', label: string, badge?: number }) => (
             <button onClick={() => setAbaDetalhe(id)} style={{
@@ -2337,6 +2339,7 @@ function App() {
                                 {grupo.items.map((item, idx) => {
                                   const subido = !!item.estoque_olist_atualizado_em
                                   const conferido = item.quantidade_confirmada !== null && item.quantidade_confirmada !== undefined
+                                  const comDivergencia = idsComDivergencia.has(item.id)
                                   const selecionado = itensSelecionadosMultiplos.has(item.id)
                                   return (
                                     <div
@@ -2371,11 +2374,13 @@ function App() {
                                           Cód: {item.codigo_produto}{conferido ? ` · Recebido: ${Math.round(item.quantidade_confirmada as number)}` : ''}
                                         </div>
                                         <div style={{ marginTop: 4 }}>
-                                          {subido
-                                            ? <span style={{ background: '#e8f5e9', color: '#2e7d32', fontSize: '0.7rem', fontWeight: 700, padding: '0.15rem 0.5rem', borderRadius: 999 }}>✅ Subido na Olist</span>
-                                            : conferido
-                                              ? <span style={{ background: '#e3f2fd', color: '#1565c0', fontSize: '0.7rem', fontWeight: 700, padding: '0.15rem 0.5rem', borderRadius: 999 }}>🔄 Conferido</span>
-                                              : <span style={{ background: '#fff3e0', color: '#e65100', fontSize: '0.7rem', fontWeight: 700, padding: '0.15rem 0.5rem', borderRadius: 999 }}>🆕 A conferir</span>}
+                                          {comDivergencia
+                                            ? <span style={{ background: '#ffebee', color: '#c62828', fontSize: '0.7rem', fontWeight: 700, padding: '0.15rem 0.5rem', borderRadius: 999 }}>⚠️ Produto com divergência</span>
+                                            : subido
+                                              ? <span style={{ background: '#e8f5e9', color: '#2e7d32', fontSize: '0.7rem', fontWeight: 700, padding: '0.15rem 0.5rem', borderRadius: 999 }}>✅ Subido na Olist</span>
+                                              : conferido
+                                                ? <span style={{ background: '#e3f2fd', color: '#1565c0', fontSize: '0.7rem', fontWeight: 700, padding: '0.15rem 0.5rem', borderRadius: 999 }}>🔄 Conferido</span>
+                                                : <span style={{ background: '#fff3e0', color: '#e65100', fontSize: '0.7rem', fontWeight: 700, padding: '0.15rem 0.5rem', borderRadius: 999 }}>🆕 A conferir</span>}
                                         </div>
                                       </div>
 
