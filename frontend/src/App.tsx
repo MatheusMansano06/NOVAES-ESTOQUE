@@ -1481,7 +1481,34 @@ function App() {
 
             {/* FILTRO + LISTA DE NOTAS */}
             <div className="card">
-              <h2 style={{ marginTop: 0 }}>Notas Fiscais ({notasFiltradas.length})</h2>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '1.5rem', marginBottom: '1rem', flexWrap: 'wrap' }}>
+                <h2 style={{ marginTop: 0 }}>Notas Fiscais ({notasFiltradas.length})</h2>
+
+                {/* ===== AVISO INBOUND ATIVO ===== */}
+                {inboundsAtivos.length > 0 && (
+                  <div style={{
+                    border: `2px solid ${inboundsAtivos.length > 0 ? '#d32f2f' : '#a5d6a7'}`,
+                    borderRadius: '12px',
+                    padding: '0.85rem 1rem',
+                    background: inboundsAtivos.length > 0 ? '#fff5f5' : '#f3faf3',
+                    boxShadow: inboundsAtivos.length > 0 ? '0 10px 24px rgba(211, 47, 47, 0.08)' : '0 8px 18px rgba(46, 125, 50, 0.08)',
+                    minWidth: '260px'
+                  }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', color: '#d32f2f', fontWeight: 800, fontSize: '0.78rem', letterSpacing: '0.04em', marginBottom: '0.55rem', textTransform: 'uppercase' }}>
+                      <span style={{ width: 9, height: 9, borderRadius: '50%', background: '#d32f2f', display: 'inline-block', animation: 'pulse-inbound 1.2s infinite' }} />
+                      {inboundsAtivos.length === 1 ? 'Inbound ativo' : `${inboundsAtivos.length} inbounds ativos`}
+                    </div>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
+                      {inboundsAtivos.map((inb) => (
+                        <div key={inb.numero_inbound} style={{ display: 'flex', justifyContent: 'space-between', gap: '0.75rem', color: '#d32f2f', fontSize: '0.82rem', fontWeight: 700 }}>
+                          <span>#{inb.numero_inbound}</span>
+                          <span>encerra {fmtData(inb.data_limite)}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
               <div className="card-body">
                 <div style={{ display: 'flex', gap: '0.75rem', marginBottom: '1.25rem', flexWrap: 'wrap' }}>
                   <input
