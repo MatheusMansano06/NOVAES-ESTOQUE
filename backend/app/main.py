@@ -20,7 +20,7 @@ from app.models import (
     NotaFiscal, ItemEstoque, ConfirmacaoEstoque, StatusEstoque, VinculoOlist,
     Fornecedor, HistoricoCompra, ConfiguracaoEstoqueMinimo, NotificacaoFornecedor,
     EmbaleFU, ItemEmbaleFU, ApelidoFornecedor, PrecoVendaProduto,
-    MercadoLivreItemCache, MercadoLivreSyncState
+    MercadoLivreItemCache, MercadoLivreSyncState, HistoricoFullEmbale
 )
 from app.utils.nfe_parser import NFeParsing
 from app.utils.nfe_pdf_generator import NFePDFGenerator
@@ -2182,6 +2182,18 @@ def _progresso_item_full(item) -> tuple[float, float]:
     return planejado, realizado
 
 
+def _marcar_historico_full(db, embale_id, revisao):
+    """Marca cada item da revisão com tem_historico_full = True quando houve
+    qualquer mudança registrada na quantidade do FULL daquele item."""
+    try:
+        ids = {row[0] for row in db.query(HistoricoFullEmbale.item_id)
+               .filter(HistoricoFullEmbale.embale_id == embale_id).all()}
+    except Exception:
+        ids = set()
+    for r in revisao:
+        r["tem_historico_full"] = r.get("item_id") in ids
+
+
 def _resumo_revisao_salva_item(item):
     produto_id = item.olist_produto_id
     qtd_full = _quantidade_planejada_full(item)
@@ -2281,6 +2293,7 @@ async def revisar_baixa_embale(request: Request):
 
         if embale.revisao_salva_em and not force_refresh:
             revisao = [_resumo_revisao_salva_item(item) for item in itens]
+            _marcar_historico_full(db, embale.id, revisao)
             resumo = {
                 "total": len(revisao),
                 "encontrados": sum(1 for item in revisao if item["olist_encontrado"]),
@@ -2436,6 +2449,8 @@ async def revisar_baixa_embale(request: Request):
             embale.revisao_salva_em = revisado_em
         db.add(embale)
         db.commit()
+
+        _marcar_historico_full(db, embale.id, revisao)
 
         return JSONResponse({
             "embale_id": embale.id,
@@ -2728,10 +2743,26 @@ async def ajustar_quantidade_full_embale(request: Request):
                 "erro": f"NÃ£o dÃ¡ para reduzir abaixo de {ja_reservado:g}, porque essa quantidade jÃ¡ foi reservada/baixada."
             }, status_code=400)
 
+        # Quantidade planejada ANTES da mudança (para registrar no histórico)
+        quantidade_anterior = _quantidade_planejada_full(item)
+
         item.quantidade_baixar = quantidade_full
         if item.olist_estoque_antes is not None:
             item.falta = max(0.0, quantidade_full - float(item.olist_estoque_antes or 0))
         db.add(item)
+
+        # Histórico: registra TODA mudança do "Vai pro FULL" (aumento ou redução)
+        if abs(quantidade_full - quantidade_anterior) > 0.0001:
+            db.add(HistoricoFullEmbale(
+                embale_id=embale.id,
+                item_id=item.id,
+                titulo_anuncio=item.titulo_anuncio,
+                sku_inbound=item.sku_inbound,
+                quantidade_anterior=quantidade_anterior,
+                quantidade_nova=quantidade_full,
+                tipo="aumento" if quantidade_full > quantidade_anterior else "reducao",
+            ))
+
         db.commit()
 
         return JSONResponse({
@@ -2791,10 +2822,10 @@ async def balancear_item_embale(request: Request):
         # Quantidade planejada para o FULL (editavel na revisao)
         qtd_full = _quantidade_planejada_full(item)
 
-        if qtd_full > quantidade_real:
-            return JSONResponse({
-                "erro": f"O FULL estÃ¡ planejado para {qtd_full:g} un, mas o estoque real conferido foi {quantidade_real:g}. Ajuste o valor de 'Vai pro FULL' antes do balanÃ§o."
-            }, status_code=400)
+        # Quando o conferido no físico é MENOR que o que vai pro FULL, temos
+        # divergência: corrige a Olist para o real, mas NÃO baixa — o item
+        # continua pendente/divergente e a falta é notificada no WhatsApp.
+        tem_divergencia = quantidade_real < qtd_full
 
         # 1. Atualizar Olist para quantidade_real (balanço completo)
         # tipo="B" é ABSOLUTO na Tiny: o valor enviado VIRA o estoque atual.
@@ -2809,6 +2840,33 @@ async def balancear_item_embale(request: Request):
             db.rollback()
             return JSONResponse({"erro": "Falha ao atualizar estoque na Olist"}, status_code=500)
 
+        if tem_divergencia:
+            # Corrige a Olist mas NÃO baixa. Mantém divergência (falta) para o
+            # operador resolver e dispara a notificação no WhatsApp (no frontend).
+            item.falta = max(0.0, qtd_full - quantidade_real)
+            item.saldo_disponivel = 0
+            item.foi_balanceado = 1
+            item.data_balanceamento = datetime.utcnow()
+            db.add(item)
+            db.commit()
+
+            estoque_depois = olist.obter_estoque_produto(produto_id) or 0
+            return JSONResponse({
+                "item_id": item.id,
+                "titulo": item.titulo_anuncio,
+                "sku_inbound": item.sku_inbound,
+                "estoque_olist_antes": estoque_antes,
+                "estoque_olist_depois": estoque_depois,
+                "quantidade_real_conferida": quantidade_real,
+                "qtd_full_desconta": qtd_full,
+                "falta": item.falta,
+                "saldo_disponivel": 0,
+                "tem_divergencia": True,
+                "baixa_status": "nao_baixado_divergencia",
+                "mensagem": f"Olist corrigida para {quantidade_real:g} un. Faltam {item.falta:g} un para o FULL ({qtd_full:g}). Item segue divergente — notifique no WhatsApp."
+            })
+
+        # Sem divergência (conferido >= FULL): aplica a baixa normalmente.
         # 2. Aplicar baixa do FULL automaticamente
         baixa_resultado = _aplicar_baixa_item(db, item, embale, qtd_override=qtd_full)
 
@@ -2827,17 +2885,56 @@ async def balancear_item_embale(request: Request):
         return JSONResponse({
             "item_id": item.id,
             "titulo": item.titulo_anuncio,
+            "sku_inbound": item.sku_inbound,
             "estoque_olist_antes": estoque_antes,
             "estoque_olist_depois": estoque_depois,
             "quantidade_real_conferida": quantidade_real,
             "qtd_full_desconta": qtd_full,
+            "falta": item.falta,
             "saldo_disponivel": item.saldo_disponivel,
+            "tem_divergencia": False,
             "baixa_status": baixa_resultado.get("status"),
             "mensagem": f"Balanço realizado. Olist: {estoque_antes} → {estoque_depois}. FULL desconta {qtd_full}, sobram {item.saldo_disponivel}."
         })
 
     except Exception as e:
         db.rollback()
+        return JSONResponse({"erro": str(e)}, status_code=500)
+    finally:
+        db.close()
+
+
+async def listar_historico_full_embale(request: Request):
+    """
+    GET /api/embaldes/{embale_id}/historico-full
+    Lista o histórico de mudanças na quantidade do FULL deste inbound
+    (mais recentes primeiro).
+    """
+    db = SessionLocal()
+    try:
+        embale_id = int(request.path_params.get("embale_id"))
+        registros = (db.query(HistoricoFullEmbale)
+                     .filter(HistoricoFullEmbale.embale_id == embale_id)
+                     .order_by(HistoricoFullEmbale.criado_em.desc())
+                     .all())
+        return JSONResponse({
+            "embale_id": embale_id,
+            "total": len(registros),
+            "itens": [
+                {
+                    "id": h.id,
+                    "item_id": h.item_id,
+                    "titulo_anuncio": h.titulo_anuncio,
+                    "sku_inbound": h.sku_inbound,
+                    "quantidade_anterior": h.quantidade_anterior,
+                    "quantidade_nova": h.quantidade_nova,
+                    "tipo": h.tipo,
+                    "criado_em": h.criado_em.isoformat() if h.criado_em else None,
+                }
+                for h in registros
+            ]
+        })
+    except Exception as e:
         return JSONResponse({"erro": str(e)}, status_code=500)
     finally:
         db.close()
@@ -3474,6 +3571,7 @@ routes = [
     Route("/api/embaldes/{embale_id}/itens/{item_id}/vincular", vincular_item_embale, methods=["POST"]),
     Route("/api/embaldes/{embale_id}/itens/{item_id}/quantidade-full", ajustar_quantidade_full_embale, methods=["POST"]),
     Route("/api/embaldes/{embale_id}/itens/{item_id}/balancear", balancear_item_embale, methods=["POST"]),
+    Route("/api/embaldes/{embale_id}/historico-full", listar_historico_full_embale, methods=["GET"]),
     Route("/api/embaldes/{embale_id}/itens/{item_id}/em-espera", marcar_em_espera_embale, methods=["POST"]),
     Route("/api/embaldes/{embale_id}/encerrar", encerrar_embale, methods=["POST"]),
 ]

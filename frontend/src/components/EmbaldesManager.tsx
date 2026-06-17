@@ -59,6 +59,7 @@ interface ItemRevisao {
   foi_balanceado?: number
   saldo_disponivel?: number | null
   em_espera?: number
+  tem_historico_full?: boolean
 }
 
 interface Revisao {
@@ -96,8 +97,11 @@ export function EmbaldesManager() {
   const [quantidadesFull, setQuantidadesFull] = useState<Record<number, string>>({})
   const [salvandoQuantidadeId, setSalvandoQuantidadeId] = useState<number | null>(null)
   // Filtro da tabela de revisão
-  type FiltroRev = 'todos' | 'vinculados' | 'nao_vinculados' | 'baixados' | 'nao_baixados'
+  type FiltroRev = 'todos' | 'vinculados' | 'nao_vinculados' | 'baixados' | 'nao_baixados' | 'full_alterado'
   const [filtroRevisao, setFiltroRevisao] = useState<FiltroRev>('todos')
+  // Histórico de alterações da quantidade do FULL
+  const [historicoFull, setHistoricoFull] = useState<any[]>([])
+  const [mostrarHistorico, setMostrarHistorico] = useState(false)
   // Vínculo manual de item "não achado"
   const [vinculandoItem, setVinculandoItem] = useState<ItemRevisao | null>(null)
   const [buscaTermo, setBuscaTermo] = useState('')
@@ -279,26 +283,64 @@ export function EmbaldesManager() {
     }
   }
 
+  const NUMERO_WHATSAPP = '5519978149245'
+
   const balancearItem = async (item: ItemRevisao, embaleId: number) => {
     if (!qtdRealConferida || qtdRealConferida === '') {
       setMessage('Digite a quantidade conferida no físico')
       return
     }
 
+    // Abre a aba do WhatsApp AINDA no clique (evita bloqueio de pop-up).
+    const real = parseFloat(qtdRealConferida)
+    const vaiPraoFull = Math.round(item.quantidade_full || 0)
+    const haveraDivergencia = real < vaiPraoFull
+    let janelaWhats: Window | null = null
+    if (haveraDivergencia) janelaWhats = window.open('', '_blank')
+
     try {
       setBalanceandoId(item.item_id)
       const resultado = await api.post(`/embaldes/${embaleId}/itens/${item.item_id}/balancear`, {
-        quantidade_real: parseFloat(qtdRealConferida)
+        quantidade_real: real
       })
 
       setMessage(`Balanço realizado! ${resultado.data.mensagem}`)
+
+      // Divergência: notifica no WhatsApp (produto, qtd real e qtd que vai pro FULL)
+      if (resultado.data.tem_divergencia) {
+        const falta = Math.max(0, vaiPraoFull - real)
+        const mensagem =
+          `⚠️ DIVERGÊNCIA NO INBOUND (FULL)\n\n` +
+          `Produto: ${item.titulo_anuncio}\n` +
+          (item.sku_inbound ? `SKU: ${item.sku_inbound}\n` : '') +
+          `Quantidade real conferida: ${real}\n` +
+          `Quantidade que vai pro FULL: ${vaiPraoFull}\n` +
+          `Falta: ${falta}`
+        const url = `https://wa.me/${NUMERO_WHATSAPP}?text=${encodeURIComponent(mensagem)}`
+        if (janelaWhats) janelaWhats.location.href = url
+        else window.open(url, '_blank')
+      } else if (janelaWhats) {
+        janelaWhats.close()
+      }
+
       setBalanceandoItem(null)
       setQtdRealConferida('')
       await carregarRevisao(embaleId)
     } catch (erro: any) {
+      if (janelaWhats) janelaWhats.close()
       setMessage('Erro: ' + (erro.response?.data?.erro || String(erro)))
     } finally {
       setBalanceandoId(null)
+    }
+  }
+
+  const carregarHistoricoFull = async (embaleId: number) => {
+    try {
+      const resposta = await api.get(`/embaldes/${embaleId}/historico-full`)
+      setHistoricoFull(resposta.data.itens || [])
+      setMostrarHistorico(true)
+    } catch (erro: any) {
+      setMessage('Erro ao carregar histórico: ' + (erro.response?.data?.erro || String(erro)))
     }
   }
 
@@ -920,15 +962,17 @@ export function EmbaldesManager() {
                       {(() => {
                         const itBaixado = (it: ItemRevisao) => it.baixa_aplicada === 1 || !!itensBaixados[it.item_id]
                         const itVinc = (it: ItemRevisao) => it.vinculado === 1 || !!it.olist_produto_id
+                        const itFullAlterado = (it: ItemRevisao) => !!it.tem_historico_full
                         const chips: { id: FiltroRev; label: string; n: number }[] = [
                           { id: 'todos', label: 'Todos', n: revisao.itens.length },
                           { id: 'vinculados', label: 'Vinculados', n: revisao.itens.filter(itVinc).length },
                           { id: 'nao_vinculados', label: 'Não vinculados', n: revisao.itens.filter((i) => !itVinc(i)).length },
                           { id: 'baixados', label: 'Estoque retirado', n: revisao.itens.filter(itBaixado).length },
                           { id: 'nao_baixados', label: 'Ainda não retirado', n: revisao.itens.filter((i) => !itBaixado(i)).length },
+                          { id: 'full_alterado', label: 'Qtd FULL alterada', n: revisao.itens.filter(itFullAlterado).length },
                         ]
                         return (
-                          <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '0.75rem', flexWrap: 'wrap' }}>
+                          <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '0.75rem', flexWrap: 'wrap', alignItems: 'center' }}>
                             {chips.map((c) => {
                               const ativo = filtroRevisao === c.id
                               return (
@@ -947,6 +991,16 @@ export function EmbaldesManager() {
                                 </button>
                               )
                             })}
+                            <button
+                              onClick={() => carregarHistoricoFull(revisao.embale_id)}
+                              style={{
+                                padding: '0.4rem 0.9rem', borderRadius: '999px', cursor: 'pointer',
+                                fontSize: '0.85rem', fontWeight: 600,
+                                border: '1px solid #8e24aa', background: '#fff', color: '#8e24aa',
+                              }}
+                            >
+                              📜 Histórico de alterações
+                            </button>
                           </div>
                         )
                       })()}
@@ -970,6 +1024,7 @@ export function EmbaldesManager() {
                           if (filtroRevisao === 'nao_vinculados') return !vinc
                           if (filtroRevisao === 'baixados') return baixado
                           if (filtroRevisao === 'nao_baixados') return !baixado
+                          if (filtroRevisao === 'full_alterado') return !!it.tem_historico_full
                           return true
                         }).map((it) => {
                           const naoAchado = !it.olist_encontrado
@@ -1251,14 +1306,35 @@ export function EmbaldesManager() {
               </div>
             </div>
 
-            <div style={{ background: '#e8f5e9', padding: '0.75rem', borderRadius: '4px', marginBottom: '1rem', fontSize: '0.85rem' }}>
-              <strong>O que vai acontecer:</strong>
-              <ul style={{ margin: '0.5rem 0 0 0', paddingLeft: '1.2rem' }}>
-                <li>Olist será atualizada para {qtdRealConferida || '?'} un (corrigindo erros)</li>
-                <li>Será descontado {Math.round(balanceandoItem.quantidade_full)} un para o FULL</li>
-                <li>Sobra: {qtdRealConferida ? Math.max(0, parseInt(qtdRealConferida) - Math.round(balanceandoItem.quantidade_full)) : '?'} un disponível</li>
-              </ul>
-            </div>
+            {(() => {
+              const real = qtdRealConferida ? parseInt(qtdRealConferida) : null
+              const full = Math.round(balanceandoItem.quantidade_full)
+              const divergente = real !== null && real < full
+              if (divergente) {
+                const falta = full - (real as number)
+                return (
+                  <div style={{ background: '#fff3e0', padding: '0.75rem', borderRadius: '4px', marginBottom: '1rem', fontSize: '0.85rem', borderLeft: '4px solid #ef6c00' }}>
+                    <strong>⚠️ Vai gerar divergência:</strong>
+                    <ul style={{ margin: '0.5rem 0 0 0', paddingLeft: '1.2rem' }}>
+                      <li>Olist será corrigida para {real} un (o real que você tem)</li>
+                      <li><strong>NÃO</strong> será baixado para o FULL (faltam {falta} un para os {full} planejados)</li>
+                      <li>O item continua com divergência até você resolver</li>
+                      <li>Vou abrir o <strong>WhatsApp</strong> com a notificação (produto, qtd real e qtd que vai pro FULL)</li>
+                    </ul>
+                  </div>
+                )
+              }
+              return (
+                <div style={{ background: '#e8f5e9', padding: '0.75rem', borderRadius: '4px', marginBottom: '1rem', fontSize: '0.85rem' }}>
+                  <strong>O que vai acontecer:</strong>
+                  <ul style={{ margin: '0.5rem 0 0 0', paddingLeft: '1.2rem' }}>
+                    <li>Olist será atualizada para {qtdRealConferida || '?'} un (corrigindo erros)</li>
+                    <li>Será descontado {full} un para o FULL</li>
+                    <li>Sobra: {real !== null ? Math.max(0, real - full) : '?'} un disponível</li>
+                  </ul>
+                </div>
+              )
+            })()}
 
             <div style={{ display: 'flex', gap: '0.7rem' }}>
               <button
@@ -1275,6 +1351,53 @@ export function EmbaldesManager() {
                 Cancelar
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal de Histórico de alterações do FULL */}
+      {mostrarHistorico && (
+        <div
+          onClick={() => setMostrarHistorico(false)}
+          style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{ background: '#fff', borderRadius: '8px', padding: '1.5rem', width: '720px', maxWidth: '94vw', maxHeight: '85vh', overflowY: 'auto', boxShadow: '0 10px 40px rgba(0,0,0,0.3)' }}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start', marginBottom: '1rem' }}>
+              <h3 style={{ margin: 0, color: '#8e24aa' }}>📜 Histórico de alterações do FULL</h3>
+              <button onClick={() => setMostrarHistorico(false)} style={{ background: 'none', border: 'none', fontSize: '1.4rem', cursor: 'pointer', color: '#999', lineHeight: 1 }}>×</button>
+            </div>
+            {historicoFull.length === 0 ? (
+              <div style={{ textAlign: 'center', padding: '2rem', color: '#999' }}>
+                Nenhuma alteração de quantidade do FULL registrada neste inbound.
+              </div>
+            ) : (
+              <div style={{ display: 'grid', gap: '0.5rem' }}>
+                {historicoFull.map((h) => {
+                  const aumento = h.tipo === 'aumento'
+                  return (
+                    <div key={h.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '1rem', padding: '0.7rem 0.9rem', border: '1px solid #eee', borderRadius: '6px', borderLeft: `4px solid ${aumento ? '#2e7d32' : '#ef6c00'}` }}>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontWeight: 600, fontSize: '0.9rem' }}>{h.titulo_anuncio}</div>
+                        <div style={{ fontSize: '0.78rem', color: '#666' }}>
+                          SKU: {h.sku_inbound || '—'} · {h.criado_em ? new Date(h.criado_em).toLocaleString('pt-BR') : ''}
+                        </div>
+                      </div>
+                      <div style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
+                        <span style={{ padding: '0.15rem 0.5rem', borderRadius: '999px', fontSize: '0.72rem', fontWeight: 700, background: aumento ? '#e8f5e9' : '#fff3e0', color: aumento ? '#2e7d32' : '#ef6c00' }}>
+                          {aumento ? '▲ aumentou' : '▼ reduziu'}
+                        </span>
+                        <div style={{ fontWeight: 700, fontSize: '0.95rem', marginTop: '0.2rem' }}>
+                          {Math.round(h.quantidade_anterior)} → {Math.round(h.quantidade_nova)} un
+                        </div>
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            )}
           </div>
         </div>
       )}
