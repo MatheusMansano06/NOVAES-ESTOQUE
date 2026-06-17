@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react'
+import { type ReactNode, useState, useEffect, useRef } from 'react'
 import './App.css'
 import { ModalDetalhes } from './ModalDetalhes'
 import { ModalDetalhesNota } from './ModalDetalhesNota'
@@ -6,6 +6,7 @@ import { ModalDetalhesNotaFiscal } from './ModalDetalhesNotaFiscal'
 import { FornecedoresManager } from './components/FornecedoresManager'
 import { EmbaldesManager } from './components/EmbaldesManager'
 import { AnunciosML } from './components/AnunciosML'
+import { AppShell, type ShellNavGroup, type ShellStatusItem } from './components/AppShell'
 import { baixarMultiplosOuPdfs } from './services/api'
 
 const API_BASE = import.meta.env.VITE_API_URL ?? 'http://127.0.0.1:8000'
@@ -67,7 +68,7 @@ interface ProdutoEstoque {
   }>
 }
 
-type Pagina = 'bemvindo' | 'inicial' | 'conferencia' | 'produtos_nota' | 'relacionamento_produto' | 'fornecedores' | 'embaldes' | 'anuncios'
+type Pagina = 'bemvindo' | 'inicial' | 'conferencia' | 'produtos_nota' | 'relacionamento_produto' | 'fornecedores' | 'embaldes' | 'anuncios' | 'notas-fiscais'
 
 interface Divergencia {
   item_id: number
@@ -80,6 +81,14 @@ interface Divergencia {
   quantidade_nf: number
   quantidade_confirmada: number
   data_registro: string
+}
+
+interface MlStatus {
+  authorized?: boolean
+}
+
+interface OlistStatus {
+  authorized?: boolean
 }
 
 function App() {
@@ -168,6 +177,8 @@ function App() {
   }>>([])
   const [syncSaudavel, setSyncSaudavel] = useState(false)
   const [ultimaSincronizacao, setUltimaSincronizacao] = useState<string | null>(null)
+  const [mlStatus, setMlStatus] = useState<MlStatus | null>(null)
+  const [olistStatus, setOlistStatus] = useState<OlistStatus | null>(null)
 
   // Formata data ISO -> dd/mm/aaaa (pt-BR)
   const fmtData = (d: string | null) => {
@@ -191,11 +202,26 @@ function App() {
     return { planejado, baixado, restante, percentual, emEspera }
   })()
 
+  const loadIntegracoes = async () => {
+    try {
+      const [mlRes, olistRes] = await Promise.allSettled([
+        fetchJsonNoCache(`${API_BASE}/api/ml/status`),
+        fetchJsonNoCache(`${API_BASE}/api/olist/status`),
+      ])
+
+      if (mlRes.status === 'fulfilled') setMlStatus(mlRes.value || null)
+      if (olistRes.status === 'fulfilled') setOlistStatus(olistRes.value || null)
+    } catch {
+      // silencioso para nao travar a interface
+    }
+  }
+
   // Carregar notas ao iniciar
   useEffect(() => {
     loadNotas(false)
     loadEstoque(false)
     loadDivergencias(false)
+    loadIntegracoes()
   }, [])
 
   // Diagnóstico de inbounds ATIVOS em tempo real (atualiza a cada 20s).
@@ -220,6 +246,7 @@ function App() {
         loadNotas(true),
         loadEstoque(true),
         loadDivergencias(true),
+        loadIntegracoes(),
       ])
     }
 
@@ -1251,6 +1278,77 @@ function App() {
 
   // ===== PÁGINA INICIAL =====
   // ===== TELA DE BOAS-VINDAS (sem login) =====
+  const todosItens = notas.flatMap((nota) => nota.itens || [])
+  const itensSincronizados = todosItens.filter((item) => !!item.estoque_olist_atualizado_em).length
+  const itensSemVinculo = todosItens.filter((item) => !item.olist_produto_id).length
+  const itensBloqueados = todosItens.filter((item) => item.status === 'bloqueado').length
+  const notasHoje = notas.filter((nota) => {
+    if (!nota.data_upload) return false
+    const dataUpload = new Date(nota.data_upload)
+    const hoje = new Date()
+    return dataUpload.toDateString() === hoje.toDateString()
+  }).length
+
+  const topStatuses: ShellStatusItem[] = [
+    {
+      label: 'Mercado Livre',
+      value: mlStatus?.authorized ? 'Conectado' : 'Pendente',
+      tone: mlStatus?.authorized ? 'positive' : 'warning',
+    },
+    {
+      label: 'Olist',
+      value: olistStatus?.authorized ? 'Sincronizado' : 'Pendente',
+      tone: olistStatus?.authorized ? 'positive' : 'warning',
+    },
+    {
+      label: 'Fluxo local',
+      value: syncSaudavel ? 'Operacional' : 'Verificando',
+      tone: syncSaudavel ? 'positive' : 'warning',
+    },
+  ]
+
+  const navGroups: ShellNavGroup[] = [
+    {
+      label: 'Dashboard',
+      items: [
+        { key: 'dashboard', label: 'Dashboard', icon: 'dashboard', active: pagina === 'inicial', onClick: () => setPagina('inicial') },
+        { key: 'notas', label: 'Notas fiscais', icon: 'receipt', badge: notas.length, onClick: () => setPagina('inicial') },
+        { key: 'estoque', label: 'Estoque', icon: 'box', badge: estoque.length, onClick: () => setPagina('inicial') },
+        { key: 'fornecedores', label: 'Fornecedores', icon: 'users', active: pagina === 'fornecedores', onClick: () => setPagina('fornecedores') },
+      ],
+    },
+    {
+      label: 'Marketplace',
+      items: [
+        { key: 'anuncios', label: 'Anuncios ML', icon: 'megaphone', active: pagina === 'anuncios', onClick: () => setPagina('anuncios') },
+        { key: 'inbound', label: 'Inbound FULL', icon: 'truck', active: pagina === 'embaldes', badge: inboundsAtivos.length, onClick: () => setPagina('embaldes') },
+        { key: 'divergencias', label: 'Divergencias', icon: 'warning', badge: divergencias.length, onClick: () => setPagina('inicial') },
+      ],
+    },
+  ]
+
+  const acoesRapidas = [
+    { label: 'Subir NF-e', tone: 'primary', onClick: () => fileInputRef.current?.click() },
+    { label: 'Criar inbound', tone: 'green', onClick: () => setPagina('embaldes') },
+    { label: 'Ver anuncios ML', tone: 'gold', onClick: () => setPagina('anuncios') },
+    { label: 'Fornecedores', tone: 'purple', onClick: () => setPagina('fornecedores') },
+    { label: 'Sincronizar Mercado Livre', tone: 'green', onClick: () => loadIntegracoes() },
+    { label: olistStatus?.authorized ? 'Sincronizar Olist' : 'Conectar Olist', tone: 'primary', onClick: () => loadIntegracoes() },
+  ]
+
+  const renderComShell = (title: string, subtitle: string, conteudo: ReactNode) => (
+    <AppShell
+      title={title}
+      subtitle={subtitle}
+      navGroups={navGroups}
+      statuses={topStatuses}
+      syncTimeLabel={fmtHora(ultimaSincronizacao)}
+      primaryAction={{ label: 'Sincronizar agora', onClick: () => loadIntegracoes() }}
+    >
+      {conteudo}
+    </AppShell>
+  )
+
   if (pagina === 'bemvindo') {
     const features = [
       { icon: '📄', texto: 'Notas fiscais organizadas' },
@@ -1398,7 +1496,9 @@ function App() {
   }
 
   if (pagina === 'inicial') {
-    return (
+    return renderComShell(
+      'Dashboard Operacional',
+      'Visao geral da sua operacao em tempo real.',
       <div className="app">
         <header className="header">
           <div className="container header-main-layout">
@@ -1439,6 +1539,88 @@ function App() {
         </header>
 
         <main className="container main-content">
+          <section className="nvs-kpi-grid" style={{ marginBottom: '1.5rem' }}>
+            {[
+              { tag: 'NF', cor: 'blue', titulo: 'Notas fiscais hoje', valor: notasHoje, helper: `${notas.length} nota(s) no ambiente local` },
+              { tag: 'OL', cor: 'green', titulo: 'Itens sincronizados', valor: itensSincronizados, helper: `${todosItens.length} itens tratados no fluxo` },
+              { tag: 'IN', cor: 'yellow', titulo: 'Inbound ativo', valor: inboundsAtivos.length, helper: inboundsAtivos.length > 0 ? `${progressoBaixasInbound.restante} un aguardando baixa` : 'Sem inbound em aberto' },
+              { tag: 'DG', cor: 'red', titulo: 'Produtos com divergencia', valor: divergencias.length, helper: divergencias.length > 0 ? 'Exigem tratativa imediata' : 'Nenhuma divergencia aberta' },
+              { tag: 'VL', cor: 'yellow', titulo: 'Produtos sem vinculo', valor: itensSemVinculo, helper: 'Aguardando relacao com anuncio correto' },
+              { tag: 'ST', cor: 'green', titulo: 'Produtos em estoque', valor: estoque.length, helper: `${Math.max(todosItens.length - itensBloqueados, 0)} itens liberados na operacao` },
+            ].map((item) => (
+              <div className="nvs-kpi-card" key={item.titulo}>
+                <div className="nvs-kpi-card__head">
+                  <div className={`nvs-kpi-card__icon is-${item.cor}`}>
+                    <span style={{ fontSize: '0.68rem', fontWeight: 800 }}>{item.tag}</span>
+                  </div>
+                  <span className="nvs-kpi-card__label">{item.titulo}</span>
+                </div>
+                <div className="nvs-kpi-card__value">{item.valor}</div>
+                <div className="nvs-kpi-card__helper">{item.helper}</div>
+              </div>
+            ))}
+          </section>
+
+          <section className="nvs-panel-grid" style={{ marginBottom: '1.5rem' }}>
+            <div className="nvs-surface nvs-panel">
+              <h3>Alertas importantes</h3>
+              <div className="nvs-list">
+                {[
+                  { titulo: 'Produtos com divergencia aberta', detalhe: `${divergencias.length} item(ns) precisa de acao`, valor: divergencias.length || 'OK', tom: divergencias.length > 0 ? 'danger' : 'success' },
+                  { titulo: 'Produtos sem vinculo com anuncio', detalhe: `${itensSemVinculo} item(ns) sem relacao com Olist`, valor: itensSemVinculo, tom: itensSemVinculo > 0 ? 'warning' : 'success' },
+                  { titulo: 'Itens bloqueados na operacao', detalhe: `${itensBloqueados} item(ns) aguardando tratativa`, valor: itensBloqueados, tom: itensBloqueados > 0 ? 'warning' : 'success' },
+                  { titulo: 'Autorizacao Olist local', detalhe: olistStatus?.authorized ? 'Pronta para sincronizar estoque' : 'Conectar para buscar e subir estoque', valor: olistStatus?.authorized ? 'OK' : 'PEND', tom: olistStatus?.authorized ? 'success' : 'warning' },
+                ].map((alerta) => (
+                  <div className="nvs-list__row" key={alerta.titulo}>
+                    <span className={`nvs-list__dot is-${alerta.tom}`} />
+                    <div className="nvs-list__copy">
+                      <strong>{alerta.titulo}</strong>
+                      <span>{alerta.detalhe}</span>
+                    </div>
+                    <span className={`nvs-list__meta is-${alerta.tom}`}>{alerta.valor}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div className="nvs-surface nvs-panel">
+              <h3>Atividades recentes</h3>
+              <div className="nvs-list">
+                {notas.slice(0, 5).map((nota) => (
+                  <div className="nvs-list__row" key={nota.id}>
+                    <span className="nvs-list__dot is-success" />
+                    <div className="nvs-list__copy">
+                      <strong>NF #{nota.numero_nf} processada</strong>
+                      <span>{nota.fornecedor}</span>
+                    </div>
+                    <span className="nvs-list__meta">{fmtHora(nota.data_upload || null)}</span>
+                  </div>
+                ))}
+                {inboundsAtivos.slice(0, 1).map((inbound) => (
+                  <div className="nvs-list__row" key={inbound.numero_inbound || inbound.nome_embalde}>
+                    <span className="nvs-list__dot is-warning" />
+                    <div className="nvs-list__copy">
+                      <strong>Inbound #{inbound.numero_inbound || inbound.nome_embalde}</strong>
+                      <span>{inbound.nome_embalde || 'Inbound em acompanhamento'}</span>
+                    </div>
+                    <span className="nvs-list__meta">{fmtData(inbound.data_limite)}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div className="nvs-surface nvs-panel">
+              <h3>Acoes rapidas</h3>
+              <div className="nvs-quick-actions">
+                {acoesRapidas.map((acao) => (
+                  <button key={acao.label} type="button" className={`nvs-button nvs-button--${acao.tone}`} onClick={acao.onClick}>
+                    {acao.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </section>
+
           {message && (
             <div className={`message ${message.includes('sucesso') ? 'success' : 'error'}`}>
               {message}
@@ -2971,7 +3153,9 @@ function App() {
 
   // ===== PÁGINA DE FORNECEDORES =====
   if (pagina === 'fornecedores') {
-    return (
+    return renderComShell(
+      'Central de fornecedores',
+      'Visao historica de fornecedores, catalogo e margens cruzadas.',
       <FornecedoresManager
         onVoltar={voltarParaInicial}
       />
@@ -2980,7 +3164,11 @@ function App() {
 
   // ===== PÁGINA DE ANÚNCIOS (MERCADO LIVRE) =====
   if (pagina === 'anuncios') {
-    return <AnunciosML onVoltar={voltarParaInicial} />
+    return renderComShell(
+      'Painel Mercado Livre',
+      'Acompanhe anuncios, estoque, imagens, precificacao e dimensoes.',
+      <AnunciosML onVoltar={voltarParaInicial} />
+    )
   }
 
   // ===== PÁGINA DE CONFERÊNCIA =====
@@ -3796,7 +3984,9 @@ function App() {
 
   // ===== PÁGINA EMBALDES =====
   if (pagina === 'embaldes') {
-    return (
+    return renderComShell(
+      'Operacao de inbound FULL',
+      'Receba PDFs de inbound, revise o FULL e acompanhe baixas.',
       <div className="app">
         <header className="header">
           <div className="container">
