@@ -241,6 +241,10 @@ class ItemEmbaleFU(Base):
     saldo_disponivel = Column(Float, nullable=True)  # Qtd real - FULL (após balanço)
     data_balanceamento = Column(DateTime, nullable=True)
 
+    # Status em espera (produto bloqueado sem mexer por fatores externos)
+    em_espera = Column(Integer, default=0)  # 1 = em espera, 0 = normal
+    data_em_espera = Column(DateTime, nullable=True)
+
     criado_em = Column(DateTime, default=datetime.utcnow)
 
     embalde = relationship("EmbaleFU", back_populates="itens")

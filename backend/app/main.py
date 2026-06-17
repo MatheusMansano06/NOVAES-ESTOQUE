@@ -61,9 +61,11 @@ def _garantir_colunas_sqlite():
                 ("saldo_disponivel", "FLOAT"),
                 ("data_balanceamento", "DATETIME"),
                 ("revisao_salva_em", "DATETIME"),
+                ("em_espera", "INTEGER DEFAULT 0"),
+                ("data_em_espera", "DATETIME"),
             ]
             for nome, tipo in migracoes_embale:
-                if nome in {"foi_balanceado", "saldo_disponivel", "data_balanceamento"} and nome not in colunas_embale:
+                if nome in {"foi_balanceado", "saldo_disponivel", "data_balanceamento", "em_espera", "data_em_espera"} and nome not in colunas_embale:
                     conn.exec_driver_sql(f"ALTER TABLE itens_embale_fu ADD COLUMN {nome} {tipo}")
                     print(f"[DB] Coluna itens_embale_fu.{nome} criada")
 
@@ -2837,6 +2839,51 @@ async def balancear_item_embale(request: Request):
         db.close()
 
 
+async def marcar_em_espera_embale(request: Request):
+    """
+    POST /api/embaldes/{embale_id}/itens/{item_id}/em-espera
+    Marca/desmarca um item como "em espera" (bloqueado por fatores externos).
+    Body: {"em_espera": 1 ou 0}
+    Quando em espera, o item fica bloqueado para edição.
+    """
+    db = SessionLocal()
+    try:
+        embale_id = int(request.path_params.get("embale_id"))
+        item_id = int(request.path_params.get("item_id"))
+        data = await request.json()
+        em_espera = int(data.get("em_espera", 0))
+
+        embale = db.query(EmbaleFU).filter(EmbaleFU.id == embale_id).first()
+        if not embale:
+            return JSONResponse({"erro": "Inbound não encontrado"}, status_code=404)
+
+        item = next((i for i in embale.itens if i.id == item_id), None)
+        if not item:
+            return JSONResponse({"erro": "Item não encontrado neste inbound"}, status_code=404)
+
+        # Marcar/desmarcar em espera
+        item.em_espera = em_espera
+        if em_espera == 1:
+            item.data_em_espera = datetime.utcnow()
+        else:
+            item.data_em_espera = None
+
+        db.commit()
+
+        return JSONResponse({
+            "item_id": item.id,
+            "em_espera": item.em_espera,
+            "data_em_espera": item.data_em_espera.isoformat() if item.data_em_espera else None,
+            "mensagem": "Em espera" if em_espera == 1 else "Voltando à ativa"
+        })
+
+    except Exception as e:
+        db.rollback()
+        return JSONResponse({"erro": str(e)}, status_code=500)
+    finally:
+        db.close()
+
+
 async def encerrar_embale(request: Request):
     """
     POST /api/embaldes/{embale_id}/encerrar
@@ -3423,6 +3470,7 @@ routes = [
     Route("/api/embaldes/{embale_id}/itens/{item_id}/vincular", vincular_item_embale, methods=["POST"]),
     Route("/api/embaldes/{embale_id}/itens/{item_id}/quantidade-full", ajustar_quantidade_full_embale, methods=["POST"]),
     Route("/api/embaldes/{embale_id}/itens/{item_id}/balancear", balancear_item_embale, methods=["POST"]),
+    Route("/api/embaldes/{embale_id}/itens/{item_id}/em-espera", marcar_em_espera_embale, methods=["POST"]),
     Route("/api/embaldes/{embale_id}/encerrar", encerrar_embale, methods=["POST"]),
 ]
 
