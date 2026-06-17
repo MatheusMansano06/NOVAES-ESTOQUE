@@ -2022,6 +2022,7 @@ async def listar_embaldes(request: Request):
                     "qtd_items": len(e.itens),
                     "qtd_validados": sum(1 for i in e.itens if i.validado == 1),
                     "qtd_baixados": sum(1 for i in e.itens if _progresso_item_full(i)[1] >= _progresso_item_full(i)[0] and _progresso_item_full(i)[0] > 0),
+                    "qtd_em_espera": sum(1 for i in e.itens if (i.em_espera or 0) == 1),
                     "total_lido": sum(i.quantidade_separada or 0 for i in e.itens),
                     "revisao_salva_em": e.revisao_salva_em.isoformat() if e.revisao_salva_em else None,
                 }
@@ -2255,6 +2256,7 @@ def _resumo_revisao_salva_item(item):
         "vinculado": item.validado or 0,
         "foi_balanceado": item.foi_balanceado or 0,
         "saldo_disponivel": item.saldo_disponivel,
+        "em_espera": item.em_espera or 0,
     }
 
 
@@ -2362,6 +2364,7 @@ async def revisar_baixa_embale(request: Request):
                     "vinculado": item.validado or 0,
                     "foi_balanceado": item.foi_balanceado or 0,
                     "saldo_disponivel": item.saldo_disponivel,
+                    "em_espera": item.em_espera or 0,
                 })
                 db.add(item)
                 continue
@@ -2391,6 +2394,7 @@ async def revisar_baixa_embale(request: Request):
                     "vinculado": item.validado or 0,
                     "foi_balanceado": item.foi_balanceado or 0,
                     "saldo_disponivel": item.saldo_disponivel,
+                    "em_espera": item.em_espera or 0,
                 })
                 db.add(item)
                 continue

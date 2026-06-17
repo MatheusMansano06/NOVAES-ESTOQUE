@@ -58,6 +58,7 @@ interface ItemRevisao {
   vinculado?: number
   foi_balanceado?: number
   saldo_disponivel?: number | null
+  em_espera?: number
 }
 
 interface Revisao {
@@ -333,6 +334,12 @@ export function EmbaldesManager() {
         if (it.baixa_aplicada === 1) jaBaixados[it.item_id] = 1
       }
       setItensBaixados(jaBaixados)
+      // Recupera o estado "em espera" salvo no banco
+      const emEspera: Record<number, boolean> = {}
+      for (const it of resposta.data.itens || []) {
+        if (it.em_espera === 1) emEspera[it.item_id] = true
+      }
+      setItensEmEspera(emEspera)
     } catch (erro: any) {
       setMessage('Erro ao revisar: ' + (erro.response?.data?.erro || String(erro)))
       setRevisandoId(null)
@@ -1052,20 +1059,24 @@ export function EmbaldesManager() {
                                 )}
                               </div>
                               <div style={{ textAlign: 'center' }}>
-                                <input
-                                  type="checkbox"
-                                  checked={itensEmEspera[it.item_id] || false}
-                                  onChange={(e) => {
-                                    const novo = { ...itensEmEspera, [it.item_id]: e.target.checked }
-                                    setItensEmEspera(novo)
-                                    if (revisao) {
-                                      setMarcandoEmEspera(it.item_id)
-                                      api.post(`/embaldes/${revisao.embale_id}/itens/${it.item_id}/em-espera`, { em_espera: e.target.checked ? 1 : 0 }).finally(() => setMarcandoEmEspera(null))
-                                    }
-                                  }}
-                                  disabled={marcandoEmEspera === it.item_id}
-                                  style={{ cursor: 'pointer', width: '18px', height: '18px' }}
-                                />
+                                {jaBaixado ? (
+                                  <span style={{ color: '#ccc', fontSize: '0.8rem' }}>—</span>
+                                ) : (
+                                  <input
+                                    type="checkbox"
+                                    checked={itensEmEspera[it.item_id] || false}
+                                    onChange={(e) => {
+                                      const novo = { ...itensEmEspera, [it.item_id]: e.target.checked }
+                                      setItensEmEspera(novo)
+                                      if (revisao) {
+                                        setMarcandoEmEspera(it.item_id)
+                                        api.post(`/embaldes/${revisao.embale_id}/itens/${it.item_id}/em-espera`, { em_espera: e.target.checked ? 1 : 0 }).finally(() => setMarcandoEmEspera(null))
+                                      }
+                                    }}
+                                    disabled={marcandoEmEspera === it.item_id}
+                                    style={{ cursor: 'pointer', width: '18px', height: '18px' }}
+                                  />
+                                )}
                               </div>
                               <div style={{ textAlign: 'center', display: 'flex', gap: '0.3rem', justifyContent: 'center', flexWrap: 'wrap' }}>
                                 {itensEmEspera[it.item_id] ? (

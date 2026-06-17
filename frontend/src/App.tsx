@@ -164,10 +164,10 @@ function App() {
     total_baixado_full?: number
     qtd_items?: number
     qtd_baixados?: number
+    qtd_em_espera?: number
   }>>([])
   const [syncSaudavel, setSyncSaudavel] = useState(false)
   const [ultimaSincronizacao, setUltimaSincronizacao] = useState<string | null>(null)
-  const [inboundEmEspera, setInboundEmEspera] = useState(false)
 
   // Formata data ISO -> dd/mm/aaaa (pt-BR)
   const fmtData = (d: string | null) => {
@@ -185,9 +185,10 @@ function App() {
   const progressoBaixasInbound = (() => {
     const planejado = inboundsAtivos.reduce((acc, inbound) => acc + Number(inbound.total_planejado_full || 0), 0)
     const baixado = inboundsAtivos.reduce((acc, inbound) => acc + Number(inbound.total_baixado_full || 0), 0)
+    const emEspera = inboundsAtivos.reduce((acc, inbound) => acc + Number(inbound.qtd_em_espera || 0), 0)
     const restante = Math.max(0, planejado - baixado)
     const percentual = planejado > 0 ? Math.round((baixado / planejado) * 100) : 0
-    return { planejado, baixado, restante, percentual }
+    return { planejado, baixado, restante, percentual, emEspera }
   })()
 
   // Carregar notas ao iniciar
@@ -1452,6 +1453,11 @@ function App() {
                       <div style={{ color: '#ef6c00' }}>
                         Pendente: <strong>{progressoBaixasInbound.restante}</strong>
                       </div>
+                      {progressoBaixasInbound.emEspera > 0 && (
+                        <div style={{ color: '#8e24aa' }}>
+                          Em espera: <strong>{progressoBaixasInbound.emEspera}</strong>
+                        </div>
+                      )}
                     </div>
                   </div>
                 </div>
