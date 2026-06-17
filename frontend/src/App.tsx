@@ -597,6 +597,12 @@ function App() {
     }
   }
 
+  const abrirDetalheNotaPorClick = (e: React.MouseEvent, notaId: number) => {
+    e.preventDefault()
+    e.stopPropagation()
+    void abrirDetalheNota(notaId)
+  }
+
   const fecharDetalheNota = () => {
     setNotaDetalheAberta(null)
     setAbaDetalhe('detalhes')
@@ -1826,7 +1832,7 @@ function App() {
                       return (
                         <div
                           key={nota.id}
-                          onClick={() => !isSelected && abrirDetalheNota(nota.id)}
+                          onClick={(e) => { if (!isSelected) abrirDetalheNotaPorClick(e, nota.id) }}
                           style={{ display: 'flex', alignItems: 'center', gap: '1rem', padding: '0.85rem 1.1rem', cursor: 'pointer', background: isSelected ? '#e3f2fd' : '#fff', borderTop: idx > 0 ? '1px solid #eef2f4' : 'none', transition: 'background .15s', borderLeft: isSelected ? '4px solid #2196F3' : 'none' }}
                           onMouseEnter={(e) => { if (!isSelected) e.currentTarget.style.background = '#f5f9ff' }}
                           onMouseLeave={(e) => { if (!isSelected) e.currentTarget.style.background = '#fff' }}
@@ -1866,7 +1872,11 @@ function App() {
             {notaDetalheAberta && (
               <div
                 className="modal-overlay"
-                onClick={fecharDetalheNota}
+                onMouseDown={(e) => {
+                  if (e.target === e.currentTarget) {
+                    fecharDetalheNota()
+                  }
+                }}
                 style={{ padding: '20px' }}
               >
                 <div
