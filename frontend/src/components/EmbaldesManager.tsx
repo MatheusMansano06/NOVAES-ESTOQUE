@@ -880,20 +880,30 @@ export function EmbaldesManager() {
                   ) : revisao ? (
                     <div>
                       {/* Resumo */}
-                      <div style={{ display: 'flex', gap: '1rem', marginBottom: '1rem', flexWrap: 'wrap' }}>
-                        <div style={{ padding: '0.6rem 1rem', background: '#e3f2fd', borderRadius: '4px', fontSize: '0.85rem' }}>
-                          Total: <strong>{revisao.resumo.total}</strong>
-                        </div>
-                        <div style={{ padding: '0.6rem 1rem', background: '#e8f5e9', borderRadius: '4px', fontSize: '0.85rem' }}>
-                          Achados na Olist: <strong>{revisao.resumo.encontrados}</strong>
-                        </div>
-                        <div style={{ padding: '0.6rem 1rem', background: '#fff3e0', borderRadius: '4px', fontSize: '0.85rem' }}>
-                          Não achados: <strong>{revisao.resumo.nao_encontrados}</strong>
-                        </div>
-                        <div style={{ padding: '0.6rem 1rem', background: '#ffebee', borderRadius: '4px', fontSize: '0.85rem' }}>
-                          Com falta: <strong>{revisao.resumo.com_falta}</strong>
-                        </div>
-                      </div>
+                      {(() => {
+                        const qtdEmEspera = revisao.itens.filter((it) => itensEmEspera[it.item_id]).length
+                        return (
+                          <div style={{ display: 'flex', gap: '1rem', marginBottom: '1rem', flexWrap: 'wrap' }}>
+                            <div style={{ padding: '0.6rem 1rem', background: '#e3f2fd', borderRadius: '4px', fontSize: '0.85rem' }}>
+                              Total: <strong>{revisao.resumo.total}</strong>
+                            </div>
+                            <div style={{ padding: '0.6rem 1rem', background: '#e8f5e9', borderRadius: '4px', fontSize: '0.85rem' }}>
+                              Achados na Olist: <strong>{revisao.resumo.encontrados}</strong>
+                            </div>
+                            <div style={{ padding: '0.6rem 1rem', background: '#fff3e0', borderRadius: '4px', fontSize: '0.85rem' }}>
+                              Não achados: <strong>{revisao.resumo.nao_encontrados}</strong>
+                            </div>
+                            <div style={{ padding: '0.6rem 1rem', background: '#ffebee', borderRadius: '4px', fontSize: '0.85rem' }}>
+                              Com falta: <strong>{revisao.resumo.com_falta}</strong>
+                            </div>
+                            {qtdEmEspera > 0 && (
+                              <div style={{ padding: '0.6rem 1rem', background: '#f3e5f5', borderRadius: '4px', fontSize: '0.85rem' }}>
+                                Em espera: <strong>{qtdEmEspera}</strong>
+                              </div>
+                            )}
+                          </div>
+                        )
+                      })()}
 
                       <div style={{ fontSize: '0.85rem', color: '#666', marginBottom: '0.75rem', fontStyle: 'italic' }}>
                         A primeira leitura do inbound fica salva no banco. Ajuste "Vai pro FULL" quando precisar e use baixa/balanço sem revisar tudo de novo.
@@ -935,7 +945,7 @@ export function EmbaldesManager() {
                       })()}
 
                       {/* Tabela */}
-                      <div style={{ display: 'grid', gridTemplateColumns: '2.4fr 1fr 1.2fr 0.9fr 1.1fr 0.8fr 0.7fr 1.5fr', gap: '0.5rem', padding: '0.7rem 0.9rem', background: '#f5f5f5', borderRadius: '4px 4px 0 0', fontSize: '0.8rem', fontWeight: 'bold', color: '#555', textTransform: 'uppercase' }}>
+                      <div style={{ display: 'grid', gridTemplateColumns: '2.4fr 1fr 1.2fr 0.9fr 1.1fr 0.8fr 0.6fr 1.5fr', gap: '0.5rem', padding: '0.7rem 0.9rem', background: '#f5f5f5', borderRadius: '4px 4px 0 0', fontSize: '0.8rem', fontWeight: 'bold', color: '#555', textTransform: 'uppercase' }}>
                         <div>Produto / SKU</div>
                         <div style={{ textAlign: 'center' }}>Estoque Olist</div>
                         <div style={{ textAlign: 'center' }}>Vai pro FULL</div>
@@ -966,7 +976,7 @@ export function EmbaldesManager() {
                           return (
                             <div
                               key={it.item_id}
-                              style={{ display: 'grid', gridTemplateColumns: '2.4fr 1fr 1.2fr 0.9fr 1.1fr 0.8fr 0.7fr 1.5fr', gap: '0.5rem', padding: '0.8rem 0.9rem', background: jaBaixado ? '#eef7ee' : bg, borderBottom: '1px solid #f0f0f0', fontSize: '0.9rem', alignItems: 'center', opacity: itensEmEspera[it.item_id] ? 0.5 : (jaBaixado ? 0.8 : 1) }}
+                              style={{ display: 'grid', gridTemplateColumns: '2.4fr 1fr 1.2fr 0.9fr 1.1fr 0.8fr 0.6fr 1.5fr', gap: '0.5rem', padding: '0.8rem 0.9rem', background: jaBaixado ? '#eef7ee' : bg, borderBottom: '1px solid #f0f0f0', fontSize: '0.9rem', alignItems: 'center', opacity: itensEmEspera[it.item_id] ? 0.5 : (jaBaixado ? 0.8 : 1) }}
                             >
                               <div>
                                 <div style={{ fontWeight: 600, lineHeight: 1.3 }}>{it.titulo_anuncio}</div>
@@ -1003,7 +1013,8 @@ export function EmbaldesManager() {
                                       onChange={(e) => setQuantidadesFull({ ...quantidadesFull, [it.item_id]: e.target.value })}
                                       onBlur={() => salvarQuantidadeFull(it)}
                                       onKeyDown={(e) => { if (e.key === 'Enter') salvarQuantidadeFull(it) }}
-                                      style={{ width: '78px', padding: '0.32rem', borderRadius: '4px', border: '1px solid #bbb', textAlign: 'center', fontSize: '0.9rem', fontWeight: 700 }}
+                                      disabled={itensEmEspera[it.item_id]}
+                                      style={{ width: '78px', padding: '0.32rem', borderRadius: '4px', border: '1px solid #bbb', textAlign: 'center', fontSize: '0.9rem', fontWeight: 700, backgroundColor: itensEmEspera[it.item_id] ? '#f0f0f0' : '#fff', color: itensEmEspera[it.item_id] ? '#999' : '#000', cursor: itensEmEspera[it.item_id] ? 'not-allowed' : 'auto' }}
                                     />
                                     {salvandoQuantidadeId === it.item_id && (
                                       <span style={{ fontSize: '0.68rem', color: '#1976D2', fontWeight: 700 }}>salvando...</span>
@@ -1033,27 +1044,32 @@ export function EmbaldesManager() {
                                     max={it.estoque_atual || 0}
                                     value={declaracoes[it.item_id] ?? Math.round(it.estoque_atual || 0)}
                                     onChange={(e) => setDeclaracoes({ ...declaracoes, [it.item_id]: parseFloat(e.target.value) || 0 })}
-                                    style={{ width: '60px', padding: '0.3rem', borderRadius: '3px', border: '1px solid #ddd', textAlign: 'center', fontSize: '0.85rem' }}
+                                    disabled={itensEmEspera[it.item_id]}
+                                    style={{ width: '60px', padding: '0.3rem', borderRadius: '3px', border: '1px solid #ddd', textAlign: 'center', fontSize: '0.85rem', backgroundColor: itensEmEspera[it.item_id] ? '#f0f0f0' : '#fff', color: itensEmEspera[it.item_id] ? '#999' : '#000', cursor: itensEmEspera[it.item_id] ? 'not-allowed' : 'auto' }}
                                   />
                                 ) : (
                                   <span style={{ color: '#999', fontSize: '0.8rem' }}>—</span>
                                 )}
                               </div>
-                              <div style={{ textAlign: 'center', display: 'flex', gap: '0.3rem', justifyContent: 'center', flexWrap: 'wrap', alignItems: 'center' }}>
+                              <div style={{ textAlign: 'center' }}>
+                                <input
+                                  type="checkbox"
+                                  checked={itensEmEspera[it.item_id] || false}
+                                  onChange={(e) => {
+                                    const novo = { ...itensEmEspera, [it.item_id]: e.target.checked }
+                                    setItensEmEspera(novo)
+                                    if (revisao) {
+                                      setMarcandoEmEspera(it.item_id)
+                                      api.post(`/embaldes/${revisao.embale_id}/itens/${it.item_id}/em-espera`, { em_espera: e.target.checked ? 1 : 0 }).finally(() => setMarcandoEmEspera(null))
+                                    }
+                                  }}
+                                  disabled={marcandoEmEspera === it.item_id}
+                                  style={{ cursor: 'pointer', width: '18px', height: '18px' }}
+                                />
+                              </div>
+                              <div style={{ textAlign: 'center', display: 'flex', gap: '0.3rem', justifyContent: 'center', flexWrap: 'wrap' }}>
                                 {itensEmEspera[it.item_id] ? (
-                                  <button
-                                    onClick={() => {
-                                      const novo = { ...itensEmEspera, [it.item_id]: false }
-                                      setItensEmEspera(novo)
-                                      if (revisao) {
-                                        setMarcandoEmEspera(it.item_id)
-                                        api.post(`/embaldes/${revisao.embale_id}/itens/${it.item_id}/em-espera`, { em_espera: 0 }).finally(() => setMarcandoEmEspera(null))
-                                      }
-                                    }}
-                                    style={{ padding: '0.4rem 0.8rem', background: '#ff6f00', color: '#fff', border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '0.8rem', fontWeight: 'bold', whiteSpace: 'nowrap' }}
-                                  >
-                                    ⏸ Espera
-                                  </button>
+                                  <span style={{ color: '#999', fontWeight: 'bold', fontSize: '0.8rem' }}>Bloqueado</span>
                                 ) : jaBaixado ? (
                                   <span style={{ color: '#2e7d32', fontWeight: 'bold', fontSize: '0.8rem' }}>✓ Baixado</span>
                                 ) : naoAchado ? (
@@ -1065,20 +1081,6 @@ export function EmbaldesManager() {
                                   </button>
                                 ) : (
                                   <>
-                                    <button
-                                      onClick={() => {
-                                        const novo = { ...itensEmEspera, [it.item_id]: true }
-                                        setItensEmEspera(novo)
-                                        if (revisao) {
-                                          setMarcandoEmEspera(it.item_id)
-                                          api.post(`/embaldes/${revisao.embale_id}/itens/${it.item_id}/em-espera`, { em_espera: 1 }).finally(() => setMarcandoEmEspera(null))
-                                        }
-                                      }}
-                                      disabled={marcandoEmEspera === it.item_id}
-                                      style={{ padding: '0.3rem 0.6rem', background: '#fff', color: '#ff6f00', border: '1px solid #ff6f00', borderRadius: '4px', cursor: 'pointer', fontSize: '0.75rem', fontWeight: 'bold' }}
-                                    >
-                                      ⏸
-                                    </button>
                                     {podeBalancear && (
                                       <button
                                         onClick={() => abrirBalanceamento(it)}
