@@ -146,12 +146,8 @@ export function AnunciosML({ onVoltar }: Props) {
   const labelStatus = (s: string) => s === 'active' ? 'Ativo' : s === 'paused' ? 'Pausado' : s === 'closed' ? 'Finalizado' : s
 
   return (
-    <div className="app" style={{ background: '#ffffff' }}>
-      <header className="header"><div className="container"><h1>NVS TECH</h1><p>Anuncios do Mercado Livre</p></div></header>
-
-      <main className="container main-content">
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem', flexWrap: 'wrap', gap: '1rem' }}>
-          <button onClick={onVoltar} style={{ padding: '0.75rem 1.5rem', background: '#f0f0f0', border: '1px solid #ddd', borderRadius: '4px', cursor: 'pointer', fontWeight: 600 }}>Voltar</button>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+        <button onClick={onVoltar} style={{ padding: '0.75rem 1.5rem', background: '#f0f0f0', border: '1px solid #ddd', borderRadius: '4px', cursor: 'pointer', fontWeight: 600, width: 'fit-content' }}>Voltar</button>
           <span style={{ fontSize: '0.85rem', padding: '0.3rem 0.8rem', borderRadius: '20px', fontWeight: 600,
             background: statusConexao === 'ok' ? '#e8f5e9' : statusConexao === 'erro' ? '#ffebee' : '#f5f5f5',
             color: statusConexao === 'ok' ? '#2e7d32' : statusConexao === 'erro' ? '#c62828' : '#999' }}>
@@ -270,9 +266,8 @@ export function AnunciosML({ onVoltar }: Props) {
               style={{ padding: '0.6rem 1.2rem', background: paginaAtual >= totalPaginas ? '#f5f5f5' : '#fff', border: '1px solid #ddd', borderRadius: '6px', cursor: paginaAtual >= totalPaginas ? 'not-allowed' : 'pointer', fontWeight: 600 }}>Proxima</button>
           </div>
         )}
-      </main>
 
-      {precificando && (
+        {precificando && (
         <Precificador
           titulo={precificando.titulo}
           sku={precificando.sku}

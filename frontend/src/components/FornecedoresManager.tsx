@@ -419,11 +419,8 @@ export function FornecedoresManager({ onVoltar }: FornecedoresManagerProps) {
   }
 
   return (
-    <div className="app" style={{ background: '#ffffff' }}>
-      <header className="header"><div className="container"><h1>NVS TECH</h1><p>Sistema de Gestão Inteligente de Estoque para Operações de Logística e Marketplace</p></div></header>
-
-      <main className="container main-content">
-        <button onClick={onVoltar} style={{ marginBottom: '2rem', padding: '0.75rem 1.5rem', background: '#f0f0f0', border: '1px solid #ddd', borderRadius: '4px', cursor: 'pointer', fontWeight: 600 }}>← Voltar</button>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+        <button onClick={onVoltar} style={{ marginBottom: '2rem', padding: '0.75rem 1.5rem', background: '#f0f0f0', border: '1px solid #ddd', borderRadius: '4px', cursor: 'pointer', fontWeight: 600, width: 'fit-content' }}>← Voltar</button>
 
         {/* Tabs */}
         <div style={{ display: 'flex', gap: '1rem', marginBottom: '2rem', borderBottom: '2px solid #e0e0e0' }}>
