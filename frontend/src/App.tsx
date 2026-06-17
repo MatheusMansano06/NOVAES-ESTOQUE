@@ -597,6 +597,12 @@ function App() {
     }
   }
 
+  const fecharDetalheNota = () => {
+    setNotaDetalheAberta(null)
+    setAbaDetalhe('detalhes')
+    setItensSelecionadosMultiplos(new Set())
+  }
+
   // Notas filtradas pela busca (nº, nome, CNPJ) e data
   const notasFiltradas = notas.filter((nota) => {
     const termo = filtroBusca.trim().toLowerCase()
@@ -1856,6 +1862,237 @@ function App() {
                 )}
               </div>
             </div>
+
+            {notaDetalheAberta && (
+              <div
+                className="modal-overlay"
+                onClick={fecharDetalheNota}
+                style={{ padding: '1.5rem' }}
+              >
+                <div
+                  className="modal-content"
+                  onClick={(e) => e.stopPropagation()}
+                  style={{
+                    width: 'min(1180px, 100%)',
+                    maxHeight: '90vh',
+                    overflowY: 'auto',
+                    padding: '0',
+                  }}
+                >
+                  <div className="modal-header" style={{ padding: '1.25rem 1.5rem 1rem' }}>
+                    <div>
+                      <h2 style={{ margin: 0 }}>NF #{notaDetalheAberta.numero_nf}</h2>
+                      <p style={{ margin: '0.35rem 0 0 0', color: '#666', fontSize: '0.92rem' }}>
+                        {notaDetalheAberta.fornecedor} • Série {notaDetalheAberta.serie || '—'}
+                      </p>
+                    </div>
+                    <button className="modal-close" onClick={fecharDetalheNota}>
+                      ×
+                    </button>
+                  </div>
+
+                  <div style={{ padding: '0 1.5rem 1.5rem' }}>
+                    <div style={{ display: 'flex', gap: '0.75rem', marginBottom: '1.25rem', flexWrap: 'wrap' }}>
+                      {[
+                        { key: 'detalhes', label: 'Detalhes' },
+                        { key: 'conferencia', label: 'Conferência' },
+                        { key: 'divergencias', label: `Divergências (${divergenciasDaNota(notaDetalheAberta).length})` },
+                      ].map((tab) => {
+                        const ativa = abaDetalhe === tab.key
+                        return (
+                          <button
+                            key={tab.key}
+                            onClick={() => setAbaDetalhe(tab.key as typeof abaDetalhe)}
+                            style={{
+                              padding: '0.65rem 1rem',
+                              borderRadius: '999px',
+                              border: ativa ? 'none' : '1px solid #d0d7de',
+                              background: ativa ? '#1976D2' : '#fff',
+                              color: ativa ? '#fff' : '#455a64',
+                              fontWeight: 700,
+                              cursor: 'pointer',
+                            }}
+                          >
+                            {tab.label}
+                          </button>
+                        )
+                      })}
+                    </div>
+
+                    {abaDetalhe === 'detalhes' && (
+                      <div style={{ display: 'grid', gap: '1rem' }}>
+                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '1rem' }}>
+                          <div style={{ background: '#f7f9fa', borderRadius: '10px', padding: '1rem' }}>
+                            <div style={{ fontSize: '0.78rem', color: '#78909c', fontWeight: 700, textTransform: 'uppercase' }}>Fornecedor</div>
+                            <div style={{ marginTop: '0.35rem', color: '#1a1a1a', fontWeight: 700 }}>{notaDetalheAberta.fornecedor}</div>
+                          </div>
+                          <div style={{ background: '#f7f9fa', borderRadius: '10px', padding: '1rem' }}>
+                            <div style={{ fontSize: '0.78rem', color: '#78909c', fontWeight: 700, textTransform: 'uppercase' }}>Emissão</div>
+                            <div style={{ marginTop: '0.35rem', color: '#1a1a1a', fontWeight: 700 }}>
+                              {notaDetalheAberta.data_emissao ? new Date(notaDetalheAberta.data_emissao).toLocaleDateString('pt-BR') : '—'}
+                            </div>
+                          </div>
+                          <div style={{ background: '#f7f9fa', borderRadius: '10px', padding: '1rem' }}>
+                            <div style={{ fontSize: '0.78rem', color: '#78909c', fontWeight: 700, textTransform: 'uppercase' }}>Itens</div>
+                            <div style={{ marginTop: '0.35rem', color: '#1a1a1a', fontWeight: 700 }}>{notaDetalheAberta.itens?.length || 0}</div>
+                          </div>
+                          <div style={{ background: '#f7f9fa', borderRadius: '10px', padding: '1rem' }}>
+                            <div style={{ fontSize: '0.78rem', color: '#78909c', fontWeight: 700, textTransform: 'uppercase' }}>Valor total</div>
+                            <div style={{ marginTop: '0.35rem', color: '#1a1a1a', fontWeight: 700 }}>
+                              R$ {((notaDetalheAberta.itens || []).reduce((sum, item) => sum + (item.quantidade_nf * item.preco_unitario), 0)).toFixed(2)}
+                            </div>
+                          </div>
+                        </div>
+
+                        <div style={{ border: '1px solid #e0e0e0', borderRadius: '10px', overflow: 'hidden' }}>
+                          <div style={{ display: 'grid', gridTemplateColumns: 'minmax(240px, 1fr) 110px 130px 140px', gap: '1rem', padding: '0.9rem 1rem', background: '#f7f9fa', fontSize: '0.78rem', fontWeight: 700, color: '#78909c', textTransform: 'uppercase' }}>
+                            <div>Produto</div>
+                            <div style={{ textAlign: 'center' }}>Qtd</div>
+                            <div style={{ textAlign: 'right' }}>Preço</div>
+                            <div style={{ textAlign: 'right' }}>Subtotal</div>
+                          </div>
+                          {(notaDetalheAberta.itens || []).map((item, idx) => (
+                            <div key={item.id} style={{ display: 'grid', gridTemplateColumns: 'minmax(240px, 1fr) 110px 130px 140px', gap: '1rem', padding: '0.95rem 1rem', borderTop: idx > 0 ? '1px solid #eef2f4' : 'none', alignItems: 'center' }}>
+                              <div>
+                                <div style={{ fontWeight: 700, color: '#1a1a1a' }}>{item.descricao}</div>
+                                <div style={{ color: '#78909c', fontSize: '0.82rem' }}>Código: {item.codigo_produto || '—'}</div>
+                              </div>
+                              <div style={{ textAlign: 'center', fontWeight: 700, color: '#1a1a1a' }}>{Math.round(item.quantidade_nf)}</div>
+                              <div style={{ textAlign: 'right', color: '#455a64' }}>R$ {item.preco_unitario.toFixed(2)}</div>
+                              <div style={{ textAlign: 'right', fontWeight: 700, color: '#1a1a1a' }}>R$ {(item.quantidade_nf * item.preco_unitario).toFixed(2)}</div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {abaDetalhe === 'conferencia' && (
+                      <div style={{ display: 'grid', gap: '1rem' }}>
+                        <div style={{ background: '#f7f9fa', border: '1px solid #e0e0e0', borderRadius: '10px', padding: '1rem' }}>
+                          <div style={{ fontWeight: 700, color: '#1a1a1a', marginBottom: '0.6rem' }}>Progresso da nota</div>
+                          <BarraProgresso itens={notaDetalheAberta.itens} />
+                        </div>
+
+                        <div style={{ display: 'flex', justifyContent: 'space-between', gap: '1rem', alignItems: 'center', flexWrap: 'wrap' }}>
+                          <div style={{ color: '#607d8b', fontSize: '0.88rem' }}>
+                            Clique em `Conferir` para abrir o fluxo antigo de conferência do item.
+                          </div>
+                          <button
+                            onClick={enviarMultiplosEmMassa}
+                            disabled={itensSelecionadosMultiplos.size === 0}
+                            style={{
+                              padding: '0.65rem 1rem',
+                              background: itensSelecionadosMultiplos.size === 0 ? '#cfd8dc' : '#1976D2',
+                              color: '#fff',
+                              border: 'none',
+                              borderRadius: '8px',
+                              cursor: itensSelecionadosMultiplos.size === 0 ? 'not-allowed' : 'pointer',
+                              fontWeight: 700,
+                            }}
+                          >
+                            Enviar selecionados em massa
+                          </button>
+                        </div>
+
+                        <div style={{ border: '1px solid #e0e0e0', borderRadius: '10px', overflow: 'hidden' }}>
+                          <div style={{ display: 'grid', gridTemplateColumns: '42px minmax(240px, 1fr) 90px 120px 160px', gap: '1rem', padding: '0.9rem 1rem', background: '#f7f9fa', fontSize: '0.78rem', fontWeight: 700, color: '#78909c', textTransform: 'uppercase', alignItems: 'center' }}>
+                            <div />
+                            <div>Produto</div>
+                            <div style={{ textAlign: 'center' }}>Qtd</div>
+                            <div style={{ textAlign: 'center' }}>Status</div>
+                            <div style={{ textAlign: 'right' }}>Ação</div>
+                          </div>
+                          {(notaDetalheAberta.itens || []).map((item, idx) => {
+                            const statusItem = item.divergencia ? 'Divergência' : item.quantidade_confirmada != null ? 'Conferido' : 'Pendente'
+                            const statusColor = item.divergencia ? '#c62828' : item.quantidade_confirmada != null ? '#2e7d32' : '#ef6c00'
+                            return (
+                              <div key={item.id} style={{ display: 'grid', gridTemplateColumns: '42px minmax(240px, 1fr) 90px 120px 160px', gap: '1rem', padding: '0.95rem 1rem', borderTop: idx > 0 ? '1px solid #eef2f4' : 'none', alignItems: 'center' }}>
+                                <div style={{ display: 'flex', justifyContent: 'center' }}>
+                                  <input
+                                    type="checkbox"
+                                    checked={itensSelecionadosMultiplos.has(item.id)}
+                                    onChange={() => toggleSelecaoMultipla(item.id)}
+                                    style={{ width: '18px', height: '18px', cursor: 'pointer' }}
+                                  />
+                                </div>
+                                <div>
+                                  <div style={{ fontWeight: 700, color: '#1a1a1a' }}>{item.descricao}</div>
+                                  <div style={{ color: '#78909c', fontSize: '0.82rem' }}>Código: {item.codigo_produto || '—'}</div>
+                                </div>
+                                <div style={{ textAlign: 'center', fontWeight: 700 }}>{Math.round(item.quantidade_nf)}</div>
+                                <div style={{ textAlign: 'center', color: statusColor, fontWeight: 700, fontSize: '0.82rem' }}>{statusItem}</div>
+                                <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                                  <button
+                                    onClick={() => conferirProduto(item)}
+                                    style={{ padding: '0.55rem 0.9rem', background: '#1976D2', color: '#fff', border: 'none', borderRadius: '8px', cursor: 'pointer', fontWeight: 700 }}
+                                  >
+                                    Conferir
+                                  </button>
+                                </div>
+                              </div>
+                            )
+                          })}
+                        </div>
+                      </div>
+                    )}
+
+                    {abaDetalhe === 'divergencias' && (
+                      <div style={{ display: 'grid', gap: '1rem' }}>
+                        {divergenciasDaNota(notaDetalheAberta).length === 0 ? (
+                          <div style={{ textAlign: 'center', color: '#90a4ae', padding: '2rem 1rem', border: '1px dashed #cfd8dc', borderRadius: '10px' }}>
+                            Nenhuma divergência encontrada para esta nota.
+                          </div>
+                        ) : (
+                          divergenciasDaNota(notaDetalheAberta).map((div) => (
+                            <div key={div.item_id} style={{ padding: '1.25rem', border: '1px solid #ffccd2', borderRadius: '10px', background: '#fff7f8' }}>
+                              <div style={{ display: 'grid', gridTemplateColumns: '1fr auto', gap: '1rem', marginBottom: '0.9rem' }}>
+                                <div>
+                                  <div style={{ fontWeight: 700, color: '#1a1a1a' }}>{div.produto}</div>
+                                  <div style={{ color: '#78909c', fontSize: '0.84rem' }}>Código: {div.codigo}</div>
+                                </div>
+                                <div style={{ color: '#c62828', fontWeight: 700, fontSize: '0.82rem', textTransform: 'uppercase' }}>
+                                  {div.tipo_divergencia}
+                                </div>
+                              </div>
+                              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '0.75rem', marginBottom: '1rem' }}>
+                                <div style={{ background: '#fff', borderRadius: '8px', padding: '0.85rem' }}>
+                                  <div style={{ color: '#90a4ae', fontSize: '0.75rem', fontWeight: 700, textTransform: 'uppercase' }}>NF</div>
+                                  <div style={{ marginTop: '0.3rem', fontWeight: 700 }}>{div.quantidade_nf} un</div>
+                                </div>
+                                <div style={{ background: '#fff', borderRadius: '8px', padding: '0.85rem' }}>
+                                  <div style={{ color: '#90a4ae', fontSize: '0.75rem', fontWeight: 700, textTransform: 'uppercase' }}>Recebido</div>
+                                  <div style={{ marginTop: '0.3rem', fontWeight: 700 }}>{div.quantidade_confirmada} un</div>
+                                </div>
+                                <div style={{ background: '#fff', borderRadius: '8px', padding: '0.85rem' }}>
+                                  <div style={{ color: '#90a4ae', fontSize: '0.75rem', fontWeight: 700, textTransform: 'uppercase' }}>Diferença</div>
+                                  <div style={{ marginTop: '0.3rem', fontWeight: 700, color: '#c62828' }}>{div.quantidade_nf - div.quantidade_confirmada} un</div>
+                                </div>
+                              </div>
+                              <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
+                                <button onClick={() => vincularDivergenciaOlist(div)} style={{ padding: '0.7rem 1rem', background: '#1976D2', color: '#fff', border: 'none', borderRadius: '8px', cursor: 'pointer', fontWeight: 700 }}>Vincular na Olist</button>
+                                <button onClick={() => resolverDivergenciaItem(div.item_id)} style={{ padding: '0.7rem 1rem', background: '#2e7d32', color: '#fff', border: 'none', borderRadius: '8px', cursor: 'pointer', fontWeight: 700 }}>Marcar como resolvida</button>
+                                <button onClick={() => deletarDivergenciaItem(div.item_id)} style={{ padding: '0.7rem 1rem', background: '#fff', color: '#c62828', border: '1px solid #ef9a9a', borderRadius: '8px', cursor: 'pointer', fontWeight: 700 }}>Deletar</button>
+                              </div>
+                            </div>
+                          ))
+                        )}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {produtoSelecionado && (
+              <ModalDetalhesNota
+                isOpen={modalOpen}
+                onClose={() => setModalOpen(false)}
+                produto={produtoSelecionado}
+                notaNota={notaDetalheAberta}
+                onNaoConfirmado={(qtd) => irParaOlistSubirEstoque(qtd)}
+                onDivergenciaConfirmada={(qtd) => irParaOlistSubirEstoque(qtd)}
+              />
+            )}
           </div>
     )
   }
