@@ -615,7 +615,6 @@ export function FornecedoresManager({ onVoltar }: FornecedoresManagerProps) {
             )}
           </div>
         )}
-      </main>
 
       {/* MODAL PRODUTOS DO FORNECEDOR */}
       {showModal && (
