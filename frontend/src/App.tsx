@@ -67,7 +67,7 @@ interface ProdutoEstoque {
   }>
 }
 
-type Pagina = 'inicial' | 'conferencia' | 'produtos_nota' | 'relacionamento_produto' | 'fornecedores' | 'embaldes' | 'anuncios'
+type Pagina = 'bemvindo' | 'inicial' | 'conferencia' | 'produtos_nota' | 'relacionamento_produto' | 'fornecedores' | 'embaldes' | 'anuncios'
 
 interface Divergencia {
   item_id: number
@@ -84,7 +84,7 @@ interface Divergencia {
 
 function App() {
   // Estados de navegação
-  const [pagina, setPagina] = useState<Pagina>('inicial')
+  const [pagina, setPagina] = useState<Pagina>('bemvindo')
   const [notaSelecionada, setNotaSelecionada] = useState<NotaFiscal | null>(null)
   const [produtosNota, setProdutosNota] = useState<ItemNota[]>([])
 
@@ -1250,6 +1250,134 @@ function App() {
   }
 
   // ===== PÁGINA INICIAL =====
+  // ===== TELA DE BOAS-VINDAS (sem login) =====
+  if (pagina === 'bemvindo') {
+    const features = [
+      { icon: '📄', texto: 'Notas fiscais organizadas' },
+      { icon: '🔄', texto: 'Anúncios e estoque sincronizados' },
+      { icon: '📦', texto: 'Inbound FULL com menos erro operacional' },
+    ]
+    return (
+      <div style={{
+        position: 'relative',
+        zIndex: 1,
+        minHeight: '100vh',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        background: 'linear-gradient(135deg, #0a1a36 0%, #0d2657 100%)',
+        padding: '1.5rem',
+        fontFamily: 'inherit'
+      }}>
+        <div style={{
+          display: 'grid',
+          gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)',
+          width: '100%',
+          maxWidth: '960px',
+          minHeight: '560px',
+          borderRadius: '18px',
+          overflow: 'hidden',
+          boxShadow: '0 30px 80px rgba(0,0,0,0.45)',
+          background: '#fff'
+        }}>
+          {/* Painel esquerdo (azul) */}
+          <div style={{
+            position: 'relative',
+            background: 'linear-gradient(160deg, #0b2050 0%, #08326b 100%)',
+            color: '#fff',
+            padding: '2.5rem 2.25rem',
+            display: 'flex',
+            flexDirection: 'column',
+            justifyContent: 'space-between'
+          }}>
+            <div>
+              {/* Logo */}
+              <div style={{ marginBottom: '2.5rem', lineHeight: 1 }}>
+                <div style={{ fontSize: '2.6rem', fontWeight: 900, letterSpacing: '0.02em' }}>
+                  NV<span style={{ color: '#ffc629' }}>S</span>
+                </div>
+                <div style={{ fontSize: '0.85rem', fontWeight: 700, letterSpacing: '0.55em', marginTop: '0.15rem', opacity: 0.9 }}>
+                  TECH
+                </div>
+              </div>
+
+              <h1 style={{ fontSize: '1.9rem', fontWeight: 800, margin: '0 0 0.75rem 0' }}>
+                Bem-vindo de volta!
+              </h1>
+              <p style={{ fontSize: '0.98rem', lineHeight: 1.5, opacity: 0.85, margin: '0 0 2rem 0', maxWidth: '320px' }}>
+                Entre na sua conta e gerencie sua operação de marketplace.
+              </p>
+
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '1.1rem' }}>
+                {features.map((f) => (
+                  <div key={f.texto} style={{ display: 'flex', alignItems: 'center', gap: '0.85rem' }}>
+                    <div style={{
+                      width: 38, height: 38, borderRadius: '10px',
+                      background: 'rgba(255,255,255,0.1)',
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      fontSize: '1.1rem', flexShrink: 0
+                    }}>
+                      {f.icon}
+                    </div>
+                    <span style={{ fontSize: '0.95rem', opacity: 0.95 }}>{f.texto}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div style={{ fontSize: '0.75rem', opacity: 0.6, marginTop: '2rem' }}>
+              © 2026 NVS TECH. Todos os direitos reservados.
+            </div>
+          </div>
+
+          {/* Painel direito (boas-vindas + entrar, sem login) */}
+          <div style={{
+            padding: '3rem 2.75rem',
+            display: 'flex',
+            flexDirection: 'column',
+            justifyContent: 'center',
+            gap: '1.5rem'
+          }}>
+            <div>
+              <h2 style={{ fontSize: '1.6rem', fontWeight: 800, color: '#0b2050', margin: '0 0 0.6rem 0' }}>
+                Acessar plataforma
+              </h2>
+              <p style={{ fontSize: '0.95rem', color: '#667085', lineHeight: 1.5, margin: 0 }}>
+                Tudo pronto para você gerenciar suas notas, estoque e inbound. É só entrar.
+              </p>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => setPagina('inicial')}
+              style={{
+                width: '100%',
+                padding: '1rem',
+                background: 'linear-gradient(135deg, #1f6fff 0%, #1657d6 100%)',
+                color: '#fff',
+                border: 'none',
+                borderRadius: '10px',
+                fontSize: '1.05rem',
+                fontWeight: 800,
+                cursor: 'pointer',
+                boxShadow: '0 12px 26px rgba(31, 111, 255, 0.35)',
+                transition: 'transform 0.12s ease, box-shadow 0.12s ease'
+              }}
+              onMouseEnter={(e) => { const el = e.currentTarget; el.style.transform = 'translateY(-1px)'; el.style.boxShadow = '0 16px 32px rgba(31, 111, 255, 0.42)' }}
+              onMouseLeave={(e) => { const el = e.currentTarget; el.style.transform = 'none'; el.style.boxShadow = '0 12px 26px rgba(31, 111, 255, 0.35)' }}
+            >
+              Entrar
+            </button>
+
+            <div style={{ textAlign: 'center', fontSize: '0.85rem', color: '#98a2b3' }}>
+              Precisa de ajuda? <span style={{ color: '#1f6fff', fontWeight: 600 }}>Fale com o suporte</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
   if (pagina === 'inicial') {
     return (
       <div className="app">
