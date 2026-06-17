@@ -167,6 +167,7 @@ function App() {
   }>>([])
   const [syncSaudavel, setSyncSaudavel] = useState(false)
   const [ultimaSincronizacao, setUltimaSincronizacao] = useState<string | null>(null)
+  const [inboundEmEspera, setInboundEmEspera] = useState(false)
 
   // Formata data ISO -> dd/mm/aaaa (pt-BR)
   const fmtData = (d: string | null) => {
@@ -1495,7 +1496,7 @@ function App() {
                     )}
                   </div>
 
-                  {false && inboundsAtivos.length > 0 && progressoBaixasInbound.planejado > 0 && (
+                  {inboundsAtivos.length > 0 && progressoBaixasInbound.planejado > 0 && (
                     <div style={{
                       border: '2px solid #90caf9',
                       borderRadius: '12px',
@@ -1503,10 +1504,21 @@ function App() {
                       background: '#f7fbff',
                       boxShadow: '0 10px 24px rgba(25, 118, 210, 0.08)'
                     }}>
-                      <div style={{ color: '#1565c0', fontWeight: 800, fontSize: '0.78rem', letterSpacing: '0.04em', textTransform: 'uppercase', marginBottom: '0.75rem' }}>
-                        Progresso das baixas do inbound
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem' }}>
+                        <div style={{ color: '#1565c0', fontWeight: 800, fontSize: '0.78rem', letterSpacing: '0.04em', textTransform: 'uppercase' }}>
+                          Progresso das baixas do inbound
+                        </div>
+                        <label style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', cursor: 'pointer', fontSize: '0.78rem', fontWeight: 600, color: '#1565c0' }}>
+                          <input
+                            type="checkbox"
+                            checked={inboundEmEspera}
+                            onChange={(e) => setInboundEmEspera(e.target.checked)}
+                            style={{ cursor: 'pointer' }}
+                          />
+                          Em espera
+                        </label>
                       </div>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', opacity: inboundEmEspera ? 0.6 : 1 }}>
                         <svg width="112" height="112" viewBox="0 0 42 42" aria-label="Gráfico de pizza das baixas do inbound">
                           <circle cx="21" cy="21" r="15.915" fill="transparent" stroke="#e3f2fd" strokeWidth="7" />
                           <circle
@@ -1514,26 +1526,35 @@ function App() {
                             cy="21"
                             r="15.915"
                             fill="transparent"
-                            stroke="#1976d2"
+                            stroke={inboundEmEspera ? '#ffc107' : '#1976d2'}
                             strokeWidth="7"
                             strokeDasharray={`${progressoBaixasInbound.percentual} ${100 - progressoBaixasInbound.percentual}`}
                             strokeLinecap="round"
                             transform="rotate(-90 21 21)"
                           />
-                          <text x="21" y="22.5" textAnchor="middle" fontSize="7" fontWeight="700" fill="#0d47a1">
-                            {progressoBaixasInbound.percentual}%
+                          <text x="21" y="22.5" textAnchor="middle" fontSize="7" fontWeight="700" fill={inboundEmEspera ? '#ff6f00' : '#0d47a1'}>
+                            {inboundEmEspera ? '⏸' : `${progressoBaixasInbound.percentual}%`}
                           </text>
                         </svg>
                         <div style={{ display: 'grid', gap: '0.35rem', fontSize: '0.84rem' }}>
-                          <div style={{ color: '#0d47a1', fontWeight: 700 }}>
-                            {progressoBaixasInbound.baixado} de {progressoBaixasInbound.planejado} un
-                          </div>
-                          <div style={{ color: '#2e7d32' }}>
-                            Realizado: <strong>{progressoBaixasInbound.baixado}</strong>
-                          </div>
-                          <div style={{ color: '#ef6c00' }}>
-                            Pendente: <strong>{progressoBaixasInbound.restante}</strong>
-                          </div>
+                          {inboundEmEspera ? (
+                            <div style={{ color: '#ff6f00', fontWeight: 700, fontSize: '0.9rem' }}>
+                              ⏸ EM ESPERA<br />
+                              <span style={{ fontSize: '0.75rem', fontWeight: 400, color: '#666' }}>Produtos sem movimentação<br />por fatores externos</span>
+                            </div>
+                          ) : (
+                            <>
+                              <div style={{ color: '#0d47a1', fontWeight: 700 }}>
+                                {progressoBaixasInbound.baixado} de {progressoBaixasInbound.planejado} un
+                              </div>
+                              <div style={{ color: '#2e7d32' }}>
+                                Realizado: <strong>{progressoBaixasInbound.baixado}</strong>
+                              </div>
+                              <div style={{ color: '#ef6c00' }}>
+                                Pendente: <strong>{progressoBaixasInbound.restante}</strong>
+                              </div>
+                            </>
+                          )}
                         </div>
                       </div>
                     </div>
