@@ -1297,17 +1297,27 @@ function App() {
             pointerEvents: 'none'
           }} />
 
+          {/* Logo (bolinha NVS TECH) — topo */}
           <div style={{ position: 'relative', zIndex: 1 }}>
-            {/* Logo */}
-            <div style={{ marginBottom: '3rem', lineHeight: 1 }}>
-              <div style={{ fontSize: '3rem', fontWeight: 900, letterSpacing: '0.02em' }}>
-                NV<span style={{ color: '#ffc629' }}>S</span>
-              </div>
-              <div style={{ fontSize: '0.95rem', fontWeight: 700, letterSpacing: '0.6em', marginTop: '0.2rem', opacity: 0.9 }}>
-                TECH
-              </div>
-            </div>
+            <div style={{
+              width: 104,
+              height: 104,
+              borderRadius: '50%',
+              background: "#ffffff url('/assets/nvs-tech-logo.jpeg') center / 82% auto no-repeat",
+              border: '3px solid rgba(255, 196, 0, 0.9)',
+              boxShadow: '0 14px 32px rgba(0, 0, 0, 0.25)'
+            }} />
+          </div>
 
+          {/* Conteúdo central — centralizado na vertical */}
+          <div style={{
+            position: 'relative',
+            zIndex: 1,
+            flex: 1,
+            display: 'flex',
+            flexDirection: 'column',
+            justifyContent: 'center'
+          }}>
             <h1 style={{ fontSize: '2.1rem', fontWeight: 800, margin: '0 0 0.85rem 0' }}>
               Bem-vindo de volta!
             </h1>
@@ -1332,7 +1342,7 @@ function App() {
             </div>
           </div>
 
-          <div style={{ position: 'relative', zIndex: 1, fontSize: '0.78rem', opacity: 0.6, marginTop: '2.5rem' }}>
+          <div style={{ position: 'relative', zIndex: 1, fontSize: '0.78rem', opacity: 0.6 }}>
             © 2026 NVS TECH. Todos os direitos reservados.
           </div>
         </div>
