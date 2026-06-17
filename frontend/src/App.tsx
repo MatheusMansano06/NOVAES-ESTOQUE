@@ -68,7 +68,7 @@ interface ProdutoEstoque {
   }>
 }
 
-type Pagina = 'bemvindo' | 'inicial' | 'conferencia' | 'produtos_nota' | 'relacionamento_produto' | 'fornecedores' | 'embaldes' | 'anuncios' | 'notas-fiscais'
+type Pagina = 'bemvindo' | 'inicial' | 'conferencia' | 'produtos_nota' | 'relacionamento_produto' | 'fornecedores' | 'embaldes' | 'anuncios' | 'notas-fiscais' | 'divergencias'
 
 interface Divergencia {
   item_id: number
@@ -1313,7 +1313,6 @@ function App() {
       items: [
         { key: 'dashboard', label: 'Dashboard', icon: 'dashboard', active: pagina === 'inicial', onClick: () => setPagina('inicial') },
         { key: 'notas', label: 'Notas fiscais', icon: 'receipt', badge: notas.length, active: pagina === 'notas-fiscais', onClick: () => setPagina('notas-fiscais') },
-        { key: 'estoque', label: 'Estoque', icon: 'box', badge: estoque.length, active: pagina === 'inicial', onClick: () => setPagina('inicial') },
         { key: 'fornecedores', label: 'Fornecedores', icon: 'users', active: pagina === 'fornecedores', onClick: () => setPagina('fornecedores') },
       ],
     },
@@ -1322,7 +1321,7 @@ function App() {
       items: [
         { key: 'anuncios', label: 'Anuncios ML', icon: 'megaphone', active: pagina === 'anuncios', onClick: () => setPagina('anuncios') },
         { key: 'inbound', label: 'Inbound FULL', icon: 'truck', active: pagina === 'embaldes', badge: inboundsAtivos.length, onClick: () => setPagina('embaldes') },
-        { key: 'divergencias', label: 'Divergencias', icon: 'warning', badge: divergencias.length, active: pagina === 'inicial', onClick: () => setPagina('inicial') },
+        { key: 'divergencias', label: 'Divergencias', icon: 'warning', badge: divergencias.length, active: pagina === 'divergencias', onClick: () => setPagina('divergencias') },
       ],
     },
   ]
@@ -2129,6 +2128,68 @@ function App() {
       'Painel Mercado Livre',
       'Acompanhe anuncios, estoque, imagens, precificacao e dimensoes.',
       <AnunciosML onVoltar={voltarParaInicial} />
+    )
+  }
+
+  // ===== PÁGINA DE DIVERGÊNCIAS =====
+  if (pagina === 'divergencias') {
+    return renderComShell(
+      'Divergências',
+      'Produtos com divergências entre nota fiscal e estoque recebido',
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+        <button onClick={voltarParaInicial} style={{ marginBottom: '1rem', padding: '0.75rem 1.5rem', background: '#f0f0f0', border: '1px solid #ddd', borderRadius: '4px', cursor: 'pointer', fontWeight: 600, width: 'fit-content' }}>← Voltar</button>
+
+        {divergencias.length === 0 ? (
+          <div style={{ textAlign: 'center', padding: '2rem', color: '#999' }}>
+            <p>Nenhuma divergência encontrada.</p>
+          </div>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+            {divergencias.map(div => {
+              const nota = notas.find(n => n.id === div.nf_id)
+              return (
+                <div key={div.item_id} style={{ padding: '1.5rem', border: '1px solid #ffb3ba', borderRadius: '8px', background: '#fff5f6' }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '2rem', marginBottom: '1rem' }}>
+                    <div>
+                      <div style={{ fontSize: '0.8rem', color: '#666', marginBottom: '0.5rem' }}>PRODUTO</div>
+                      <div style={{ fontWeight: 600, fontSize: '1rem', marginBottom: '0.25rem' }}>{div.produto}</div>
+                      <div style={{ fontSize: '0.85rem', color: '#999' }}>Código: {div.codigo}</div>
+                    </div>
+                    <div>
+                      <div style={{ fontSize: '0.8rem', color: '#666', marginBottom: '0.5rem' }}>NOTA FISCAL</div>
+                      <div style={{ fontWeight: 600, fontSize: '1rem' }}>#{nota?.numero_nf || 'N/A'}</div>
+                      <div style={{ fontSize: '0.85rem', color: '#999' }}>{nota?.fornecedor || 'Fornecedor desconhecido'}</div>
+                    </div>
+                  </div>
+
+                  <div style={{ background: 'white', padding: '1rem', borderRadius: '6px', marginBottom: '1rem' }}>
+                    <div style={{ fontSize: '0.8rem', color: '#666', marginBottom: '0.75rem', fontWeight: 600, textTransform: 'uppercase' }}>Divergência</div>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '1rem', fontSize: '0.9rem' }}>
+                      <div>
+                        <span style={{ color: '#666' }}>Quantidade NF:</span>
+                        <div style={{ fontWeight: 600, color: '#1a1a1a' }}>{div.quantidade_nf} un</div>
+                      </div>
+                      <div>
+                        <span style={{ color: '#666' }}>Recebido:</span>
+                        <div style={{ fontWeight: 600, color: div.quantidade_confirmada !== div.quantidade_nf ? '#ff6b6b' : '#2e7d32' }}>{div.quantidade_confirmada} un</div>
+                      </div>
+                      <div>
+                        <span style={{ color: '#666' }}>Diferença:</span>
+                        <div style={{ fontWeight: 600, color: '#ff6b6b' }}>{div.quantidade_nf - div.quantidade_confirmada} un</div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div style={{ display: 'flex', gap: '0.75rem' }}>
+                    <button onClick={() => resolverDivergencia(div.item_id)} style={{ flex: 1, padding: '0.75rem', background: '#2e7d32', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 600 }}>✓ Marcar como resolvida</button>
+                    <button onClick={() => deletarDivergencia(div.item_id)} style={{ flex: 1, padding: '0.75rem', background: '#ff6b6b', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 600 }}>🗑️ Deletar</button>
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        )}
+      </div>
     )
   }
 

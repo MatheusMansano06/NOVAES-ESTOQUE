@@ -267,7 +267,7 @@ body::after {
   display: flex;
   flex-direction: column;
   gap: 18px;
-  box-shadow: 18px 0 44px rgba(6, 26, 53, 0.28);
+  box-shadow: none;
 }
 
 .nvs-sidebar__brand-card {
