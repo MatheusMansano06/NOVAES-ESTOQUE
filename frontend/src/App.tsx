@@ -1541,12 +1541,10 @@ function App() {
         <main className="container main-content">
           <section className="nvs-kpi-grid" style={{ marginBottom: '1.5rem' }}>
             {[
-              { tag: 'NF', cor: 'blue', titulo: 'Notas fiscais hoje', valor: notasHoje, helper: `${notas.length} nota(s) no ambiente local` },
-              { tag: 'OL', cor: 'green', titulo: 'Itens sincronizados', valor: itensSincronizados, helper: `${todosItens.length} itens tratados no fluxo` },
-              { tag: 'IN', cor: 'yellow', titulo: 'Inbound ativo', valor: inboundsAtivos.length, helper: inboundsAtivos.length > 0 ? `${progressoBaixasInbound.restante} un aguardando baixa` : 'Sem inbound em aberto' },
-              { tag: 'DG', cor: 'red', titulo: 'Produtos com divergencia', valor: divergencias.length, helper: divergencias.length > 0 ? 'Exigem tratativa imediata' : 'Nenhuma divergencia aberta' },
-              { tag: 'VL', cor: 'yellow', titulo: 'Produtos sem vinculo', valor: itensSemVinculo, helper: 'Aguardando relacao com anuncio correto' },
-              { tag: 'ST', cor: 'green', titulo: 'Produtos em estoque', valor: estoque.length, helper: `${Math.max(todosItens.length - itensBloqueados, 0)} itens liberados na operacao` },
+              { tag: 'FN', cor: 'blue', titulo: 'Fornecedores', valor: estoque.length > 0 ? new Set(estoque.flatMap(e => e.notas_fiscais.map(n => n.fornecedor))).size : 0, helper: 'Fornecedores cadastrados' },
+              { tag: 'IT', cor: 'green', titulo: 'Itens sincronizados', valor: itensSincronizados, helper: `${todosItens.length} itens no fluxo` },
+              { tag: 'IN', cor: 'yellow', titulo: 'Inbounds ativos', valor: inboundsAtivos.length, helper: inboundsAtivos.length > 0 ? `${progressoBaixasInbound.restante} un pendente` : 'Sem inbound em aberto' },
+              { tag: 'DG', cor: 'red', titulo: 'Itens divergentes', valor: divergencias.length, helper: divergencias.length > 0 ? 'Exigem ação imediata' : 'Nenhuma divergência' },
             ].map((item) => (
               <div className="nvs-kpi-card" key={item.titulo}>
                 <div className="nvs-kpi-card__head">
@@ -1561,65 +1559,6 @@ function App() {
             ))}
           </section>
 
-          <section className="nvs-panel-grid" style={{ marginBottom: '1.5rem' }}>
-            <div className="nvs-surface nvs-panel">
-              <h3>Alertas importantes</h3>
-              <div className="nvs-list">
-                {[
-                  { titulo: 'Produtos com divergencia aberta', detalhe: `${divergencias.length} item(ns) precisa de acao`, valor: divergencias.length || 'OK', tom: divergencias.length > 0 ? 'danger' : 'success' },
-                  { titulo: 'Produtos sem vinculo com anuncio', detalhe: `${itensSemVinculo} item(ns) sem relacao com Olist`, valor: itensSemVinculo, tom: itensSemVinculo > 0 ? 'warning' : 'success' },
-                  { titulo: 'Itens bloqueados na operacao', detalhe: `${itensBloqueados} item(ns) aguardando tratativa`, valor: itensBloqueados, tom: itensBloqueados > 0 ? 'warning' : 'success' },
-                  { titulo: 'Autorizacao Olist local', detalhe: olistStatus?.authorized ? 'Pronta para sincronizar estoque' : 'Conectar para buscar e subir estoque', valor: olistStatus?.authorized ? 'OK' : 'PEND', tom: olistStatus?.authorized ? 'success' : 'warning' },
-                ].map((alerta) => (
-                  <div className="nvs-list__row" key={alerta.titulo}>
-                    <span className={`nvs-list__dot is-${alerta.tom}`} />
-                    <div className="nvs-list__copy">
-                      <strong>{alerta.titulo}</strong>
-                      <span>{alerta.detalhe}</span>
-                    </div>
-                    <span className={`nvs-list__meta is-${alerta.tom}`}>{alerta.valor}</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            <div className="nvs-surface nvs-panel">
-              <h3>Atividades recentes</h3>
-              <div className="nvs-list">
-                {notas.slice(0, 5).map((nota) => (
-                  <div className="nvs-list__row" key={nota.id}>
-                    <span className="nvs-list__dot is-success" />
-                    <div className="nvs-list__copy">
-                      <strong>NF #{nota.numero_nf} processada</strong>
-                      <span>{nota.fornecedor}</span>
-                    </div>
-                    <span className="nvs-list__meta">{fmtHora(nota.data_upload || null)}</span>
-                  </div>
-                ))}
-                {inboundsAtivos.slice(0, 1).map((inbound) => (
-                  <div className="nvs-list__row" key={inbound.numero_inbound || inbound.nome_embalde}>
-                    <span className="nvs-list__dot is-warning" />
-                    <div className="nvs-list__copy">
-                      <strong>Inbound #{inbound.numero_inbound || inbound.nome_embalde}</strong>
-                      <span>{inbound.nome_embalde || 'Inbound em acompanhamento'}</span>
-                    </div>
-                    <span className="nvs-list__meta">{fmtData(inbound.data_limite)}</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            <div className="nvs-surface nvs-panel">
-              <h3>Acoes rapidas</h3>
-              <div className="nvs-quick-actions">
-                {acoesRapidas.map((acao) => (
-                  <button key={acao.label} type="button" className={`nvs-button nvs-button--${acao.tone}`} onClick={acao.onClick}>
-                    {acao.label}
-                  </button>
-                ))}
-              </div>
-            </div>
-          </section>
 
           {message && (
             <div className={`message ${message.includes('sucesso') ? 'success' : 'error'}`}>
@@ -1657,91 +1596,6 @@ function App() {
                   </button>
                 </form>
 
-                {/* Botão de Fornecedores e Embaldes */}
-                <div style={{ marginTop: '1rem', paddingTop: '1rem', borderTop: '1px solid #e0e0e0', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
-                  <button
-                    onClick={() => setPagina('fornecedores')}
-                    translate="no"
-                    className="notranslate"
-                    aria-label="Fornecedores"
-                    title="Fornecedores"
-                    style={{
-                      padding: '0.75rem 1rem',
-                      background: '#fff',
-                      color: '#333',
-                      border: '1px solid #ddd',
-                      borderRadius: '4px',
-                      cursor: 'pointer',
-                      fontWeight: 600,
-                      fontSize: '0.95rem',
-                      transition: 'all 0.2s ease'
-                    }}
-                    onMouseEnter={(e) => {
-                      const el = e.currentTarget as HTMLElement
-                      el.style.background = '#f5f5f5'
-                      el.style.borderColor = '#999'
-                    }}
-                    onMouseLeave={(e) => {
-                      const el = e.currentTarget as HTMLElement
-                      el.style.background = '#fff'
-                      el.style.borderColor = '#ddd'
-                    }}
-                  >
-                    👥 Fornecedores
-                  </button>
-                  <button
-                    onClick={() => setPagina('embaldes')}
-                    style={{
-                      padding: '0.75rem 1rem',
-                      background: '#fff',
-                      color: '#333',
-                      border: '1px solid #ddd',
-                      borderRadius: '4px',
-                      cursor: 'pointer',
-                      fontWeight: 600,
-                      fontSize: '0.95rem',
-                      transition: 'all 0.2s ease'
-                    }}
-                    onMouseEnter={(e) => {
-                      const el = e.currentTarget as HTMLElement
-                      el.style.background = '#f5f5f5'
-                      el.style.borderColor = '#999'
-                    }}
-                    onMouseLeave={(e) => {
-                      const el = e.currentTarget as HTMLElement
-                      el.style.background = '#fff'
-                      el.style.borderColor = '#ddd'
-                    }}
-                  >
-                    Inbound
-                  </button>
-                  <button
-                    onClick={() => setPagina('anuncios')}
-                    style={{
-                      padding: '0.75rem 1rem',
-                      background: '#fff',
-                      color: '#333',
-                      border: '1px solid #ddd',
-                      borderRadius: '4px',
-                      cursor: 'pointer',
-                      fontWeight: 600,
-                      fontSize: '0.95rem',
-                      transition: 'all 0.2s ease'
-                    }}
-                    onMouseEnter={(e) => {
-                      const el = e.currentTarget as HTMLElement
-                      el.style.background = '#f5f5f5'
-                      el.style.borderColor = '#999'
-                    }}
-                    onMouseLeave={(e) => {
-                      const el = e.currentTarget as HTMLElement
-                      el.style.background = '#fff'
-                      el.style.borderColor = '#ddd'
-                    }}
-                  >
-                    🛒 Anúncios ML
-                  </button>
-                </div>
               </div>
             </div>
 
