@@ -43,7 +43,64 @@ class NFeParsing:
             }
         """
         try:
-            root = ET.fromstring(file_content)
+            # 0) Conteúdo vazio/corrompido: causa #1 de "no element found".
+            #    Dá um diagnóstico preciso em vez de uma mensagem genérica.
+            if not file_content or not file_content.strip():
+                tamanho = len(file_content or b"")
+                return {
+                    "sucesso": False,
+                    "erro": (f"O arquivo enviado está vazio ({tamanho} bytes). "
+                             "O download do XML provavelmente falhou ou veio incompleto. "
+                             "Baixe novamente o XML da nota direto do emissor/SEFAZ e tente de novo."),
+                    "itens": []
+                }
+
+            # 1) Remove BOM (UTF-8/UTF-16) e espaços antes da declaração <?xml,
+            #    que quebram o parser ("declaration not at start of entity").
+            limpo = file_content
+            for bom in (b"\xef\xbb\xbf", b"\xff\xfe", b"\xfe\xff"):
+                if limpo.startswith(bom):
+                    limpo = limpo[len(bom):]
+                    break
+            limpo = limpo.lstrip()
+
+            # 2) Detecta arquivos que NÃO são XML (erro comum: mandar o DANFE/PDF).
+            cabecalho = limpo[:64].lstrip().lower()
+            if cabecalho.startswith(b"%pdf"):
+                return {
+                    "sucesso": False,
+                    "erro": ("Este arquivo é um PDF (DANFE), não o XML da nota. "
+                             "Envie o arquivo .xml de verdade — ou suba o PDF na opção de PDF."),
+                    "itens": []
+                }
+            if cabecalho.startswith(b"<!doctype html") or cabecalho.startswith(b"<html"):
+                return {
+                    "sucesso": False,
+                    "erro": ("Este arquivo é uma página HTML, não o XML da nota. "
+                             "Provavelmente o download trouxe uma página de erro/login. "
+                             "Baixe novamente o XML direto do emissor/SEFAZ."),
+                    "itens": []
+                }
+
+            try:
+                root = ET.fromstring(limpo)
+            except ET.ParseError:
+                # 3) Fallback de encoding: alguns emissores salvam em UTF-16 ou
+                #    declaram um encoding que não bate com os bytes. Tenta decodificar
+                #    e reserializar para o parser resolver pela árvore de texto.
+                texto = None
+                for enc in ("utf-8", "utf-16", "latin-1"):
+                    try:
+                        texto = limpo.decode(enc)
+                        break
+                    except (UnicodeDecodeError, LookupError):
+                        continue
+                if texto is None:
+                    raise
+                # Remove a declaração de encoding p/ o ET não reclamar de divergência
+                import re as _re
+                texto = _re.sub(r'<\?xml[^>]*\?>', '', texto, count=1).lstrip()
+                root = ET.fromstring(texto)
 
             # Namespaces for NF-e
             ns = {
@@ -108,8 +165,9 @@ class NFeParsing:
         except ET.ParseError as e:
             logger.error(f"Erro ao fazer parse do XML: {str(e)}")
             tecnico = str(e)
+            tamanho = len(file_content or b"")
             if "no element found" in tecnico or "column 0" in tecnico:
-                amigavel = ("O arquivo XML está vazio ou não é uma NF-e válida. "
+                amigavel = (f"O arquivo XML está vazio ou não é uma NF-e válida ({tamanho} bytes recebidos). "
                             "Baixe novamente o XML da nota (o arquivo .xml de verdade, "
                             "não o DANFE/PDF) e tente de novo.")
             else:
