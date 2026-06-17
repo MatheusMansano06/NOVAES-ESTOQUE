@@ -1632,18 +1632,19 @@ function App() {
             </div>
           </section>
 
-          {message && (
-            <div className={`message ${message.includes('sucesso') ? 'success' : 'error'}`}>
-              {message}
-            </div>
-          )}
+        </main>
+      </div>
+    )
+  }
 
-          {/* ===== TELA ÚNICA: 2 colunas — Upload (esq.) | Notas (dir.) ===== */}
-          <div style={{ display: 'grid', gridTemplateColumns: 'minmax(300px, 360px) 1fr', gap: '1.5rem', alignItems: 'start' }}>
-
-            <div style={{ display: 'grid', gap: '1rem', alignContent: 'start' }}>
-            {/* UPLOAD compacto */}
-            <div className="card">
+  // ===== PÁGINA NOTAS FISCAIS =====
+  if (pagina === 'notas-fiscais') {
+    return renderComShell(
+      'Notas Fiscais',
+      'Gerenciar upload e lista completa',
+      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(300px, 360px) 1fr', gap: '1.5rem', alignItems: 'start' }}>
+        <div style={{ display: 'grid', gap: '1rem', alignContent: 'start' }}>
+          <div className="card">
               <h2>Upload de Nota Fiscal</h2>
               <div className="card-body">
                 <form onSubmit={handleUpload} style={{ display: 'flex', gap: '1rem', alignItems: 'center', flexWrap: 'wrap' }}>
@@ -1819,11 +1820,16 @@ function App() {
                 )}
               </div>
             </div>
+          </div>
+        </div>
+      </div>
+    )
+  }
 
-            </div>
-
-          {/* ===== layout antigo (4 colunas) desativado ===== */}
-          <div style={{ display: 'none' }}>
+  // ===== Código antigo removido =====
+  if (false) {
+    return (
+      <div style={{ display: 'none' }}>
             {/* UPLOAD CARD */}
             <div className="card">
               <h2>Upload de Nota Fiscal</h2>
