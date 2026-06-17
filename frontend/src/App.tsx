@@ -1262,84 +1262,93 @@ function App() {
         position: 'relative',
         zIndex: 1,
         minHeight: '100vh',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        background: 'linear-gradient(135deg, #0a1a36 0%, #0d2657 100%)',
-        padding: '1.5rem',
+        display: 'grid',
+        gridTemplateColumns: '1fr 1fr',
+        background: '#fff',
         fontFamily: 'inherit'
       }}>
+        {/* Lateral esquerda — inteira azul */}
         <div style={{
-          display: 'grid',
-          gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)',
-          width: '100%',
-          maxWidth: '960px',
-          minHeight: '560px',
-          borderRadius: '18px',
+          position: 'relative',
           overflow: 'hidden',
-          boxShadow: '0 30px 80px rgba(0,0,0,0.45)',
-          background: '#fff'
+          background: 'linear-gradient(150deg, #0a1c44 0%, #0c2a5e 55%, #0e336f 100%)',
+          color: '#fff',
+          padding: '3.5rem 3.25rem',
+          display: 'flex',
+          flexDirection: 'column',
+          justifyContent: 'space-between'
         }}>
-          {/* Painel esquerdo (azul) */}
+          {/* Motoqueiro ao fundo */}
           <div style={{
-            position: 'relative',
-            background: 'linear-gradient(160deg, #0b2050 0%, #08326b 100%)',
-            color: '#fff',
-            padding: '2.5rem 2.25rem',
-            display: 'flex',
-            flexDirection: 'column',
-            justifyContent: 'space-between'
-          }}>
-            <div>
-              {/* Logo */}
-              <div style={{ marginBottom: '2.5rem', lineHeight: 1 }}>
-                <div style={{ fontSize: '2.6rem', fontWeight: 900, letterSpacing: '0.02em' }}>
-                  NV<span style={{ color: '#ffc629' }}>S</span>
-                </div>
-                <div style={{ fontSize: '0.85rem', fontWeight: 700, letterSpacing: '0.55em', marginTop: '0.15rem', opacity: 0.9 }}>
-                  TECH
-                </div>
+            position: 'absolute',
+            right: '-2%',
+            top: '50%',
+            transform: 'translateY(-50%)',
+            width: '60%',
+            height: '72%',
+            backgroundImage: "url('/assets/nvs-rider.jpeg')",
+            backgroundRepeat: 'no-repeat',
+            backgroundPosition: 'center',
+            backgroundSize: 'contain',
+            opacity: 0.12,
+            mixBlendMode: 'screen',
+            WebkitMaskImage: 'radial-gradient(ellipse at center, #000 30%, transparent 68%)',
+            maskImage: 'radial-gradient(ellipse at center, #000 30%, transparent 68%)',
+            pointerEvents: 'none'
+          }} />
+
+          <div style={{ position: 'relative', zIndex: 1 }}>
+            {/* Logo */}
+            <div style={{ marginBottom: '3rem', lineHeight: 1 }}>
+              <div style={{ fontSize: '3rem', fontWeight: 900, letterSpacing: '0.02em' }}>
+                NV<span style={{ color: '#ffc629' }}>S</span>
               </div>
-
-              <h1 style={{ fontSize: '1.9rem', fontWeight: 800, margin: '0 0 0.75rem 0' }}>
-                Bem-vindo de volta!
-              </h1>
-              <p style={{ fontSize: '0.98rem', lineHeight: 1.5, opacity: 0.85, margin: '0 0 2rem 0', maxWidth: '320px' }}>
-                Entre na sua conta e gerencie sua operação de marketplace.
-              </p>
-
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '1.1rem' }}>
-                {features.map((f) => (
-                  <div key={f.texto} style={{ display: 'flex', alignItems: 'center', gap: '0.85rem' }}>
-                    <div style={{
-                      width: 38, height: 38, borderRadius: '10px',
-                      background: 'rgba(255,255,255,0.1)',
-                      display: 'flex', alignItems: 'center', justifyContent: 'center',
-                      fontSize: '1.1rem', flexShrink: 0
-                    }}>
-                      {f.icon}
-                    </div>
-                    <span style={{ fontSize: '0.95rem', opacity: 0.95 }}>{f.texto}</span>
-                  </div>
-                ))}
+              <div style={{ fontSize: '0.95rem', fontWeight: 700, letterSpacing: '0.6em', marginTop: '0.2rem', opacity: 0.9 }}>
+                TECH
               </div>
             </div>
 
-            <div style={{ fontSize: '0.75rem', opacity: 0.6, marginTop: '2rem' }}>
-              © 2026 NVS TECH. Todos os direitos reservados.
+            <h1 style={{ fontSize: '2.1rem', fontWeight: 800, margin: '0 0 0.85rem 0' }}>
+              Bem-vindo de volta!
+            </h1>
+            <p style={{ fontSize: '1rem', lineHeight: 1.5, opacity: 0.85, margin: '0 0 2.5rem 0', maxWidth: '340px' }}>
+              Entre na sua conta e gerencie sua operação de marketplace.
+            </p>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
+              {features.map((f) => (
+                <div key={f.texto} style={{ display: 'flex', alignItems: 'center', gap: '0.9rem' }}>
+                  <div style={{
+                    width: 40, height: 40, borderRadius: '10px',
+                    background: 'rgba(255,255,255,0.1)',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    fontSize: '1.15rem', flexShrink: 0
+                  }}>
+                    {f.icon}
+                  </div>
+                  <span style={{ fontSize: '0.98rem', opacity: 0.95 }}>{f.texto}</span>
+                </div>
+              ))}
             </div>
           </div>
 
-          {/* Painel direito (boas-vindas + entrar, sem login) */}
-          <div style={{
-            padding: '3rem 2.75rem',
-            display: 'flex',
-            flexDirection: 'column',
-            justifyContent: 'center',
-            gap: '1.5rem'
-          }}>
+          <div style={{ position: 'relative', zIndex: 1, fontSize: '0.78rem', opacity: 0.6, marginTop: '2.5rem' }}>
+            © 2026 NVS TECH. Todos os direitos reservados.
+          </div>
+        </div>
+
+        {/* Lateral direita — inteira branca, com o botão */}
+        <div style={{
+          background: '#fff',
+          padding: '3rem',
+          display: 'flex',
+          flexDirection: 'column',
+          justifyContent: 'center',
+          alignItems: 'center'
+        }}>
+          <div style={{ width: '100%', maxWidth: '380px', display: 'flex', flexDirection: 'column', gap: '1.6rem' }}>
             <div>
-              <h2 style={{ fontSize: '1.6rem', fontWeight: 800, color: '#0b2050', margin: '0 0 0.6rem 0' }}>
+              <h2 style={{ fontSize: '1.7rem', fontWeight: 800, color: '#0b2050', margin: '0 0 0.6rem 0' }}>
                 Acessar plataforma
               </h2>
               <p style={{ fontSize: '0.95rem', color: '#667085', lineHeight: 1.5, margin: 0 }}>
