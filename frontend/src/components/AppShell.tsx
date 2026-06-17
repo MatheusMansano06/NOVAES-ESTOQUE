@@ -31,6 +31,9 @@ export interface ShellStatusItem {
   label: string
   value: string
   tone?: 'positive' | 'warning' | 'danger' | 'neutral'
+  // Quando definido, o chip vira um botão clicável (ex.: conectar integração pendente).
+  // Sem onClick, é apenas um indicador estático (não clicável).
+  onClick?: () => void
 }
 
 interface AppShellProps {
@@ -223,13 +226,27 @@ export function AppShell({
           </button>
 
           <div className="nvs-topbar__status-strip">
-            {statuses.map((status) => (
-              <div key={status.label} className={`nvs-status-chip ${toneClass(status.tone)}`}>
-                <span className="nvs-status-chip__dot" />
-                <span className="nvs-status-chip__label">{status.label}</span>
-                <strong>{status.value}</strong>
-              </div>
-            ))}
+            {statuses.map((status) =>
+              status.onClick ? (
+                <button
+                  key={status.label}
+                  type="button"
+                  className={`nvs-status-chip is-clickable ${toneClass(status.tone)}`}
+                  onClick={status.onClick}
+                  title={`Clique para conectar ${status.label}`}
+                >
+                  <span className="nvs-status-chip__dot" />
+                  <span className="nvs-status-chip__label">{status.label}</span>
+                  <strong>{status.value}</strong>
+                </button>
+              ) : (
+                <div key={status.label} className={`nvs-status-chip ${toneClass(status.tone)}`}>
+                  <span className="nvs-status-chip__dot" />
+                  <span className="nvs-status-chip__label">{status.label}</span>
+                  <strong>{status.value}</strong>
+                </div>
+              )
+            )}
           </div>
 
           <div className="nvs-topbar__sync">

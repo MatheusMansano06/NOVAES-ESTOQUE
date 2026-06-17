@@ -84,11 +84,18 @@ interface Divergencia {
 }
 
 interface MlStatus {
-  authorized?: boolean
+  autorizado?: boolean
+  credenciais_configuradas?: boolean
+  status?: string
+  url_autorizacao?: string | null
 }
 
 interface OlistStatus {
-  authorized?: boolean
+  autorizado?: boolean
+  integrado?: boolean
+  credenciais_configuradas?: boolean
+  status?: string
+  url_autorizacao?: string | null
 }
 
 function App() {
@@ -1308,16 +1315,23 @@ function App() {
     return dataUpload.toDateString() === hoje.toDateString()
   }).length
 
+  const mlConectado = mlStatus?.autorizado === true
+  const olistConectado = olistStatus?.autorizado === true
+  const urlConectarML = mlStatus?.url_autorizacao || `${API_BASE}/api/ml/conectar`
+  const urlConectarOlist = olistStatus?.url_autorizacao || `${API_BASE}/api/olist/conectar`
+
   const topStatuses: ShellStatusItem[] = [
     {
       label: 'Mercado Livre',
-      value: mlStatus?.authorized ? 'Conectado' : 'Pendente',
-      tone: mlStatus?.authorized ? 'positive' : 'warning',
+      value: mlConectado ? 'Conectado' : 'Pendente',
+      tone: mlConectado ? 'positive' : 'warning',
+      onClick: mlConectado ? undefined : () => { window.location.href = urlConectarML },
     },
     {
       label: 'Olist',
-      value: olistStatus?.authorized ? 'Sincronizado' : 'Pendente',
-      tone: olistStatus?.authorized ? 'positive' : 'warning',
+      value: olistConectado ? 'Sincronizado' : 'Pendente',
+      tone: olistConectado ? 'positive' : 'warning',
+      onClick: olistConectado ? undefined : () => { window.location.href = urlConectarOlist },
     },
     {
       label: 'Fluxo local',
@@ -1343,15 +1357,6 @@ function App() {
         { key: 'divergencias', label: 'Divergencias', icon: 'warning', badge: divergencias.length, active: pagina === 'divergencias', onClick: () => setPagina('divergencias') },
       ],
     },
-  ]
-
-  const acoesRapidas = [
-    { label: 'Subir NF-e', tone: 'primary', onClick: () => fileInputRef.current?.click() },
-    { label: 'Criar inbound', tone: 'green', onClick: () => setPagina('embaldes') },
-    { label: 'Ver anuncios ML', tone: 'gold', onClick: () => setPagina('anuncios') },
-    { label: 'Fornecedores', tone: 'purple', onClick: () => setPagina('fornecedores') },
-    { label: 'Sincronizar Mercado Livre', tone: 'green', onClick: () => loadIntegracoes() },
-    { label: olistStatus?.authorized ? 'Sincronizar Olist' : 'Conectar Olist', tone: 'primary', onClick: () => loadIntegracoes() },
   ]
 
   const renderComShell = (title: string, subtitle: string, conteudo: ReactNode) => (
@@ -2222,7 +2227,6 @@ function App() {
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
             {divergencias.map(div => {
-              const nota = notas.find(n => n.id === div.nf_id)
               return (
                 <div key={div.item_id} style={{ padding: '1.5rem', border: '1px solid #ffb3ba', borderRadius: '8px', background: '#fff5f6' }}>
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '2rem', marginBottom: '1rem' }}>
@@ -2233,8 +2237,8 @@ function App() {
                     </div>
                     <div>
                       <div style={{ fontSize: '0.8rem', color: '#666', marginBottom: '0.5rem' }}>NOTA FISCAL</div>
-                      <div style={{ fontWeight: 600, fontSize: '1rem' }}>#{nota?.numero_nf || 'N/A'}</div>
-                      <div style={{ fontSize: '0.85rem', color: '#999' }}>{nota?.fornecedor || 'Fornecedor desconhecido'}</div>
+                      <div style={{ fontWeight: 600, fontSize: '1rem' }}>#{div.numero_nf || 'N/A'}</div>
+                      <div style={{ fontSize: '0.85rem', color: '#999' }}>{div.fornecedor || 'Fornecedor desconhecido'}</div>
                     </div>
                   </div>
 
@@ -2257,8 +2261,8 @@ function App() {
                   </div>
 
                   <div style={{ display: 'flex', gap: '0.75rem' }}>
-                    <button onClick={() => resolverDivergencia(div.item_id)} style={{ flex: 1, padding: '0.75rem', background: '#2e7d32', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 600 }}>✓ Marcar como resolvida</button>
-                    <button onClick={() => deletarDivergencia(div.item_id)} style={{ flex: 1, padding: '0.75rem', background: '#ff6b6b', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 600 }}>🗑️ Deletar</button>
+                    <button onClick={() => resolverDivergenciaItem(div.item_id)} style={{ flex: 1, padding: '0.75rem', background: '#2e7d32', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 600 }}>✓ Marcar como resolvida</button>
+                    <button onClick={() => deletarDivergenciaItem(div.item_id)} style={{ flex: 1, padding: '0.75rem', background: '#ff6b6b', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 600 }}>🗑️ Deletar</button>
                   </div>
                 </div>
               )

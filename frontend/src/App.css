@@ -384,6 +384,28 @@ body::after {
   white-space: nowrap;
 }
 
+/* Chip clicável (integração pendente -> botão de conectar) */
+.nvs-status-chip.is-clickable {
+  cursor: pointer;
+  font-size: inherit;
+  font-family: inherit;
+  transition: transform 0.15s, box-shadow 0.15s, border-color 0.15s;
+}
+.nvs-status-chip.is-clickable.is-warning {
+  border-color: #ffb521;
+  background: #fff8e8;
+}
+.nvs-status-chip.is-clickable:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 6px 16px rgba(255, 152, 0, 0.22);
+  border-color: #ff9800;
+}
+.nvs-status-chip.is-clickable .nvs-status-chip__label::after {
+  content: " — conectar";
+  font-weight: 700;
+  color: #b26a00;
+}
+
 .nvs-status-chip__dot {
   width: 10px;
   height: 10px;
