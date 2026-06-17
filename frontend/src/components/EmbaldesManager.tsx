@@ -1039,31 +1039,21 @@ export function EmbaldesManager() {
                                   <span style={{ color: '#999', fontSize: '0.8rem' }}>—</span>
                                 )}
                               </div>
-                              <div style={{ textAlign: 'center' }}>
-                                <label style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', gap: '0.3rem' }}>
-                                  <input
-                                    type="checkbox"
-                                    checked={itensEmEspera[it.item_id] || false}
-                                    onChange={(e) => {
-                                      const novo = { ...itensEmEspera, [it.item_id]: e.target.checked }
+                              <div style={{ textAlign: 'center', display: 'flex', gap: '0.3rem', justifyContent: 'center', flexWrap: 'wrap', alignItems: 'center' }}>
+                                {itensEmEspera[it.item_id] ? (
+                                  <button
+                                    onClick={() => {
+                                      const novo = { ...itensEmEspera, [it.item_id]: false }
                                       setItensEmEspera(novo)
-                                      if (e.target.checked && revisao) {
-                                        setMarcandoEmEspera(it.item_id)
-                                        api.post(`/embaldes/${revisao.embale_id}/itens/${it.item_id}/em-espera`, { em_espera: 1 }).finally(() => setMarcandoEmEspera(null))
-                                      } else if (!e.target.checked && revisao) {
+                                      if (revisao) {
                                         setMarcandoEmEspera(it.item_id)
                                         api.post(`/embaldes/${revisao.embale_id}/itens/${it.item_id}/em-espera`, { em_espera: 0 }).finally(() => setMarcandoEmEspera(null))
                                       }
                                     }}
-                                    disabled={marcandoEmEspera === it.item_id}
-                                    style={{ cursor: 'pointer' }}
-                                  />
-                                  <span style={{ fontSize: '0.7rem', color: '#666', fontWeight: 600 }}>⏸</span>
-                                </label>
-                              </div>
-                              <div style={{ textAlign: 'center', display: 'flex', gap: '0.3rem', justifyContent: 'center', flexWrap: 'wrap' }}>
-                                {itensEmEspera[it.item_id] ? (
-                                  <span style={{ color: '#ff6f00', fontWeight: 'bold', fontSize: '0.8rem' }}>Em espera</span>
+                                    style={{ padding: '0.4rem 0.8rem', background: '#ff6f00', color: '#fff', border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '0.8rem', fontWeight: 'bold', whiteSpace: 'nowrap' }}
+                                  >
+                                    ⏸ Espera
+                                  </button>
                                 ) : jaBaixado ? (
                                   <span style={{ color: '#2e7d32', fontWeight: 'bold', fontSize: '0.8rem' }}>✓ Baixado</span>
                                 ) : naoAchado ? (
@@ -1075,6 +1065,20 @@ export function EmbaldesManager() {
                                   </button>
                                 ) : (
                                   <>
+                                    <button
+                                      onClick={() => {
+                                        const novo = { ...itensEmEspera, [it.item_id]: true }
+                                        setItensEmEspera(novo)
+                                        if (revisao) {
+                                          setMarcandoEmEspera(it.item_id)
+                                          api.post(`/embaldes/${revisao.embale_id}/itens/${it.item_id}/em-espera`, { em_espera: 1 }).finally(() => setMarcandoEmEspera(null))
+                                        }
+                                      }}
+                                      disabled={marcandoEmEspera === it.item_id}
+                                      style={{ padding: '0.3rem 0.6rem', background: '#fff', color: '#ff6f00', border: '1px solid #ff6f00', borderRadius: '4px', cursor: 'pointer', fontSize: '0.75rem', fontWeight: 'bold' }}
+                                    >
+                                      ⏸
+                                    </button>
                                     {podeBalancear && (
                                       <button
                                         onClick={() => abrirBalanceamento(it)}
