@@ -742,6 +742,29 @@ export function EmbaldesManager() {
       }}>
         <h3 style={{ marginTop: 0, marginBottom: '1rem', color: '#061a35' }}>Gestão de Inbounds</h3>
 
+        {message && (
+          <div style={{
+            marginBottom: '1rem',
+            padding: '0.85rem 1rem',
+            backgroundColor: message.toLowerCase().includes('erro') ? '#ffebee' : '#e8f5e9',
+            color: message.toLowerCase().includes('erro') ? '#c62828' : '#2e7d32',
+            borderRadius: '6px',
+            fontWeight: 600,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: '1rem'
+          }}>
+            <span>{message}</span>
+            <button
+              onClick={() => setMessage('')}
+              style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '1.2rem', color: 'inherit', lineHeight: 1 }}
+            >
+              ×
+            </button>
+          </div>
+        )}
+
         {/* Abas */}
         <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '1.5rem', borderBottom: '2px solid #eef3f8', flexWrap: 'wrap' }}>
           <button

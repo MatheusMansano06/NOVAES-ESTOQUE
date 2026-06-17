@@ -2815,9 +2815,9 @@ async def balancear_item_embale(request: Request):
         if not item.olist_produto_id:
             return JSONResponse({"erro": "Item não está vinculado à Olist"}, status_code=400)
 
-        # Obter estoque ANTES
+        # Obter estoque ANTES (sem cache, p/ valor fiel no momento do balanço)
         produto_id = item.olist_produto_id
-        estoque_antes = olist.obter_estoque_produto(produto_id) or 0
+        estoque_antes = (olist.obter_estoque(produto_id, usar_cache=False) or {}).get("saldo", 0) or 0
 
         # Quantidade planejada para o FULL (editavel na revisao)
         qtd_full = _quantidade_planejada_full(item)
@@ -2850,7 +2850,7 @@ async def balancear_item_embale(request: Request):
             db.add(item)
             db.commit()
 
-            estoque_depois = olist.obter_estoque_produto(produto_id) or 0
+            estoque_depois = (olist.obter_estoque(produto_id, usar_cache=False) or {}).get("saldo", 0) or 0
             return JSONResponse({
                 "item_id": item.id,
                 "titulo": item.titulo_anuncio,
@@ -2880,7 +2880,7 @@ async def balancear_item_embale(request: Request):
         db.commit()
 
         # Obter estoque DEPOIS
-        estoque_depois = olist.obter_estoque_produto(produto_id) or 0
+        estoque_depois = (olist.obter_estoque(produto_id, usar_cache=False) or {}).get("saldo", 0) or 0
 
         return JSONResponse({
             "item_id": item.id,
