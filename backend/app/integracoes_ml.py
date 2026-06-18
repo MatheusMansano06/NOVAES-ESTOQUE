@@ -1089,6 +1089,25 @@ class MLIntegration:
             }
         return {"margens": out, "total": len(out)}
 
+    def imagens_por_sku(self) -> Dict[str, Any]:
+        """Mapa SKU -> imagem do anúncio, lendo TODO o cache local (qualquer status).
+        Usado na Lista de Separação p/ mostrar a foto de cada item do inbound.
+        Direto do SQLite, sem chamada ao vivo e sem o teto de paginação."""
+        db = self._db()
+        try:
+            rows = db.query(MercadoLivreItemCache).all()
+        finally:
+            db.close()
+        out: Dict[str, str] = {}
+        for r in rows:
+            s = (r.sku or "").strip().upper()
+            img = r.imagem_principal or r.thumbnail
+            if not s or not img:
+                continue
+            # se houver mais de um anúncio com o mesmo SKU, mantém o primeiro com imagem
+            out.setdefault(s, img)
+        return {"imagens": out, "total": len(out)}
+
     def precificacao(self, price: float, category_id: Optional[str] = None) -> Dict:
         """Tarifa de venda real do ML (Clássico=gold_special, Premium=gold_pro) p/ um preço/categoria."""
         params = {"price": price}
