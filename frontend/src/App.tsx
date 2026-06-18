@@ -1124,7 +1124,12 @@ function App() {
     }
 
     const qtdNF = Math.round(produtoSelecionado.quantidade_nf)
-    const novoTotal = real + qtdNF
+    const reservaFull = Math.min(reservaInbound, qtdNF)
+    const qtdSubir = Math.max(0, qtdNF - reservaFull)
+    const novoTotal = real + qtdSubir
+    const reservaInfo = reservaFull > 0
+      ? `\n⚠️ ${reservaFull} un estão reservadas para o FULL (${reservaInboundInbs || 'inbound ativo'}) e NÃO vão subir na Olist.\n`
+      : ''
 
     const confirmar = window.confirm(
       `Confirmar BALANÇO de estoque na Olist?\n\n` +
@@ -1134,6 +1139,8 @@ function App() {
       `por estar incorreto.\n\n` +
       `Estoque real informado: ${real} un\n` +
       `Quantidade da NF: ${qtdNF} un\n` +
+      reservaInfo +
+      `→ Vai subir na Olist: ${qtdSubir} un\n` +
       `= Novo estoque total na Olist: ${novoTotal} un\n\n` +
       `Deseja continuar?`
     )
@@ -3412,8 +3419,17 @@ function App() {
                 <p style={{ color: '#666', fontSize: '0.88rem', marginTop: 0 }}>
                   O estoque atual da Olist (<strong>{produtoOlistSelecionado.estoque_saldo} un</strong>) está incorreto?
                   Informe abaixo o estoque <strong>REAL</strong> que você tem hoje. O sistema vai corrigir a base
-                  e somar a quantidade da NF por cima.
+                  e somar só o que realmente sobe na Olist, descontando a reserva do FULL.
                 </p>
+                {(() => {
+                  const qtdNF = Math.round(produtoSelecionado.quantidade_nf)
+                  const reserva = Math.min(reservaInbound, qtdNF)
+                  const qtdSubir = Math.max(0, qtdNF - reserva)
+                  const novoTotal = estoqueRealNF.trim() !== '' && !isNaN(Number(estoqueRealNF))
+                    ? Math.round(Number(estoqueRealNF)) + qtdSubir
+                    : null
+                  return (
+                    <>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '1.5rem', flexWrap: 'wrap', marginTop: '1rem' }}>
                   <div>
                     <label style={{ display: 'block', color: '#666', fontSize: '0.8rem', fontWeight: '600', marginBottom: '0.3rem' }}>
@@ -3431,21 +3447,32 @@ function App() {
                   </div>
                   <div style={{ fontSize: '1.5rem', color: '#ff9800', fontWeight: '700' }}>+</div>
                   <div>
-                    <p style={{ color: '#666', fontSize: '0.8rem', fontWeight: '600', margin: 0 }}>QTD DA NF</p>
+                    <p style={{ color: '#666', fontSize: '0.8rem', fontWeight: '600', margin: 0 }}>QTD A SUBIR</p>
                     <p style={{ color: '#007acc', fontSize: '1.5rem', fontWeight: '700', margin: 0 }}>
-                      {Math.round(produtoSelecionado.quantidade_nf)}
+                      {qtdSubir}
                     </p>
+                    {reserva > 0 && (
+                      <p style={{ color: '#999', fontSize: '0.7rem', margin: '0.15rem 0 0 0' }}>
+                        ({qtdNF} da NF - {reserva} pro FULL)
+                      </p>
+                    )}
                   </div>
                   <div style={{ fontSize: '1.5rem', color: '#ff9800', fontWeight: '700' }}>=</div>
                   <div>
                     <p style={{ color: '#666', fontSize: '0.8rem', fontWeight: '600', margin: 0 }}>NOVO ESTOQUE TOTAL</p>
                     <p style={{ color: '#e65100', fontSize: '1.8rem', fontWeight: '800', margin: 0 }}>
-                      {estoqueRealNF.trim() !== '' && !isNaN(Number(estoqueRealNF))
-                        ? Math.round(Number(estoqueRealNF)) + Math.round(produtoSelecionado.quantidade_nf)
-                        : '—'}
+                      {novoTotal ?? '—'}
                     </p>
                   </div>
                 </div>
+                {reserva > 0 && (
+                  <div style={{ marginTop: '1rem', padding: '0.75rem 1rem', background: '#fff8e1', border: '1px solid #ffb74d', borderRadius: '6px', color: '#e65100', fontSize: '0.88rem' }}>
+                    ⚠️ No balanço também vamos segurar <strong>{reserva} un</strong> para o FULL no inbound {reservaInboundInbs}. Então entra só <strong>{qtdSubir} un</strong> no estoque da Olist.
+                  </div>
+                )}
+                    </>
+                  )
+                })()}
               </div>
             )}
 
