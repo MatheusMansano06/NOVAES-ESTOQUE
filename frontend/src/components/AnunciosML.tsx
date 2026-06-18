@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, type CSSProperties } from 'react'
 import { Precificador, type PricingSnapshot, loadPricingSummaryMap, loadPriceHistory } from './Precificador'
 import { MLAnuncioEditorModal } from './MLAnuncioEditorModal'
 
@@ -301,7 +301,7 @@ export function AnunciosML({ onVoltar }: Props) {
   )
 }
 
-function ResumoTooltip({ anuncio, resumo, editavel = false, onSaved }: { anuncio: Anuncio; resumo?: PricingSnapshot; editavel?: boolean; onSaved?: () => void }) {
+function ResumoTooltip({ anuncio, resumo, editavel = false, modal = false, onSaved, onClose }: { anuncio: Anuncio; resumo?: PricingSnapshot; editavel?: boolean; modal?: boolean; onSaved?: () => void; onClose?: () => void }) {
   const [live, setLive] = useState<LivePriceSummary | null>(null)
   const [breakdown, setBreakdown] = useState<LivePriceBreakdown | null>(null)
   const [novoPreco, setNovoPreco] = useState('')
@@ -375,8 +375,18 @@ function ResumoTooltip({ anuncio, resumo, editavel = false, onSaved }: { anuncio
     }
   }
 
+  const rootStyle: CSSProperties = modal
+    ? { position: 'relative', width: '100%', background: '#ffffff', color: '#1d2939', border: '1px solid #cfe0ff', borderRadius: '14px', padding: '1.1rem 1.25rem', boxShadow: '0 24px 60px rgba(16,24,40,.28)', textAlign: 'left' }
+    : { position: 'absolute', right: 0, top: 'calc(100% + 10px)', width: '304px', background: '#ffffff', color: '#1d2939', border: '1px solid #cfe0ff', borderRadius: '12px', padding: '.9rem 1rem', boxShadow: '0 14px 30px rgba(16,24,40,.14)', zIndex: 30, textAlign: 'left' }
+
   return (
-    <div onClick={editavel ? (e) => e.stopPropagation() : undefined} style={{ position: 'absolute', right: 0, top: 'calc(100% + 10px)', width: '304px', background: '#ffffff', color: '#1d2939', border: '1px solid #cfe0ff', borderRadius: '12px', padding: '.9rem 1rem', boxShadow: '0 14px 30px rgba(16,24,40,.14)', zIndex: 30, textAlign: 'left' }}>
+    <div onClick={editavel ? (e) => e.stopPropagation() : undefined} style={rootStyle}>
+      {modal && (
+        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '.75rem', marginBottom: '.75rem', paddingBottom: '.6rem', borderBottom: '1px solid #e9eef7' }}>
+          <div style={{ fontSize: '.9rem', fontWeight: 800, color: '#1d2939', lineHeight: 1.3, overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' }}>{anuncio.titulo}</div>
+          <button onClick={(e) => { e.stopPropagation(); onClose?.() }} aria-label="Fechar" style={{ flexShrink: 0, width: 28, height: 28, borderRadius: 8, border: '1px solid #e4e7ec', background: '#fff', color: '#667085', fontSize: '1.1rem', lineHeight: 1, cursor: 'pointer' }}>×</button>
+        </div>
+      )}
       <LinhaResumo label="Preco original" valor={brl(precoOriginal)} risco={temPromo} />
       <LinhaResumo label="Preco promocional" valor={brl(precoPromocional)} cor={temPromo ? '#067647' : undefined} />
       <LinhaResumo label="Frete" valor={frete != null ? `-${brl(frete)}` : '--'} extra={frete != null ? `${percentual(frete, precoPromocional)}%` : undefined} cor="#b42318" />
@@ -430,7 +440,7 @@ function ResumoTooltip({ anuncio, resumo, editavel = false, onSaved }: { anuncio
           )}
         </div>
       )}
-      <div style={{ position: 'absolute', top: -7, right: 32, width: 14, height: 14, background: '#ffffff', borderLeft: '1px solid #cfe0ff', borderTop: '1px solid #cfe0ff', transform: 'rotate(45deg)' }} />
+      {!modal && <div style={{ position: 'absolute', top: -7, right: 32, width: 14, height: 14, background: '#ffffff', borderLeft: '1px solid #cfe0ff', borderTop: '1px solid #cfe0ff', transform: 'rotate(45deg)' }} />}
     </div>
   )
 }
@@ -481,7 +491,16 @@ function PriceBubble({ anuncio, resumo, statusCor, statusLabel, onPriceChanged }
 
   return (
     <>
-    {aberto && <div onClick={() => setAberto(false)} style={{ position: 'fixed', inset: 0, zIndex: 25 }} />}
+    {aberto && (
+      <div
+        onClick={() => setAberto(false)}
+        style={{ position: 'fixed', inset: 0, background: 'rgba(16,24,40,.45)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '1rem' }}
+      >
+        <div onClick={e => e.stopPropagation()} style={{ width: '100%', maxWidth: 380 }}>
+          <ResumoTooltip anuncio={anuncio} resumo={resumo} editavel modal onSaved={onPriceChanged} onClose={() => setAberto(false)} />
+        </div>
+      </div>
+    )}
     <div
       onClick={() => setAberto(v => !v)}
       style={{
@@ -519,7 +538,7 @@ function PriceBubble({ anuncio, resumo, statusCor, statusLabel, onPriceChanged }
         )}
       </div>
       <div style={{ marginTop: '.08rem', fontSize: '0.72rem', fontWeight: 700, color: statusCor, textAlign: 'right' }}>{statusLabel}</div>
-      {(aberto || hovered) && <ResumoTooltip anuncio={anuncio} resumo={resumo} editavel={aberto} onSaved={onPriceChanged} />}
+      {hovered && !aberto && <ResumoTooltip anuncio={anuncio} resumo={resumo} />}
     </div>
     </>
   )
