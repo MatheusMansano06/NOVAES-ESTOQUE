@@ -95,6 +95,9 @@ interface MarginViewModel {
   margemPct: number | null
 }
 
+interface CustoOficial { custo: number; imposto_pct: number }
+type CustosOficiais = Record<string, CustoOficial>
+
 function carregarImpostoAtual(): number {
   try {
     const raw = localStorage.getItem('nvs_imposto_pct') || '9'
@@ -105,14 +108,15 @@ function carregarImpostoAtual(): number {
   }
 }
 
-function montarResumoMargem(anuncio: Anuncio, resumo?: PricingSnapshot, live?: LivePriceSummary | null, breakdown?: LivePriceBreakdown | null): MarginViewModel {
+function montarResumoMargem(anuncio: Anuncio, resumo?: PricingSnapshot, live?: LivePriceSummary | null, breakdown?: LivePriceBreakdown | null, custoOficial?: CustoOficial | null): MarginViewModel {
   const precoOriginal = live?.cheio ?? (resumo?.precoOriginal && resumo.precoOriginal > 0 ? resumo.precoOriginal : (anuncio.preco_original || anuncio.preco))
   const precoPromocional = live?.promocional ?? (resumo?.precoPromocional && resumo.precoPromocional > 0 ? resumo.precoPromocional : anuncio.preco)
   const frete = resumo?.frete ?? breakdown?.frete ?? anuncio.frete_custo ?? null
   const tarifa = resumo?.tarifa ?? breakdown?.tarifa ?? null
   const tarifaPct = resumo?.tarifaPct ?? breakdown?.tarifaPct ?? null
-  const custo = resumo?.custo ?? null
-  const impostoPct = resumo?.impostoPct ?? carregarImpostoAtual()
+  // Custo oficial (planilha/banco) tem prioridade sobre o snapshot do Precificador.
+  const custo = custoOficial?.custo ?? resumo?.custo ?? null
+  const impostoPct = custoOficial?.imposto_pct ?? resumo?.impostoPct ?? carregarImpostoAtual()
   const imposto = precoPromocional > 0 ? (precoPromocional * impostoPct) / 100 : null
   const margem = frete != null && tarifa != null && custo != null && imposto != null
     ? precoPromocional - frete - tarifa - custo - imposto
@@ -147,9 +151,18 @@ export function AnunciosML({ onVoltar }: Props) {
   const [precificando, setPrecificando] = useState<Anuncio | null>(null)
   const [editando, setEditando] = useState<{ anuncio: Anuncio; mode: EditorMode } | null>(null)
   const [resumos, setResumos] = useState<Record<string, PricingSnapshot>>({})
+  const [custosOficiais, setCustosOficiais] = useState<CustosOficiais>({})
 
   useEffect(() => {
     setResumos(loadPricingSummaryMap())
+  }, [])
+
+  // Custo oficial por SKU (planilha/banco) — fonte de verdade da margem.
+  useEffect(() => {
+    fetch(`${API_BASE}/api/custos`, { cache: 'no-store' })
+      .then(r => r.json())
+      .then(d => { if (d && d.custos) setCustosOficiais(d.custos as CustosOficiais) })
+      .catch(() => { /* mantém vazio */ })
   }, [])
 
   const termoBusca = busca.trim()
@@ -289,7 +302,7 @@ export function AnunciosML({ onVoltar }: Props) {
                       <div style={{ fontSize: '0.7rem', color: '#999' }}>Vendidos</div>
                       <div style={{ fontWeight: 700, color: '#1a1a1a' }}>{a.vendidos}</div>
                     </div>
-                    <PriceBubble anuncio={a} resumo={resumo} statusCor={corStatus(a.status)} statusLabel={labelStatus(a.status)} onPriceChanged={carregar} />
+                    <PriceBubble anuncio={a} resumo={resumo} custoOficial={custosOficiais[a.sku]} statusCor={corStatus(a.status)} statusLabel={labelStatus(a.status)} onPriceChanged={carregar} />
                   </div>
 
                   <div style={{ marginTop: '0.9rem', paddingTop: '0.9rem', borderTop: '1px solid #f0f0f0', display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))', gap: '0.6rem' }}>
@@ -352,12 +365,23 @@ export function AnunciosML({ onVoltar }: Props) {
           itemId={precificando.id}
           precoInicial={precificando.preco}
           precoOriginal={precificando.preco_original}
+          custoInicial={custosOficiais[precificando.sku]?.custo ?? 0}
           freteInicial={precificando.frete_custo || 0}
           categoryId={precificando.categoria_id}
           tipoAtualId={precificando.tipo_anuncio_id}
           onClose={() => setPrecificando(null)}
           onSaved={(snapshot) => {
             setResumos(prev => ({ ...prev, [snapshot.itemId]: snapshot }))
+            // Persiste o custo editado como custo oficial (autoritário) no backend.
+            const sku = precificando.sku
+            if (sku) {
+              setCustosOficiais(prev => ({ ...prev, [sku]: { custo: snapshot.custo, imposto_pct: snapshot.impostoPct } }))
+              fetch(`${API_BASE}/api/custos`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ sku, custo: snapshot.custo, imposto_pct: snapshot.impostoPct }),
+              }).catch(() => { /* mantém estado local mesmo se falhar */ })
+            }
             setPrecificando(null)
           }}
         />
@@ -378,7 +402,7 @@ export function AnunciosML({ onVoltar }: Props) {
   )
 }
 
-function ResumoTooltip({ anuncio, resumo, editavel = false, modal = false, onSaved, onClose }: { anuncio: Anuncio; resumo?: PricingSnapshot; editavel?: boolean; modal?: boolean; onSaved?: () => void; onClose?: () => void }) {
+function ResumoTooltip({ anuncio, resumo, editavel = false, modal = false, onSaved, onClose, custoOficial }: { anuncio: Anuncio; resumo?: PricingSnapshot; editavel?: boolean; modal?: boolean; onSaved?: () => void; onClose?: () => void; custoOficial?: CustoOficial | null }) {
   const [live, setLive] = useState<LivePriceSummary | null>(null)
   const [breakdown, setBreakdown] = useState<LivePriceBreakdown | null>(null)
   const [novoPreco, setNovoPreco] = useState('')
@@ -407,7 +431,7 @@ function ResumoTooltip({ anuncio, resumo, editavel = false, modal = false, onSav
     return () => { ativo = false }
   }, [anuncio.id])
 
-  const resumoMargem = montarResumoMargem(anuncio, resumo, live, breakdown)
+  const resumoMargem = montarResumoMargem(anuncio, resumo, live, breakdown, custoOficial)
 
   // Quando abre em modo edição, pré-preenche o input com o preço cheio atual.
   useEffect(() => {
@@ -515,7 +539,7 @@ function ResumoTooltip({ anuncio, resumo, editavel = false, modal = false, onSav
   )
 }
 
-function PriceBubble({ anuncio, resumo, statusCor, statusLabel, onPriceChanged }: { anuncio: Anuncio; resumo?: PricingSnapshot; statusCor: string; statusLabel: string; onPriceChanged?: () => void }) {
+function PriceBubble({ anuncio, resumo, statusCor, statusLabel, onPriceChanged, custoOficial }: { anuncio: Anuncio; resumo?: PricingSnapshot; statusCor: string; statusLabel: string; onPriceChanged?: () => void; custoOficial?: CustoOficial | null }) {
   const [hovered, setHovered] = useState(false)
   const [aberto, setAberto] = useState(false)
   const [live, setLive] = useState<LivePriceSummary | null>(null)
@@ -555,7 +579,7 @@ function PriceBubble({ anuncio, resumo, statusCor, statusLabel, onPriceChanged }
     return () => { ativo = false }
   }, [hovered, resumo, breakdown, loadingBreakdown, anuncio.id])
 
-  const resumoMargem = montarResumoMargem(anuncio, resumo, live, breakdown)
+  const resumoMargem = montarResumoMargem(anuncio, resumo, live, breakdown, custoOficial)
 
   return (
     <>
@@ -565,7 +589,7 @@ function PriceBubble({ anuncio, resumo, statusCor, statusLabel, onPriceChanged }
         style={{ position: 'fixed', inset: 0, background: 'rgba(16,24,40,.45)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '1rem' }}
       >
         <div onClick={e => e.stopPropagation()} style={{ width: '100%', maxWidth: 380 }}>
-          <ResumoTooltip anuncio={anuncio} resumo={resumo} editavel modal onSaved={onPriceChanged} onClose={() => setAberto(false)} />
+          <ResumoTooltip anuncio={anuncio} resumo={resumo} custoOficial={custoOficial} editavel modal onSaved={onPriceChanged} onClose={() => setAberto(false)} />
         </div>
       </div>
     )}
@@ -597,7 +621,7 @@ function PriceBubble({ anuncio, resumo, statusCor, statusLabel, onPriceChanged }
         <BubbleMetric label="MC %" value={resumoMargem.margemPct != null ? `${resumoMargem.margemPct.toFixed(2)}%` : '--'} cor={resumoMargem.margemPct != null && resumoMargem.margemPct < 0 ? '#b42318' : '#067647'} />
       </div>
       <div style={{ marginTop: '.08rem', fontSize: '0.72rem', fontWeight: 700, color: statusCor, textAlign: 'right' }}>{statusLabel}</div>
-      {hovered && !aberto && <ResumoTooltip anuncio={anuncio} resumo={resumo} />}
+      {hovered && !aberto && <ResumoTooltip anuncio={anuncio} resumo={resumo} custoOficial={custoOficial} />}
     </div>
     </>
   )

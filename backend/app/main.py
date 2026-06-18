@@ -20,7 +20,8 @@ from app.models import (
     NotaFiscal, ItemEstoque, ConfirmacaoEstoque, StatusEstoque, VinculoOlist,
     Fornecedor, HistoricoCompra, ConfiguracaoEstoqueMinimo, NotificacaoFornecedor,
     EmbaleFU, ItemEmbaleFU, ApelidoFornecedor, PrecoVendaProduto,
-    MercadoLivreItemCache, MercadoLivreSyncState, HistoricoFullEmbale
+    MercadoLivreItemCache, MercadoLivreSyncState, HistoricoFullEmbale,
+    CustoProduto
 )
 from app.utils.nfe_parser import NFeParsing
 from app.utils.nfe_pdf_generator import NFePDFGenerator
@@ -3193,6 +3194,79 @@ async def precos_venda(request: Request):
         db.close()
 
 
+async def custos_produto(request: Request):
+    """
+    GET  /api/custos  -> {custos: {SKU: {custo, imposto_pct, atualizado_em}}}
+    POST /api/custos  Body: lote {custos:[{sku, custo, imposto_pct}]}  OU  item único {sku, custo, imposto_pct}
+    Upsert por SKU. custo <= 0 e sem registro é ignorado; com registro, atualiza.
+    Custo oficial/autoritário usado na margem dos anúncios do Mercado Livre.
+    """
+    db = SessionLocal()
+    try:
+        if request.method == "GET":
+            rows = db.query(CustoProduto).all()
+            return JSONResponse(
+                {"custos": {
+                    r.produto_chave: {
+                        "custo": r.custo,
+                        "imposto_pct": r.imposto_pct,
+                        "atualizado_em": r.atualizado_em.isoformat() if r.atualizado_em else None,
+                    } for r in rows
+                }},
+                headers={"Cache-Control": "no-store, no-cache, must-revalidate, max-age=0"},
+            )
+
+        body = await request.json()
+        # Normaliza: aceita lote {"custos":[...]} ou item único {sku,...}
+        if isinstance(body, dict) and isinstance(body.get("custos"), list):
+            itens = body["custos"]
+        elif isinstance(body, dict):
+            itens = [body]
+        else:
+            return JSONResponse({"erro": "corpo inválido"}, status_code=400)
+
+        salvos = 0
+        ignorados = 0
+        for it in itens:
+            if not isinstance(it, dict):
+                ignorados += 1
+                continue
+            sku = (str(it.get("sku") or it.get("produto_chave") or "")).strip()
+            if not sku:
+                ignorados += 1
+                continue
+            try:
+                custo = float(it.get("custo") or 0)
+            except (TypeError, ValueError):
+                ignorados += 1
+                continue
+            imposto_raw = it.get("imposto_pct")
+            try:
+                imposto = float(imposto_raw) if imposto_raw is not None else 9.0
+            except (TypeError, ValueError):
+                imposto = 9.0
+
+            row = db.query(CustoProduto).filter(CustoProduto.produto_chave == sku).first()
+            if custo <= 0 and not row:
+                ignorados += 1
+                continue
+            if row:
+                row.custo = custo
+                row.imposto_pct = imposto
+                row.atualizado_em = datetime.utcnow()
+            else:
+                db.add(CustoProduto(produto_chave=sku, custo=custo, imposto_pct=imposto))
+            salvos += 1
+
+        db.commit()
+        return JSONResponse({"ok": True, "salvos": salvos, "ignorados": ignorados})
+    except Exception as e:
+        db.rollback()
+        return JSONResponse({"erro": str(e)}, status_code=500)
+    finally:
+        db.close()
+
+
 async def ml_status(request: Request):
     """GET /api/ml/status — situação da integração Mercado Livre."""
     return JSONResponse(ml.status(), headers={"Cache-Control": "no-store"})
@@ -3533,6 +3607,7 @@ routes = [
     Route("/api/apelidos-fornecedores", apelidos_fornecedores, methods=["GET", "POST"]),
     Route("/api/notas-fiscais/{id:int}/frete", atualizar_frete_nota, methods=["POST"]),
     Route("/api/precos-venda", precos_venda, methods=["GET", "POST"]),
+    Route("/api/custos", custos_produto, methods=["GET", "POST"]),
     Route("/api/ml/status", ml_status, methods=["GET"]),
     Route("/api/ml/sync", ml_sync_cache, methods=["POST"]),
     Route("/api/ml/anuncios", ml_anuncios, methods=["GET"]),
