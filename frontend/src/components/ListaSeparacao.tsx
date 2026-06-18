@@ -403,7 +403,7 @@ export function ListaSeparacao() {
           </div>
 
           {/* Status atual */}
-          <div style({ display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
+          <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
             {itemAtual.foi_balanceado ? (
               <div style={{
                 padding: '0.5rem 1rem',
