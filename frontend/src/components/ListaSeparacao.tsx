@@ -48,7 +48,7 @@ export function ListaSeparacao() {
       const res = await fetch(`${API_BASE}/api/embaldes/lista`)
       if (!res.ok) throw new Error('Falha ao carregar inbounds')
       const data = await res.json()
-      setInbounds(data)
+      setInbounds(data.items || [])
     } catch (err) {
       setMessage(`Erro: ${err instanceof Error ? err.message : 'desconhecido'}`)
     } finally {
@@ -61,9 +61,8 @@ export function ListaSeparacao() {
     try {
       const res = await fetch(`${API_BASE}/api/embaldes/${inbound.id}/itens`)
       if (!res.ok) throw new Error('Falha ao carregar itens do inbound')
-      const itens = await res.json()
-      const inboundComItens = { ...inbound, itens }
-      setInboundSelecionado(inboundComItens)
+      const data = await res.json()
+      setInboundSelecionado({ ...inbound, itens: data.itens })
       setIndexItemAtual(0)
     } catch (err) {
       setMessage(`Erro: ${err instanceof Error ? err.message : 'desconhecido'}`)
@@ -73,25 +72,24 @@ export function ListaSeparacao() {
   }
 
   const proximoItem = () => {
-    if (inboundSelecionado && inboundSelecionado.itens) {
-      if (indexItemAtual < inboundSelecionado.itens.length - 1) {
-        setIndexItemAtual(indexItemAtual + 1)
-      }
+    if (inboundSelecionado?.itens && indexItemAtual < inboundSelecionado.itens.length - 1) {
+      setIndexItemAtual(indexItemAtual + 1)
+      setMessage('')
     }
   }
 
   const itemAtual = inboundSelecionado?.itens?.[indexItemAtual]
 
   const handleBalancear = async () => {
-    if (!itemAtual) return
+    if (!itemAtual || !inboundSelecionado) return
     setActionLoading(true)
     try {
-      const res = await fetch(`${API_BASE}/api/embaldes/${inboundSelecionado?.id}/item/${itemAtual.id}/balancear`, {
+      const res = await fetch(`${API_BASE}/api/embaldes/${inboundSelecionado.id}/itens/${itemAtual.id}/balancear`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
       })
       if (!res.ok) throw new Error('Falha ao balancear')
-      setMessage('Item balanceado com sucesso!')
+      setMessage('✓ Item balanceado!')
       setTimeout(() => proximoItem(), 800)
     } catch (err) {
       setMessage(`Erro: ${err instanceof Error ? err.message : 'desconhecido'}`)
@@ -101,15 +99,15 @@ export function ListaSeparacao() {
   }
 
   const handleBaixar = async () => {
-    if (!itemAtual) return
+    if (!itemAtual || !inboundSelecionado) return
     setActionLoading(true)
     try {
-      const res = await fetch(`${API_BASE}/api/embaldes/${inboundSelecionado?.id}/item/${itemAtual.id}/baixar`, {
+      const res = await fetch(`${API_BASE}/api/embaldes/${inboundSelecionado.id}/itens/${itemAtual.id}/baixa`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
       })
       if (!res.ok) throw new Error('Falha ao baixar estoque')
-      setMessage('Estoque baixado com sucesso!')
+      setMessage('✓ Estoque baixado!')
       setTimeout(() => proximoItem(), 800)
     } catch (err) {
       setMessage(`Erro: ${err instanceof Error ? err.message : 'desconhecido'}`)
@@ -119,15 +117,15 @@ export function ListaSeparacao() {
   }
 
   const handleEspera = async () => {
-    if (!itemAtual) return
+    if (!itemAtual || !inboundSelecionado) return
     setActionLoading(true)
     try {
-      const res = await fetch(`${API_BASE}/api/embaldes/${inboundSelecionado?.id}/item/${itemAtual.id}/espera`, {
+      const res = await fetch(`${API_BASE}/api/embaldes/${inboundSelecionado.id}/itens/${itemAtual.id}/em-espera`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
       })
       if (!res.ok) throw new Error('Falha ao marcar como espera')
-      setMessage('Item marcado como em espera!')
+      setMessage('⏸️ Item em espera!')
       setTimeout(() => proximoItem(), 800)
     } catch (err) {
       setMessage(`Erro: ${err instanceof Error ? err.message : 'desconhecido'}`)
@@ -136,7 +134,6 @@ export function ListaSeparacao() {
     }
   }
 
-  // Se nenhum inbound selecionado, mostra lista de inbounds
   if (!inboundSelecionado) {
     return (
       <div style={{ padding: '2rem' }}>
@@ -178,8 +175,7 @@ export function ListaSeparacao() {
                   borderRadius: '12px',
                   cursor: 'pointer',
                   textAlign: 'left',
-                  transition: 'all 0.3s',
-                  hover: { borderColor: '#1976d2', boxShadow: '0 4px 12px rgba(25, 118, 210, 0.2)' }
+                  transition: 'all 0.3s'
                 }}
                 onMouseEnter={(e) => {
                   e.currentTarget.style.borderColor = '#1976d2'
@@ -208,7 +204,6 @@ export function ListaSeparacao() {
     )
   }
 
-  // Se tem inbound selecionado, mostra o picker visual
   if (!itemAtual) {
     return (
       <div style={{ padding: '2rem', textAlign: 'center', color: '#666' }}>
@@ -243,14 +238,12 @@ export function ListaSeparacao() {
           background: message.includes('Erro') ? '#ffebee' : '#e8f5e9',
           color: message.includes('Erro') ? '#c62828' : '#2e7d32',
           borderRadius: '8px',
-          border: `1px solid ${message.includes('Erro') ? '#ef5350' : '#4caf50'}`,
-          animation: 'slideDown 0.3s ease'
+          border: `1px solid ${message.includes('Erro') ? '#ef5350' : '#4caf50'}`
         }}>
           {message}
         </div>
       )}
 
-      {/* Header do inbound */}
       <div style={{
         display: 'flex',
         justifyContent: 'space-between',
@@ -278,14 +271,11 @@ export function ListaSeparacao() {
             fontWeight: '600',
             fontSize: '0.9rem'
           }}
-          onMouseEnter={(e) => (e.currentTarget.style.background = '#e8e8e8')}
-          onMouseLeave={(e) => (e.currentTarget.style.background = '#f0f0f0')}
         >
           ← Voltar
         </button>
       </div>
 
-      {/* Barra de progresso */}
       <div style={{ marginBottom: '2rem' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
           <span style={{ fontSize: '0.9rem', fontWeight: '600', color: '#666' }}>
@@ -311,7 +301,6 @@ export function ListaSeparacao() {
         </div>
       </div>
 
-      {/* Card grande do produto */}
       <div style={{
         background: '#fff',
         borderRadius: '16px',
@@ -320,7 +309,6 @@ export function ListaSeparacao() {
         maxWidth: '700px',
         margin: '0 auto'
       }}>
-        {/* Imagem */}
         <div style={{
           width: '100%',
           height: '400px',
@@ -344,12 +332,11 @@ export function ListaSeparacao() {
             />
           ) : (
             <div style={{ color: '#999', fontSize: '1rem', fontWeight: '600' }}>
-              Sem imagem disponível
+              Sem imagem
             </div>
           )}
         </div>
 
-        {/* Informações */}
         <div style={{ marginBottom: '2rem' }}>
           <h3 style={{ margin: '0 0 1rem 0', color: '#1a1a1a', fontSize: '1.3rem', lineHeight: '1.4' }}>
             {itemAtual.titulo_anuncio}
@@ -380,29 +367,8 @@ export function ListaSeparacao() {
                 {Math.round(itemAtual.quantidade_separada)} un.
               </div>
             </div>
-            {itemAtual.olist_sku && (
-              <>
-                <div>
-                  <div style={{ color: '#666', fontSize: '0.85rem', fontWeight: '600', marginBottom: '0.3rem' }}>
-                    SKU OLIST
-                  </div>
-                  <div style={{ color: '#1a1a1a', fontSize: '1rem', fontWeight: '600' }}>
-                    {itemAtual.olist_sku}
-                  </div>
-                </div>
-                <div>
-                  <div style={{ color: '#666', fontSize: '0.85rem', fontWeight: '600', marginBottom: '0.3rem' }}>
-                    NOME OLIST
-                  </div>
-                  <div style={{ color: '#1a1a1a', fontSize: '0.95rem', fontWeight: '600' }}>
-                    {itemAtual.olist_nome || '—'}
-                  </div>
-                </div>
-              </>
-            )}
           </div>
 
-          {/* Status atual */}
           <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
             {itemAtual.foi_balanceado ? (
               <div style={{
@@ -446,7 +412,6 @@ export function ListaSeparacao() {
           </div>
         </div>
 
-        {/* Ações */}
         <div style={{
           display: 'grid',
           gridTemplateColumns: '1fr 1fr 1fr',
@@ -468,16 +433,6 @@ export function ListaSeparacao() {
               opacity: actionLoading ? 0.7 : 1,
               transition: 'all 0.3s'
             }}
-            onMouseEnter={(e) => {
-              if (!itemAtual.foi_balanceado && !actionLoading) {
-                e.currentTarget.style.background = '#f57c00'
-              }
-            }}
-            onMouseLeave={(e) => {
-              if (!itemAtual.foi_balanceado) {
-                e.currentTarget.style.background = '#ff9800'
-              }
-            }}
           >
             ⚖️ Balancear
           </button>
@@ -496,16 +451,6 @@ export function ListaSeparacao() {
               cursor: itemAtual.quantidade_baixada ? 'not-allowed' : 'pointer',
               opacity: actionLoading ? 0.7 : 1,
               transition: 'all 0.3s'
-            }}
-            onMouseEnter={(e) => {
-              if (!itemAtual.quantidade_baixada && !actionLoading) {
-                e.currentTarget.style.background = '#45a049'
-              }
-            }}
-            onMouseLeave={(e) => {
-              if (!itemAtual.quantidade_baixada) {
-                e.currentTarget.style.background = '#4caf50'
-              }
             }}
           >
             📦 Baixar
@@ -526,20 +471,11 @@ export function ListaSeparacao() {
               opacity: actionLoading ? 0.7 : 1,
               transition: 'all 0.3s'
             }}
-            onMouseEnter={(e) => {
-              if (!actionLoading) {
-                e.currentTarget.style.background = '#7b1fa2'
-              }
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.background = '#9c27b0'
-            }}
           >
             ⏸️ Espera
           </button>
         </div>
 
-        {/* Botão Próximo */}
         <button
           onClick={proximoItem}
           disabled={indexItemAtual >= (inboundSelecionado.itens?.length || 0) - 1 || actionLoading}
@@ -556,18 +492,8 @@ export function ListaSeparacao() {
             opacity: actionLoading ? 0.7 : 1,
             transition: 'all 0.3s'
           }}
-          onMouseEnter={(e) => {
-            if (indexItemAtual < (inboundSelecionado.itens?.length || 0) - 1 && !actionLoading) {
-              e.currentTarget.style.background = '#1565c0'
-            }
-          }}
-          onMouseLeave={(e) => {
-            if (indexItemAtual < (inboundSelecionado.itens?.length || 0) - 1) {
-              e.currentTarget.style.background = '#1976d2'
-            }
-          }}
         >
-          {indexItemAtual >= (inboundSelecionado.itens?.length || 0) - 1 ? '✓ Inbound concluído!' : 'Próximo →'}
+          {indexItemAtual >= (inboundSelecionado.itens?.length || 0) - 1 ? '✓ Concluído!' : 'Próximo →'}
         </button>
       </div>
     </div>
