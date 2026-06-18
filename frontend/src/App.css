@@ -260,8 +260,8 @@ body::after {
   grid-template-columns: 112px minmax(0, 1fr);
 }
 
-.nvs-shell.is-collapsed .nvs-sidebar__brand-card img {
-  opacity: 0;
+.nvs-shell.is-collapsed .nvs-sidebar__brand {
+  display: none;
 }
 
 .nvs-shell.is-collapsed .nvs-sidebar__group-label {
@@ -279,6 +279,7 @@ body::after {
 .nvs-shell.is-collapsed .nvs-sidebar__item {
   padding: 14px;
   justify-content: center;
+  gap: 0;
 }
 
 .nvs-sidebar {
