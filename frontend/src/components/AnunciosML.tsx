@@ -212,7 +212,7 @@ export function AnunciosML({ onVoltar }: Props) {
                       <div style={{ fontSize: '0.7rem', color: '#999' }}>Vendidos</div>
                       <div style={{ fontWeight: 700, color: '#1a1a1a' }}>{a.vendidos}</div>
                     </div>
-                    <PriceBubble anuncio={a} resumo={resumo} statusCor={corStatus(a.status)} statusLabel={labelStatus(a.status)} />
+                    <PriceBubble anuncio={a} resumo={resumo} statusCor={corStatus(a.status)} statusLabel={labelStatus(a.status)} onPriceChanged={carregar} />
                   </div>
 
                   <div style={{ marginTop: '0.9rem', paddingTop: '0.9rem', borderTop: '1px solid #f0f0f0', display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))', gap: '0.6rem' }}>
@@ -301,9 +301,12 @@ export function AnunciosML({ onVoltar }: Props) {
   )
 }
 
-function ResumoTooltip({ anuncio, resumo }: { anuncio: Anuncio; resumo?: PricingSnapshot }) {
+function ResumoTooltip({ anuncio, resumo, editavel = false, onSaved }: { anuncio: Anuncio; resumo?: PricingSnapshot; editavel?: boolean; onSaved?: () => void }) {
   const [live, setLive] = useState<LivePriceSummary | null>(null)
   const [breakdown, setBreakdown] = useState<LivePriceBreakdown | null>(null)
+  const [novoPreco, setNovoPreco] = useState('')
+  const [salvando, setSalvando] = useState(false)
+  const [msg, setMsg] = useState<{ tipo: 'ok' | 'erro'; texto: string } | null>(null)
   const historico = resumo ? loadPriceHistory(anuncio.id) : []
 
   useEffect(() => {
@@ -341,8 +344,39 @@ function ResumoTooltip({ anuncio, resumo }: { anuncio: Anuncio; resumo?: Pricing
     : null
   const margemPct = margem != null && precoPromocional > 0 ? (margem / precoPromocional) * 100 : null
 
+  // Quando abre em modo edição, pré-preenche o input com o preço cheio atual.
+  useEffect(() => {
+    if (editavel && novoPreco === '' && precoOriginal > 0) {
+      setNovoPreco(precoOriginal.toFixed(2))
+    }
+  }, [editavel, precoOriginal, novoPreco])
+
+  const salvarPrecoCheio = async () => {
+    const v = Number(String(novoPreco).replace(',', '.'))
+    if (!v || v <= 0) { setMsg({ tipo: 'erro', texto: 'Informe um preço válido' }); return }
+    if (!window.confirm(`Alterar o preço cheio para ${brl(v)}?\n\nIsso pode tirar o anúncio de promoções ativas no Mercado Livre.`)) return
+    setSalvando(true); setMsg(null)
+    try {
+      const r = await fetch(`${API_BASE}/api/ml/anuncios/${anuncio.id}/preco`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ preco: v }),
+      })
+      const d = await r.json()
+      if (!r.ok || d.erro) throw new Error(d.erro || 'Falha ao aplicar o preço')
+      const aplicado = Number(d.preco_novo || v)
+      setMsg({ tipo: 'ok', texto: `Preço cheio atualizado: ${brl(aplicado)}` })
+      setLive(prev => ({ cheio: aplicado, promocional: prev?.promocional ?? null }))
+      onSaved?.()
+    } catch (e) {
+      setMsg({ tipo: 'erro', texto: String(e instanceof Error ? e.message : e) })
+    } finally {
+      setSalvando(false)
+    }
+  }
+
   return (
-    <div style={{ position: 'absolute', right: 0, top: 'calc(100% + 10px)', width: '304px', background: '#ffffff', color: '#1d2939', border: '1px solid #cfe0ff', borderRadius: '12px', padding: '.9rem 1rem', boxShadow: '0 14px 30px rgba(16,24,40,.14)', zIndex: 30, textAlign: 'left' }}>
+    <div onClick={editavel ? (e) => e.stopPropagation() : undefined} style={{ position: 'absolute', right: 0, top: 'calc(100% + 10px)', width: '304px', background: '#ffffff', color: '#1d2939', border: '1px solid #cfe0ff', borderRadius: '12px', padding: '.9rem 1rem', boxShadow: '0 14px 30px rgba(16,24,40,.14)', zIndex: 30, textAlign: 'left' }}>
       <LinhaResumo label="Preco original" valor={brl(precoOriginal)} risco={temPromo} />
       <LinhaResumo label="Preco promocional" valor={brl(precoPromocional)} cor={temPromo ? '#067647' : undefined} />
       <LinhaResumo label="Frete" valor={frete != null ? `-${brl(frete)}` : '--'} extra={frete != null ? `${percentual(frete, precoPromocional)}%` : undefined} cor="#b42318" />
@@ -362,9 +396,38 @@ function ResumoTooltip({ anuncio, resumo }: { anuncio: Anuncio; resumo?: Pricing
           ))}
         </div>
       )}
-      {!resumo && (
+      {!resumo && !editavel && (
         <div style={{ marginTop: '.45rem', fontSize: '.68rem', color: '#98a2b3' }}>
           * Frete e tarifa vêm direto do ML. Para custo/margem exatos, salve os dados no Precificador.
+        </div>
+      )}
+      {editavel && (
+        <div style={{ marginTop: '.6rem', paddingTop: '.55rem', borderTop: '1px solid #e9eef7' }}>
+          <div style={{ fontSize: '.68rem', color: '#98a2b3', textTransform: 'uppercase', letterSpacing: '.03em', marginBottom: '.4rem' }}>Editar preço cheio</div>
+          <div style={{ display: 'flex', gap: '.4rem', alignItems: 'center' }}>
+            <span style={{ fontSize: '.85rem', color: '#475467', fontWeight: 700 }}>R$</span>
+            <input
+              type="text"
+              inputMode="decimal"
+              value={novoPreco}
+              onChange={e => setNovoPreco(e.target.value)}
+              onClick={e => e.stopPropagation()}
+              style={{ flex: 1, minWidth: 0, padding: '.45rem .6rem', border: '1px solid #cfd8dc', borderRadius: 6, fontSize: '.9rem', fontWeight: 700, boxSizing: 'border-box' }}
+            />
+            <button
+              onClick={(e) => { e.stopPropagation(); salvarPrecoCheio() }}
+              disabled={salvando}
+              style={{ padding: '.45rem .8rem', background: '#5b3cc4', color: '#fff', border: 'none', borderRadius: 6, fontWeight: 700, cursor: salvando ? 'wait' : 'pointer', whiteSpace: 'nowrap' }}
+            >
+              {salvando ? '...' : 'Salvar'}
+            </button>
+          </div>
+          <div style={{ marginTop: '.4rem', fontSize: '.7rem', color: '#b54708', background: '#fffaeb', border: '1px solid #fedf89', borderRadius: 6, padding: '.4rem .5rem' }}>
+            ⚠️ Alterar o preço cheio pode tirar o anúncio de promoções ativas no Mercado Livre.
+          </div>
+          {msg && (
+            <div style={{ marginTop: '.4rem', fontSize: '.72rem', fontWeight: 700, color: msg.tipo === 'ok' ? '#067647' : '#b42318' }}>{msg.texto}</div>
+          )}
         </div>
       )}
       <div style={{ position: 'absolute', top: -7, right: 32, width: 14, height: 14, background: '#ffffff', borderLeft: '1px solid #cfe0ff', borderTop: '1px solid #cfe0ff', transform: 'rotate(45deg)' }} />
@@ -372,8 +435,9 @@ function ResumoTooltip({ anuncio, resumo }: { anuncio: Anuncio; resumo?: Pricing
   )
 }
 
-function PriceBubble({ anuncio, resumo, statusCor, statusLabel }: { anuncio: Anuncio; resumo?: PricingSnapshot; statusCor: string; statusLabel: string }) {
+function PriceBubble({ anuncio, resumo, statusCor, statusLabel, onPriceChanged }: { anuncio: Anuncio; resumo?: PricingSnapshot; statusCor: string; statusLabel: string; onPriceChanged?: () => void }) {
   const [hovered, setHovered] = useState(false)
+  const [aberto, setAberto] = useState(false)
   const [live, setLive] = useState<LivePriceSummary | null>(null)
   const [breakdown, setBreakdown] = useState<LivePriceBreakdown | null>(null)
   const [loadingBreakdown, setLoadingBreakdown] = useState(false)
@@ -416,7 +480,10 @@ function PriceBubble({ anuncio, resumo, statusCor, statusLabel }: { anuncio: Anu
   const temPromo = precoPromocional < precoOriginal - 0.01
 
   return (
+    <>
+    {aberto && <div onClick={() => setAberto(false)} style={{ position: 'fixed', inset: 0, zIndex: 25 }} />}
     <div
+      onClick={() => setAberto(v => !v)}
       style={{
         position: 'relative',
         minWidth: '148px',
@@ -424,8 +491,9 @@ function PriceBubble({ anuncio, resumo, statusCor, statusLabel }: { anuncio: Anu
         padding: '.42rem .7rem .48rem',
         borderRadius: '10px',
         background: '#fff',
-        border: '1px solid #9fc2ff',
-        boxShadow: hovered ? '0 10px 24px rgba(52,131,250,.18)' : 'none',
+        border: aberto ? '1px solid #5b3cc4' : '1px solid #9fc2ff',
+        boxShadow: (hovered || aberto) ? '0 10px 24px rgba(52,131,250,.18)' : 'none',
+        cursor: 'pointer',
       }}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
@@ -451,8 +519,9 @@ function PriceBubble({ anuncio, resumo, statusCor, statusLabel }: { anuncio: Anu
         )}
       </div>
       <div style={{ marginTop: '.08rem', fontSize: '0.72rem', fontWeight: 700, color: statusCor, textAlign: 'right' }}>{statusLabel}</div>
-      {hovered && <ResumoTooltip anuncio={anuncio} resumo={resumo} />}
+      {(aberto || hovered) && <ResumoTooltip anuncio={anuncio} resumo={resumo} editavel={aberto} onSaved={onPriceChanged} />}
     </div>
+    </>
   )
 }
 
