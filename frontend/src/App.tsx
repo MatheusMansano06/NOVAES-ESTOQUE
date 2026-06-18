@@ -2076,8 +2076,8 @@ function App() {
                         </div>
 
                         <div style={{ marginBottom: '0.25rem' }}>
-                          <button
-                            Clique em `Conferir` para abrir o fluxo antigo de conferência do item.
+                          <div style={{ color: '#666', fontSize: '0.8rem', fontWeight: '600', margin: '0 0 0.8rem 0' }}>
+                            Clique em &quot;Conferir&quot; para abrir o fluxo antigo de conferência do item.
                           </div>
                           <button
                             onClick={() => setModalAdicionarProdutoAberto(true)}
