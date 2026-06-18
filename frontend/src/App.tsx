@@ -6,6 +6,7 @@ import { ModalDetalhesNotaFiscal } from './ModalDetalhesNotaFiscal'
 import { FornecedoresManager } from './components/FornecedoresManager'
 import { EmbaldesManager } from './components/EmbaldesManager'
 import { AnunciosML } from './components/AnunciosML'
+import { ListaSeparacao } from './components/ListaSeparacao'
 import { AppShell, type ShellNavGroup, type ShellStatusItem } from './components/AppShell'
 import { baixarMultiplosOuPdfs } from './services/api'
 
@@ -68,7 +69,7 @@ interface ProdutoEstoque {
   }>
 }
 
-type Pagina = 'bemvindo' | 'inicial' | 'conferencia' | 'produtos_nota' | 'relacionamento_produto' | 'fornecedores' | 'embaldes' | 'anuncios' | 'notas-fiscais' | 'divergencias'
+type Pagina = 'bemvindo' | 'inicial' | 'conferencia' | 'produtos_nota' | 'relacionamento_produto' | 'fornecedores' | 'embaldes' | 'anuncios' | 'notas-fiscais' | 'divergencias' | 'lista-separacao'
 
 interface Divergencia {
   item_id: number
@@ -589,6 +590,7 @@ function App() {
       const res = await fetch(`${API_BASE}/api/notas-fiscais/${notaId}`)
       const data: NotaFiscal = await res.json()
       setNotaDetalheAberta(data)
+      setGruposExpandidos(new Set())
       setNotaSelecionada(data)
       setProdutosNota(data.itens || [])
       setAbaDetalhe('detalhes')
@@ -607,6 +609,7 @@ function App() {
     setNotaDetalheAberta(null)
     setAbaDetalhe('detalhes')
     setItensSelecionadosMultiplos(new Set())
+    setGruposExpandidos(new Set())
   }
 
   // Notas filtradas pela busca (nº, nome, CNPJ) e data
@@ -1358,6 +1361,7 @@ function App() {
       items: [
         { key: 'dashboard', label: 'Dashboard', icon: 'dashboard', active: pagina === 'inicial', onClick: () => setPagina('inicial') },
         { key: 'notas', label: 'Notas fiscais', icon: 'receipt', badge: notas.length, active: pagina === 'notas-fiscais', onClick: () => setPagina('notas-fiscais') },
+        { key: 'lista-sep', label: 'Lista de separação', icon: 'box', active: pagina === 'lista-separacao', onClick: () => setPagina('lista-separacao') },
         { key: 'fornecedores', label: 'Fornecedores', icon: 'users', active: pagina === 'fornecedores', onClick: () => setPagina('fornecedores') },
       ],
     },
@@ -2066,30 +2070,20 @@ function App() {
                     )}
 
                     {abaDetalhe === 'conferencia' && (
-                      <div style={{ display: 'grid', gap: '1rem' }}>
-                        <div style={{ background: '#f7f9fa', border: '1px solid #e0e0e0', borderRadius: '10px', padding: '1rem' }}>
-                          <div style={{ fontWeight: 700, color: '#1a1a1a', marginBottom: '0.6rem' }}>Progresso da nota</div>
+                      <div style={{ display: 'grid', gap: '1.25rem' }}>
+                        <div style={{ background: '#fff', border: '1px solid #e0e0e0', borderRadius: '10px', padding: '1rem 1.25rem' }}>
                           <BarraProgresso itens={notaDetalheAberta.itens} />
                         </div>
 
-                        <div style={{ display: 'flex', justifyContent: 'space-between', gap: '1rem', alignItems: 'center', flexWrap: 'wrap' }}>
-                          <div style={{ color: '#607d8b', fontSize: '0.88rem' }}>
+                        <div style={{ marginBottom: '0.25rem' }}>
+                          <button
                             Clique em `Conferir` para abrir o fluxo antigo de conferência do item.
                           </div>
                           <button
-                            onClick={enviarMultiplosEmMassa}
-                            disabled={itensSelecionadosMultiplos.size === 0}
-                            style={{
-                              padding: '0.65rem 1rem',
-                              background: itensSelecionadosMultiplos.size === 0 ? '#cfd8dc' : '#1976D2',
-                              color: '#fff',
-                              border: 'none',
-                              borderRadius: '8px',
-                              cursor: itensSelecionadosMultiplos.size === 0 ? 'not-allowed' : 'pointer',
-                              fontWeight: 700,
-                            }}
+                            onClick={() => setModalAdicionarProdutoAberto(true)}
+                            style={{ padding: '0.65rem 1rem', background: '#4caf50', color: '#fff', border: 'none', borderRadius: '8px', fontWeight: 700, cursor: 'pointer' }}
                           >
-                            Enviar selecionados em massa
+                            + Adicionar Produto Manual
                           </button>
                         </div>
 
@@ -3453,6 +3447,29 @@ function App() {
         </header>
         <main className="container main-content">
           <EmbaldesManager />
+        </main>
+      </div>
+    )
+  }
+
+  // ===== PÁGINA LISTA DE SEPARAÇÃO =====
+  if (pagina === 'lista-separacao') {
+    return renderComShell(
+      'Lista de Separação',
+      'Separe produtos do inbound com ações visuais',
+      <div className="app">
+        <header className="header">
+          <div className="container">
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div>
+                <h1>LISTA DE SEPARAÇÃO</h1>
+                <p>Separe produtos com balanço, baixa ou espera</p>
+              </div>
+            </div>
+          </div>
+        </header>
+        <main className="container main-content">
+          <ListaSeparacao />
         </main>
       </div>
     )

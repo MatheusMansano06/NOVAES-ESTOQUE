@@ -3503,6 +3503,106 @@ async def olist_deletar_vinculo(request: Request):
         db.close()
 
 
+async def listar_embaldes_simplificado(request: Request):
+    """
+    GET /api/embaldes/lista
+    Lista simplificada de embaldes (inbounds) para o picker visual de separação.
+    Retorna apenas os dados essenciais sem os itens.
+    """
+    try:
+        db = SessionLocal()
+
+        # Lista apenas inbounds não encerrados, ordenados por data de upload DESC
+        embaldes = db.query(EmbaleFU).filter(
+            EmbaleFU.status != "encerrado"
+        ).order_by(EmbaleFU.data_upload.desc()).all()
+
+        return JSONResponse({
+            "total": len(embaldes),
+            "items": [
+                {
+                    "id": e.id,
+                    "nome_embalde": e.nome_embalde,
+                    "numero_inbound": e.numero_inbound,
+                    "total_unidades": e.total_unidades,
+                    "data_limite": e.data_limite.isoformat() if e.data_limite else None,
+                    "qtd_items": len(e.itens),
+                    "qtd_baixados": sum(1 for i in e.itens if i.quantidade_baixada and i.quantidade_baixada > 0),
+                    "qtd_em_espera": sum(1 for i in e.itens if (i.em_espera or 0) == 1),
+                }
+                for e in embaldes
+            ]
+        })
+
+    except Exception as e:
+        return JSONResponse({"erro": str(e)}, status_code=500)
+    finally:
+        db.close()
+
+
+async def obter_items_embale_para_separacao(request: Request):
+    """
+    GET /api/embaldes/{embale_id}/itens
+    Retorna itens de um inbound com vinculação a imagens do Mercado Livre.
+    Otimizado para o picker visual de separação (um produto por vez).
+    """
+    try:
+        db = SessionLocal()
+        embale_id = int(request.path_params.get("embale_id"))
+
+        embale = db.query(EmbaleFU).filter(EmbaleFU.id == embale_id).first()
+        if not embale:
+            return JSONResponse({"erro": "Inbound não encontrado"}, status_code=404)
+
+        # Buscar cache do ML para obter imagens
+        itens_response = []
+        for item in embale.itens:
+            item_data = {
+                "id": item.id,
+                "embalde_id": item.embalde_id,
+                "titulo_anuncio": item.titulo_anuncio,
+                "sku_inbound": item.sku_inbound,
+                "quantidade_separada": item.quantidade_separada,
+                "olist_sku": item.olist_sku,
+                "olist_nome": item.olist_nome,
+                "codigo_ml": item.codigo_ml,
+                "foi_balanceado": item.foi_balanceado or 0,
+                "em_espera": item.em_espera or 0,
+                "saldo_disponivel": item.saldo_disponivel,
+                "quantidade_baixada": item.quantidade_baixada or 0,
+            }
+
+            # Tentar buscar imagem do cache do ML usando o código ML
+            if item.codigo_ml:
+                try:
+                    ml_cache = db.query(MercadoLivreItemCache).filter(
+                        MercadoLivreItemCache.codigo_ml == item.codigo_ml
+                    ).first()
+                    if ml_cache:
+                        if ml_cache.imagem_principal:
+                            item_data["imagem_principal"] = ml_cache.imagem_principal
+                        if ml_cache.thumbnail:
+                            item_data["thumbnail"] = ml_cache.thumbnail
+                except:
+                    pass
+
+            itens_response.append(item_data)
+
+        return JSONResponse({
+            "id": embale.id,
+            "nome_embalde": embale.nome_embalde,
+            "numero_inbound": embale.numero_inbound,
+            "data_limite": embale.data_limite.isoformat() if embale.data_limite else None,
+            "total_unidades": embale.total_unidades,
+            "itens": itens_response
+        })
+
+    except Exception as e:
+        return JSONResponse({"erro": str(e)}, status_code=500)
+    finally:
+        db.close()
+
+
 routes = [
     Route("/api/health", root, methods=["GET"]),
     Route("/api/apelidos-fornecedores", apelidos_fornecedores, methods=["GET", "POST"]),
@@ -3562,8 +3662,10 @@ routes = [
     Route("/api/olist/vinculos/deletar", olist_deletar_vinculo, methods=["POST"]),
     # Inbound / Lista de Separação para FU
     Route("/api/embaldes/upload", upload_embale, methods=["POST"]),
+    Route("/api/embaldes/lista", listar_embaldes_simplificado, methods=["GET"]),
     Route("/api/embaldes", listar_embaldes, methods=["GET"]),
     Route("/api/embaldes/{embale_id}", obter_embale, methods=["GET"]),
+    Route("/api/embaldes/{embale_id}/itens", obter_items_embale_para_separacao, methods=["GET"]),
     Route("/api/embaldes/{embale_id}", deletar_embale, methods=["DELETE"]),
     Route("/api/embaldes/{embale_id}/nome", atualizar_nome_embale, methods=["POST"]),
     Route("/api/embaldes/{embale_id}/data-limite", atualizar_data_limite_embale, methods=["POST"]),
