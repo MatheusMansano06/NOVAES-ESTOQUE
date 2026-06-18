@@ -261,7 +261,12 @@ body::after {
 }
 
 .nvs-shell.is-collapsed .nvs-sidebar__brand {
-  display: none;
+  display: none !important;
+}
+
+.nvs-shell.is-collapsed .nvs-sidebar__groups {
+  display: flex !important;
+  position: static !important;
 }
 
 .nvs-shell.is-collapsed .nvs-sidebar__group-label {
@@ -280,6 +285,8 @@ body::after {
   padding: 14px;
   justify-content: center;
   gap: 0;
+  width: 48px;
+  height: 48px;
 }
 
 .nvs-sidebar {
