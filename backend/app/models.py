@@ -300,6 +300,22 @@ class PrecoVendaProduto(Base):
     atualizado_em = Column(DateTime, default=datetime.utcnow)
 
 
+class CustoProduto(Base):
+    """
+    Custo unitário oficial de um produto, definido pelo usuário (ex.: importado da
+    planilha financeira). É a fonte de verdade do custo na margem dos anúncios do
+    Mercado Livre (tem prioridade sobre o custo médio das NFs).
+    Chave = SKU do anúncio (ml_item_cache.sku / olist_sku).
+    """
+    __tablename__ = "custos_produto"
+
+    id = Column(Integer, primary_key=True)
+    produto_chave = Column(String(150), unique=True, index=True)  # SKU
+    custo = Column(Float, default=0)
+    imposto_pct = Column(Float, default=9)
+    atualizado_em = Column(DateTime, default=datetime.utcnow)
+
+
 class MercadoLivreItemCache(Base):
     """
     Espelho local do anúncio do Mercado Livre.
