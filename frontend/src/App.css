@@ -260,6 +260,27 @@ body::after {
   grid-template-columns: 112px minmax(0, 1fr);
 }
 
+.nvs-shell.is-collapsed .nvs-sidebar__brand-card img {
+  opacity: 0;
+}
+
+.nvs-shell.is-collapsed .nvs-sidebar__group-label {
+  display: none;
+}
+
+.nvs-shell.is-collapsed .nvs-sidebar__item-label {
+  display: none;
+}
+
+.nvs-shell.is-collapsed .nvs-sidebar__item-badge {
+  display: none;
+}
+
+.nvs-shell.is-collapsed .nvs-sidebar__item {
+  padding: 14px;
+  justify-content: center;
+}
+
 .nvs-sidebar {
   background: linear-gradient(180deg, #04111f 0%, #0a1d35 100%);
   color: #fff;
