@@ -3314,6 +3314,12 @@ async def ml_margens(request: Request):
     return JSONResponse(ml.margens_por_sku(skus), headers={"Cache-Control": "no-store"})
 
 
+async def ml_imagens(request: Request):
+    """GET /api/ml/imagens — mapa {SKU: imagem} de todo o cache do ML (qualquer status).
+    Usado na Lista de Separação para mostrar a foto de cada item do inbound."""
+    return JSONResponse(ml.imagens_por_sku(), headers={"Cache-Control": "no-store"})
+
+
 async def ml_anuncio_detalhes(request: Request):
     item_id = request.path_params.get("item_id")
     if not item_id:
@@ -3622,6 +3628,7 @@ routes = [
     Route("/api/ml/anuncios/{item_id:str}/pictures", ml_anuncio_imagens_reordenar, methods=["POST"]),
     Route("/api/ml/precificacao", ml_precificacao, methods=["GET"]),
     Route("/api/ml/margens", ml_margens, methods=["POST"]),
+    Route("/api/ml/imagens", ml_imagens, methods=["GET"]),
     Route("/api/ml/conectar", ml_conectar, methods=["GET"]),
     Route("/api/ml/callback", ml_callback, methods=["GET"]),
     Route("/api/upload-nfe", upload_nfe, methods=["POST"]),

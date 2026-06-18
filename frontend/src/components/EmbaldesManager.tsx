@@ -126,12 +126,12 @@ export function EmbaldesManager({ modoSeparacao = false }: { modoSeparacao?: boo
     let cancelado = false
     ;(async () => {
       try {
-        const r = await api.get('/ml/anuncios?status=todos&offset=0&limit=1000')
+        // Endpoint dedicado: mapa SKU->imagem de TODO o cache do ML (sem o teto de 50
+        // da listagem paginada de anúncios, que fazia a maioria das fotos sumir).
+        const r = await api.get('/ml/imagens')
         const mapa: Record<string, string> = {}
-        for (const a of r.data?.anuncios || []) {
-          const sku = String(a.sku || '').trim().toUpperCase()
-          const img = a.imagem_principal || a.thumbnail
-          if (sku && img) mapa[sku] = img
+        for (const [sku, img] of Object.entries(r.data?.imagens || {})) {
+          if (sku && img) mapa[String(sku).trim().toUpperCase()] = String(img)
         }
         if (!cancelado) setSkuImg(mapa)
       } catch { /* foto é opcional — não trava as ações */ }
