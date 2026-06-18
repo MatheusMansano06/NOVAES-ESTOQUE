@@ -6,7 +6,6 @@ import { ModalDetalhesNotaFiscal } from './ModalDetalhesNotaFiscal'
 import { FornecedoresManager } from './components/FornecedoresManager'
 import { EmbaldesManager } from './components/EmbaldesManager'
 import { AnunciosML } from './components/AnunciosML'
-import { ListaSeparacao } from './components/ListaSeparacao'
 import { AppShell, type ShellNavGroup, type ShellStatusItem } from './components/AppShell'
 import { baixarMultiplosOuPdfs } from './services/api'
 
@@ -3469,7 +3468,7 @@ function App() {
           </div>
         </header>
         <main className="container main-content">
-          <ListaSeparacao />
+          <EmbaldesManager modoSeparacao={true} />
         </main>
       </div>
     )
