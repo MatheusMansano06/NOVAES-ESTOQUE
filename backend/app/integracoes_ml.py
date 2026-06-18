@@ -24,6 +24,7 @@ from datetime import datetime, timedelta
 from typing import Optional, Dict, List, Any
 from dotenv import load_dotenv
 from sqlalchemy.orm import Session
+from sqlalchemy import or_, func
 
 from database import SessionLocal
 from app.models import MercadoLivreItemCache, MercadoLivreSyncState
@@ -709,18 +710,26 @@ class MLIntegration:
         state.cache_expires_at = now + timedelta(seconds=ttl_seconds)
         state.last_error = last_error
 
-    def _listar_anuncios_cache(self, status: str, offset: int, limit: int) -> Dict[str, Any]:
+    def _listar_anuncios_cache(self, status: str, offset: int, limit: int, q: str = "") -> Dict[str, Any]:
         db = self._db()
         try:
             scope = self._sync_scope(status)
             state = self._sync_state_query(db, scope)
-            q = db.query(MercadoLivreItemCache)
+            query = db.query(MercadoLivreItemCache)
             if status and status != "todos":
-                q = q.filter(MercadoLivreItemCache.status == status)
+                query = query.filter(MercadoLivreItemCache.status == status)
+            termo = (str(q or "")).strip().lower()
+            if termo:
+                like = f"%{termo}%"
+                query = query.filter(or_(
+                    func.lower(func.coalesce(MercadoLivreItemCache.titulo, "")).like(like),
+                    func.lower(func.coalesce(MercadoLivreItemCache.sku, "")).like(like),
+                    func.lower(func.coalesce(MercadoLivreItemCache.item_id, "")).like(like),
+                ))
             # Ordenação estável (item_id) p/ paginação consistente; total vem da
             # contagem LOCAL — o catálogo inteiro fica espelhado no cache.
-            total = q.count()
-            rows = q.order_by(MercadoLivreItemCache.item_id.asc()).offset(offset).limit(limit).all()
+            total = query.count()
+            rows = query.order_by(MercadoLivreItemCache.item_id.asc()).offset(offset).limit(limit).all()
             anuncios = [self._cache_to_simple_item(row) for row in rows]
             return {
                 "total": total,
@@ -730,6 +739,7 @@ class MLIntegration:
                 "cache": {
                     "fonte": "sqlite",
                     "scope": scope,
+                    "q": termo or None,
                     "synced_at": state.synced_at.isoformat() if state and state.synced_at else None,
                     "expires_at": state.cache_expires_at.isoformat() if state and state.cache_expires_at else None,
                     "stale": not self._is_fresh(state.cache_expires_at if state else None),
@@ -1638,26 +1648,27 @@ class MLIntegration:
         self.sync_item(item_id, force=True)
         return {"ok": True, "aplicado": True, "preco_anterior": preco_anterior, "preco_novo": preco}
 
-    def listar_anuncios(self, status: str = "active", offset: int = 0, limit: int = 50, force_refresh: bool = False) -> Dict:
+    def listar_anuncios(self, status: str = "active", offset: int = 0, limit: int = 50, force_refresh: bool = False, q: str = "") -> Dict:
         """Lista anúncios servindo do cache local (SQLite). Abrir a página NÃO bate
         na API — a atualização vem do polling incremental em segundo plano.
         force_refresh dispara uma sincronização incremental na hora.
         """
+        termo_busca = q
         if force_refresh:
             self.sync_catalogo(status=status, force_full=False)
         else:
             db = self._db()
             try:
-                q = db.query(MercadoLivreItemCache.id)
+                cache_query = db.query(MercadoLivreItemCache.id)
                 if status and status != "todos":
-                    q = q.filter(MercadoLivreItemCache.status == status)
-                tem_cache = q.first() is not None
+                    cache_query = cache_query.filter(MercadoLivreItemCache.status == status)
+                tem_cache = cache_query.first() is not None
             finally:
                 db.close()
             # cold start: cache vazio p/ este status -> popula em background e já responde
             if not tem_cache:
                 self._sync_catalogo_async(status)
-        return self._listar_anuncios_cache(status=status, offset=offset, limit=limit)
+        return self._listar_anuncios_cache(status=status, offset=offset, limit=limit, q=termo_busca)
 
 
 ml = MLIntegration()

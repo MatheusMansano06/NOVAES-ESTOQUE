@@ -3201,13 +3201,16 @@ async def ml_status(request: Request):
 async def ml_anuncios(request: Request):
     """GET /api/ml/anuncios?status=active&offset=0&limit=50 — lista anúncios do ML (somente leitura)."""
     status = request.query_params.get("status", "active")
+    q = (request.query_params.get("q", "") or "").strip()
     force_refresh = request.query_params.get("force_refresh", "").strip().lower() in {"1", "true", "yes", "sim"}
     try:
         offset = int(request.query_params.get("offset", 0))
         limit = int(request.query_params.get("limit", 50))
     except (TypeError, ValueError):
         offset, limit = 0, 50
-    resultado = ml.listar_anuncios(status=status, offset=offset, limit=limit, force_refresh=force_refresh)
+    limit = max(10, min(limit, 50))
+    offset = max(0, offset)
+    resultado = ml.listar_anuncios(status=status, offset=offset, limit=limit, force_refresh=force_refresh, q=q)
     code = 200 if not resultado.get("erro") else 502
     return JSONResponse(resultado, status_code=code, headers={"Cache-Control": "no-store"})
 

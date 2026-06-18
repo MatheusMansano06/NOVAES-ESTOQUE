@@ -3,7 +3,8 @@ import { Precificador, type PricingSnapshot, loadPricingSummaryMap, loadPriceHis
 import { MLAnuncioEditorModal } from './MLAnuncioEditorModal'
 
 const API_BASE = import.meta.env.VITE_API_URL ?? 'http://127.0.0.1:8000'
-const PAGINA = 50
+const PAGE_SIZE_OPTIONS = [10, 20, 30, 40, 50] as const
+const DEFAULT_PAGE_SIZE = 20
 
 interface Anuncio {
   id: string
@@ -95,6 +96,7 @@ export function AnunciosML({ onVoltar }: Props) {
   const [anuncios, setAnuncios] = useState<Anuncio[]>([])
   const [total, setTotal] = useState(0)
   const [offset, setOffset] = useState(0)
+  const [pageSize, setPageSize] = useState<number>(DEFAULT_PAGE_SIZE)
   const [loading, setLoading] = useState(true)
   const [erro, setErro] = useState('')
   const [busca, setBusca] = useState('')
@@ -107,15 +109,24 @@ export function AnunciosML({ onVoltar }: Props) {
     setResumos(loadPricingSummaryMap())
   }, [])
 
+  const termoBusca = busca.trim()
+
   const carregar = useCallback(async () => {
     setLoading(true)
     setErro('')
     try {
-      const r = await fetch(`${API_BASE}/api/ml/anuncios?status=${aba}&offset=${offset}&limit=${PAGINA}`, { cache: 'no-store' })
+      const params = new URLSearchParams({
+        status: aba,
+        offset: String(offset),
+        limit: String(pageSize),
+      })
+      if (termoBusca) params.set('q', termoBusca)
+      const r = await fetch(`${API_BASE}/api/ml/anuncios?${params.toString()}`, { cache: 'no-store' })
       const d = await r.json()
       if (!r.ok || d.erro) {
         setErro(d.erro || 'Falha ao carregar anuncios')
         setAnuncios([])
+        setTotal(0)
         setStatusConexao('erro')
       } else {
         setAnuncios(d.anuncios || [])
@@ -128,19 +139,22 @@ export function AnunciosML({ onVoltar }: Props) {
     } finally {
       setLoading(false)
     }
-  }, [aba, offset])
+  }, [aba, offset, pageSize, termoBusca])
 
   useEffect(() => { carregar() }, [carregar])
 
   const trocarAba = (novaAba: string) => { setAba(novaAba); setOffset(0); setBusca('') }
+  const aoMudarBusca = (valor: string) => {
+    setBusca(valor)
+    setOffset(0)
+  }
+  const aoMudarPageSize = (valor: number) => {
+    setPageSize(valor)
+    setOffset(0)
+  }
 
-  const termo = busca.trim().toLowerCase()
-  const filtrados = termo === '' ? anuncios : anuncios.filter(a =>
-    a.titulo.toLowerCase().includes(termo) || a.sku.toLowerCase().includes(termo) || a.id.toLowerCase().includes(termo)
-  )
-
-  const totalPaginas = Math.max(1, Math.ceil(total / PAGINA))
-  const paginaAtual = Math.floor(offset / PAGINA) + 1
+  const totalPaginas = Math.max(1, Math.ceil(total / pageSize))
+  const paginaAtual = Math.floor(offset / pageSize) + 1
 
   const corStatus = (s: string) => s === 'active' ? '#2e7d32' : s === 'paused' ? '#e65100' : '#9e9e9e'
   const labelStatus = (s: string) => s === 'active' ? 'Ativo' : s === 'paused' ? 'Pausado' : s === 'closed' ? 'Finalizado' : s
@@ -167,8 +181,28 @@ export function AnunciosML({ onVoltar }: Props) {
           ))}
         </div>
 
-        <input type="text" placeholder="Buscar nesta pagina por titulo, SKU ou MLB..." value={busca} onChange={e => setBusca(e.target.value)}
-          style={{ width: '100%', padding: '0.75rem 1rem', border: '1px solid #cfd8dc', borderRadius: '6px', fontSize: '0.95rem', marginBottom: '1.5rem', boxSizing: 'border-box' }} />
+        <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center', flexWrap: 'wrap', marginBottom: '1.5rem' }}>
+          <input
+            type="text"
+            placeholder="Buscar em todos os anuncios por titulo, SKU ou MLB..."
+            value={busca}
+            onChange={e => aoMudarBusca(e.target.value)}
+            style={{ flex: '1 1 420px', minWidth: '280px', padding: '0.75rem 1rem', border: '1px solid #cfd8dc', borderRadius: '6px', fontSize: '0.95rem', boxSizing: 'border-box' }}
+          />
+          <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.92rem', color: '#455a64', fontWeight: 600 }}>
+            Mostrar
+            <select
+              value={pageSize}
+              onChange={e => aoMudarPageSize(Number(e.target.value))}
+              style={{ padding: '0.72rem 0.85rem', border: '1px solid #cfd8dc', borderRadius: '6px', fontSize: '0.92rem', background: '#fff', color: '#1a1a1a' }}
+            >
+              {PAGE_SIZE_OPTIONS.map(opcao => (
+                <option key={opcao} value={opcao}>{opcao}</option>
+              ))}
+            </select>
+            por pagina
+          </label>
+        </div>
 
         {erro && (
           <div style={{ padding: '1rem', background: '#ffebee', border: '1px solid #ef5350', borderRadius: '8px', color: '#c62828', marginBottom: '1.5rem' }}>
@@ -181,11 +215,11 @@ export function AnunciosML({ onVoltar }: Props) {
 
         {loading ? (
           <p style={{ textAlign: 'center', color: '#999', padding: '2rem' }}>Carregando anuncios...</p>
-        ) : filtrados.length === 0 ? (
+        ) : anuncios.length === 0 ? (
           <p style={{ textAlign: 'center', color: '#999', padding: '2rem' }}>{erro ? '' : 'Nenhum anuncio encontrado.'}</p>
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-            {filtrados.map(a => {
+            {anuncios.map(a => {
               const resumo = resumos[a.id]
               return (
                 <div key={a.id} style={{ padding: '1rem', background: '#fff', border: '1px solid #e0e0e0', borderRadius: '10px' }}>
@@ -258,12 +292,12 @@ export function AnunciosML({ onVoltar }: Props) {
           </div>
         )}
 
-        {!loading && total > PAGINA && (
+        {!loading && total > pageSize && (
           <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '1rem', marginTop: '2rem' }}>
-            <button disabled={offset === 0} onClick={() => setOffset(Math.max(0, offset - PAGINA))}
+            <button disabled={offset === 0} onClick={() => setOffset(Math.max(0, offset - pageSize))}
               style={{ padding: '0.6rem 1.2rem', background: offset === 0 ? '#f5f5f5' : '#fff', border: '1px solid #ddd', borderRadius: '6px', cursor: offset === 0 ? 'not-allowed' : 'pointer', fontWeight: 600 }}>Anterior</button>
             <span style={{ color: '#666', fontSize: '0.9rem' }}>Pagina {paginaAtual} de {totalPaginas}</span>
-            <button disabled={paginaAtual >= totalPaginas} onClick={() => setOffset(offset + PAGINA)}
+            <button disabled={paginaAtual >= totalPaginas} onClick={() => setOffset(offset + pageSize)}
               style={{ padding: '0.6rem 1.2rem', background: paginaAtual >= totalPaginas ? '#f5f5f5' : '#fff', border: '1px solid #ddd', borderRadius: '6px', cursor: paginaAtual >= totalPaginas ? 'not-allowed' : 'pointer', fontWeight: 600 }}>Proxima</button>
           </div>
         )}
