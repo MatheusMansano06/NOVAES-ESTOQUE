@@ -1737,6 +1737,15 @@ function App() {
               </div>
             </div>
 
+            <a
+              href="https://www.nfe.fazenda.gov.br/portal/consultaRecaptcha.aspx?tipoConsulta=resumo&tipoConteudo=7PhJ+gAVw2g="
+              target="_blank"
+              rel="noreferrer noopener"
+              style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem', padding: '0.75rem 1rem', background: '#1976D2', color: '#fff', borderRadius: '8px', fontWeight: 700, fontSize: '0.95rem', textDecoration: 'none', whiteSpace: 'nowrap' }}
+            >
+              🔎 Baixar XMLs novos (SEFAZ)
+            </a>
+
             </div>
 
             {/* FILTRO + LISTA DE NOTAS */}
@@ -1919,23 +1928,13 @@ function App() {
                         NF #{notaDetalheAberta.numero_nf} - Série {notaDetalheAberta.serie || '—'}
                       </p>
                     </div>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-                      <a
-                        href="https://www.nfe.fazenda.gov.br/portal/consultaRecaptcha.aspx?tipoConsulta=resumo&tipoConteudo=7PhJ+gAVw2g="
-                        target="_blank"
-                        rel="noreferrer noopener"
-                        style={{ display: 'inline-flex', alignItems: 'center', gap: '0.45rem', padding: '0.6rem 1rem', background: '#1976D2', color: '#fff', borderRadius: '8px', fontWeight: 700, fontSize: '0.9rem', textDecoration: 'none', whiteSpace: 'nowrap' }}
-                      >
-                        🔎 Consultar NF-e online
-                      </a>
-                      <button
-                        className="modal-close"
-                        onClick={fecharDetalheNota}
-                        style={{ width: '50px', height: '50px', fontSize: '2rem', padding: 0 }}
-                      >
-                        ×
-                      </button>
-                    </div>
+                    <button
+                      className="modal-close"
+                      onClick={fecharDetalheNota}
+                      style={{ width: '50px', height: '50px', fontSize: '2rem', padding: 0 }}
+                    >
+                      ×
+                    </button>
                   </div>
 
                   <div style={{ flex: 1, overflowY: 'auto', padding: '2rem' }}>
