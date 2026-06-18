@@ -2088,100 +2088,157 @@ function App() {
                           <BarraProgresso itens={notaDetalheAberta.itens} />
                         </div>
 
-                        <div style={{ display: 'flex', justifyContent: 'space-between', gap: '1rem', alignItems: 'center', flexWrap: 'wrap' }}>
-                          <div style={{ color: '#607d8b', fontSize: '0.88rem' }}>
-                            Selecione os registros e clique em <strong>Enviar selecionados em massa</strong> para subir como uma única entrada na Olist.
-                          </div>
-                          <div style={{ display: 'flex', gap: '0.6rem', flexWrap: 'wrap' }}>
-                            <button
-                              onClick={() => setModalAdicionarProdutoAberto(true)}
-                              style={{ padding: '0.65rem 1rem', background: '#4caf50', color: '#fff', border: 'none', borderRadius: '8px', fontWeight: 700, cursor: 'pointer' }}
-                            >
-                              + Adicionar Produto Manual
-                            </button>
-                            <button
-                              onClick={enviarMultiplosEmMassa}
-                              disabled={itensSelecionadosMultiplos.size === 0}
-                              style={{ padding: '0.65rem 1rem', background: itensSelecionadosMultiplos.size === 0 ? '#cfd8dc' : '#1976D2', color: '#fff', border: 'none', borderRadius: '8px', cursor: itensSelecionadosMultiplos.size === 0 ? 'not-allowed' : 'pointer', fontWeight: 700 }}
-                            >
-                              Enviar selecionados em massa ({itensSelecionadosMultiplos.size})
-                            </button>
-                          </div>
+                        <div style={{ marginBottom: '1rem' }}>
+                          <button onClick={() => setModalAdicionarProdutoAberto(true)} style={{ padding: '0.6rem 1.1rem', background: '#4caf50', color: '#fff', border: 'none', borderRadius: 6, fontWeight: 600, cursor: 'pointer' }}>+ Adicionar Produto Manual</button>
                         </div>
 
-                        <div style={{ border: '1px solid #e0e0e0', borderRadius: '10px', overflow: 'hidden' }}>
-                          <div style={{ display: 'grid', gridTemplateColumns: '42px minmax(240px, 1fr) 90px 120px 160px', gap: '1rem', padding: '0.9rem 1rem', background: '#f7f9fa', fontSize: '0.78rem', fontWeight: 700, color: '#78909c', textTransform: 'uppercase', alignItems: 'center' }}>
-                            <div />
-                            <div>Produto</div>
-                            <div style={{ textAlign: 'center' }}>Qtd</div>
-                            <div style={{ textAlign: 'center' }}>Status</div>
-                            <div style={{ textAlign: 'right' }}>Ação</div>
-                          </div>
-                          {agruparItensPorDescricao(notaDetalheAberta.itens || []).map((grupo, gIdx) => {
-                            const multiplos = grupo.items.length > 1
-                            const todosGrupoSelecionados = grupo.items.every((i) => itensSelecionadosMultiplos.has(i.id))
-                            const conferidosGrupo = grupo.items.filter((i) => i.quantidade_confirmada != null).length
-                            const temDivergencia = grupo.items.some((i) => i.divergencia)
-                            const statusGrupo = temDivergencia ? 'Divergência' : conferidosGrupo === grupo.items.length ? 'Conferido' : conferidosGrupo > 0 ? `${conferidosGrupo}/${grupo.items.length}` : 'Pendente'
-                            const statusGrupoColor = temDivergencia ? '#c62828' : conferidosGrupo === grupo.items.length ? '#2e7d32' : '#ef6c00'
-                            const primeiro = grupo.items[0]
+                        {/* Produtos agrupados por descrição */}
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
+                          {agruparItensPorDescricao(notaDetalheAberta.itens || []).map((grupo) => {
+                            const temSelecionados = grupo.selecionados.length > 0
+                            const multi = grupo.items.length > 1
+                            const expandido = !multi || gruposExpandidos.has(grupo.descricao)
+                            const qSubidos = grupo.items.filter(i => i.estoque_olist_atualizado_em).length
+                            const qConf = grupo.items.filter(i => (i.quantidade_confirmada !== null && i.quantidade_confirmada !== undefined) && !i.estoque_olist_atualizado_em).length
+                            const qFalta = grupo.items.length - qSubidos - qConf
+                            const toggleExpandir = () => {
+                              const novo = new Set(gruposExpandidos)
+                              if (novo.has(grupo.descricao)) novo.delete(grupo.descricao)
+                              else novo.add(grupo.descricao)
+                              setGruposExpandidos(novo)
+                            }
                             return (
-                              <div key={grupo.descricao} style={{ borderTop: gIdx > 0 ? '1px solid #e0e0e0' : 'none' }}>
-                                <div style={{ display: 'grid', gridTemplateColumns: '42px minmax(240px, 1fr) 90px 120px 160px', gap: '1rem', padding: '0.95rem 1rem', background: multiplos ? '#f0f6ff' : '#fff', alignItems: 'center' }}>
-                                  <div style={{ display: 'flex', justifyContent: 'center' }}>
-                                    <input
-                                      type="checkbox"
-                                      checked={todosGrupoSelecionados}
-                                      onChange={() => toggleSelecaoGrupo(grupo.items)}
-                                      style={{ width: '18px', height: '18px', cursor: 'pointer' }}
-                                    />
-                                  </div>
-                                  <div>
-                                    <div style={{ fontWeight: 700, color: '#1a1a1a' }}>{grupo.descricao}</div>
-                                    <div style={{ color: '#78909c', fontSize: '0.82rem' }}>
-                                      Código: {primeiro.codigo_produto || '—'}{multiplos ? ` · ${grupo.items.length} registros` : ''}
+                              <div key={grupo.descricao} style={{ border: temSelecionados ? '2px solid #2196F3' : '1px solid #e0e0e0', borderRadius: 8, overflow: 'hidden', background: temSelecionados ? '#e3f2fd' : '#fff' }}>
+                                {/* Header do grupo */}
+                                <div style={{ background: temSelecionados ? '#bbdefb' : '#f5f5f5', padding: '1rem 1.25rem', borderBottom: '1px solid #e0e0e0', display: 'flex', alignItems: 'center', gap: '1rem', justifyContent: 'space-between', flexWrap: 'wrap' }}>
+                                  <div
+                                    style={{ flex: 1, minWidth: '250px', display: 'flex', alignItems: 'center', gap: '0.6rem', cursor: multi ? 'pointer' : 'default' }}
+                                    onClick={multi ? toggleExpandir : undefined}
+                                  >
+                                    {multi && (
+                                      <span
+                                        style={{ fontSize: '0.9rem', color: '#555', transition: 'transform 0.15s', transform: expandido ? 'rotate(90deg)' : 'rotate(0deg)', userSelect: 'none' }}
+                                        aria-label={expandido ? 'Recolher' : 'Expandir'}
+                                      >▶</span>
+                                    )}
+                                    <div>
+                                      <div style={{ fontWeight: 700, color: '#1a1a1a', fontSize: '1rem' }}>{grupo.descricao}</div>
+                                      <div style={{ color: '#666', fontSize: '0.85rem' }}>
+                                        {grupo.items.length} registro{grupo.items.length !== 1 ? 's' : ''} · Total: {Math.round(grupo.totalQtd)} un
+                                        {grupo.selecionados.length > 0 && <span style={{ color: '#2196F3', fontWeight: 700, marginLeft: '0.5rem' }}>· {grupo.selecionados.length} selecionado{grupo.selecionados.length !== 1 ? 's' : ''}</span>}
+                                      </div>
+                                      {multi && (
+                                        <div style={{ display: 'flex', gap: '0.4rem', marginTop: '0.35rem', flexWrap: 'wrap' }}>
+                                          {qSubidos > 0 && <span style={{ background: '#e8f5e9', color: '#2e7d32', fontSize: '0.68rem', fontWeight: 700, padding: '0.1rem 0.45rem', borderRadius: 999 }}>✅ {qSubidos} subido{qSubidos !== 1 ? 's' : ''}</span>}
+                                          {qConf > 0 && <span style={{ background: '#e3f2fd', color: '#1565c0', fontSize: '0.68rem', fontWeight: 700, padding: '0.1rem 0.45rem', borderRadius: 999 }}>🔄 {qConf} conferido{qConf !== 1 ? 's' : ''}</span>}
+                                          {qFalta > 0 && <span style={{ background: '#fff3e0', color: '#e65100', fontSize: '0.68rem', fontWeight: 700, padding: '0.1rem 0.45rem', borderRadius: 999 }}>🆕 {qFalta} a conferir</span>}
+                                          <span style={{ color: '#2196F3', fontSize: '0.68rem', fontWeight: 700 }}>{expandido ? '· clique para recolher' : '· clique para ver todos'}</span>
+                                        </div>
+                                      )}
                                     </div>
                                   </div>
-                                  <div style={{ textAlign: 'center', fontWeight: 700 }}>{Math.round(grupo.totalQtd)}</div>
-                                  <div style={{ textAlign: 'center', color: statusGrupoColor, fontWeight: 700, fontSize: '0.82rem' }}>{statusGrupo}</div>
-                                  <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-                                    {!multiplos && (
+                                  <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+                                    {grupo.items.length > 1 && grupo.selecionados.length > 0 && (
                                       <button
-                                        onClick={() => conferirProduto(primeiro)}
-                                        style={{ padding: '0.55rem 0.9rem', background: '#1976D2', color: '#fff', border: 'none', borderRadius: '8px', cursor: 'pointer', fontWeight: 700 }}
+                                        onClick={() => {
+                                          if (!notaDetalheAberta) return
+                                          const primeiroItem = grupo.selecionados[0]
+                                          const qtdTotal = grupo.selecionados.reduce((s, i) => s + i.quantidade_nf, 0)
+                                          const msg = `Confirmar envio em massa?\n\nProduto: ${grupo.descricao}\nQuantidade de registros: ${grupo.selecionados.length}\nQuantidade total: ${Math.round(qtdTotal)} unidades\n\nOs registros serão agrupados e enviados como uma única entrada para a Olist.`
+                                          if (!window.confirm(msg)) return
+
+                                          setProdutoSelecionado({
+                                            id_item: primeiroItem.id,
+                                            ids_massa: grupo.selecionados.map(i => i.id),
+                                            descricao: grupo.descricao,
+                                            codigo_produto: primeiroItem.codigo_produto,
+                                            quantidade_total: qtdTotal,
+                                            quantidade_nf: qtdTotal,
+                                            quantidade_confirmada: qtdTotal,
+                                            preco_unitario: primeiroItem.preco_unitario,
+                                            notas_fiscais: grupo.selecionados.map(i => ({
+                                              numero_nf: notaDetalheAberta.numero_nf || '',
+                                              serie: notaDetalheAberta.serie || '',
+                                              fornecedor: notaDetalheAberta.fornecedor || '',
+                                              quantidade: i.quantidade_nf
+                                            }))
+                                          } as any)
+                                          setItensSelecionadosMultiplos(new Set())
+                                          setModalOpen(true)
+                                        }}
+                                        style={{ padding: '0.4rem 0.8rem', background: '#2196F3', color: '#fff', border: 'none', borderRadius: 4, fontSize: '0.75rem', fontWeight: 600, cursor: 'pointer', whiteSpace: 'nowrap' }}
                                       >
-                                        Conferir
+                                        📦 {grupo.selecionados.length} em Massa
+                                      </button>
+                                    )}
+                                    {grupo.items.length > 1 && (
+                                      <button
+                                        onClick={() => toggleSelecaoGrupo(grupo.items)}
+                                        style={{ padding: '0.4rem 0.8rem', background: temSelecionados ? '#1976D2' : '#e0e0e0', color: temSelecionados ? '#fff' : '#666', border: 'none', borderRadius: 4, fontSize: '0.75rem', fontWeight: 600, cursor: 'pointer', whiteSpace: 'nowrap' }}
+                                      >
+                                        {grupo.items.every(i => itensSelecionadosMultiplos.has(i.id)) ? '✓ Desselecionar' : '☐ Selecionar'}
                                       </button>
                                     )}
                                   </div>
                                 </div>
-                                {multiplos && grupo.items.map((item) => {
-                                  const statusItem = item.divergencia ? 'Divergência' : item.quantidade_confirmada != null ? 'Conferido' : 'Pendente'
-                                  const statusColor = item.divergencia ? '#c62828' : item.quantidade_confirmada != null ? '#2e7d32' : '#ef6c00'
-                                  return (
-                                    <div key={item.id} style={{ display: 'grid', gridTemplateColumns: '42px minmax(240px, 1fr) 90px 120px 160px', gap: '1rem', padding: '0.7rem 1rem 0.7rem 2rem', borderTop: '1px solid #eef2f4', alignItems: 'center', background: '#fff' }}>
-                                      <div style={{ display: 'flex', justifyContent: 'center' }}>
-                                        <input
-                                          type="checkbox"
-                                          checked={itensSelecionadosMultiplos.has(item.id)}
-                                          onChange={() => toggleSelecaoMultipla(item.id)}
-                                          style={{ width: '18px', height: '18px', cursor: 'pointer' }}
-                                        />
-                                      </div>
-                                      <div style={{ color: '#546e7a', fontSize: '0.86rem' }}>↳ registro #{item.id}</div>
-                                      <div style={{ textAlign: 'center', fontWeight: 600 }}>{Math.round(item.quantidade_nf)}</div>
-                                      <div style={{ textAlign: 'center', color: statusColor, fontWeight: 700, fontSize: '0.8rem' }}>{statusItem}</div>
-                                      <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+
+                                {/* Items do grupo (só quando expandido) */}
+                                {expandido && (
+                                <div>
+                                  {grupo.items.map((item, idx) => {
+                                    const subido = !!item.estoque_olist_atualizado_em
+                                    const conferido = item.quantidade_confirmada !== null && item.quantidade_confirmada !== undefined
+                                    const selecionado = itensSelecionadosMultiplos.has(item.id)
+                                    return (
+                                      <div
+                                        key={item.id}
+                                        style={{
+                                          display: 'grid',
+                                          gridTemplateColumns: grupo.items.length > 1 ? '30px 1fr auto' : '1fr auto',
+                                          gap: '1rem',
+                                          alignItems: 'center',
+                                          padding: '1rem 1.25rem',
+                                          borderTop: idx > 0 ? '1px solid #eee' : 'none',
+                                          background: selecionado ? '#e3f2fd' : idx % 2 === 0 ? '#fff' : '#fafafa'
+                                        }}
+                                      >
+                                        {grupo.items.length > 1 && (
+                                          <input
+                                            type="checkbox"
+                                            checked={selecionado}
+                                            onChange={() => toggleSelecaoMultipla(item.id)}
+                                            style={{ width: '18px', height: '18px', cursor: 'pointer' }}
+                                          />
+                                        )}
+
+                                        <div>
+                                          <div style={{ fontWeight: 600, color: '#1a1a1a' }}>
+                                            {grupo.items.length > 1 && <span style={{ color: '#999', marginRight: '0.5rem' }}>({grupo.items.indexOf(item) + 1})</span>}
+                                            {Math.round(item.quantidade_nf)} un
+                                          </div>
+                                          <div style={{ color: '#90a4ae', fontSize: '0.8rem' }}>
+                                            Cód: {item.codigo_produto}{conferido ? ` · Recebido: ${Math.round(item.quantidade_confirmada as number)}` : ''}
+                                          </div>
+                                          <div style={{ marginTop: 4 }}>
+                                            {subido
+                                              ? <span style={{ background: '#e8f5e9', color: '#2e7d32', fontSize: '0.7rem', fontWeight: 700, padding: '0.15rem 0.5rem', borderRadius: 999 }}>✅ Subido na Olist</span>
+                                              : conferido
+                                                ? <span style={{ background: '#e3f2fd', color: '#1565c0', fontSize: '0.7rem', fontWeight: 700, padding: '0.15rem 0.5rem', borderRadius: 999 }}>🔄 Conferido</span>
+                                                : <span style={{ background: '#fff3e0', color: '#e65100', fontSize: '0.7rem', fontWeight: 700, padding: '0.15rem 0.5rem', borderRadius: 999 }}>🆕 A conferir</span>}
+                                          </div>
+                                        </div>
+
                                         <button
                                           onClick={() => conferirProduto(item)}
-                                          style={{ padding: '0.45rem 0.8rem', background: '#fff', color: '#1976D2', border: '1px solid #1976D2', borderRadius: '8px', cursor: 'pointer', fontWeight: 700, fontSize: '0.82rem' }}
+                                          style={{ padding: '0.6rem 1rem', background: '#007acc', color: '#fff', border: 'none', borderRadius: 6, fontWeight: 600, cursor: 'pointer', whiteSpace: 'nowrap', fontSize: '0.85rem' }}
                                         >
                                           Conferir
                                         </button>
                                       </div>
-                                    </div>
-                                  )
-                                })}
+                                    )
+                                  })}
+                                </div>
+                                )}
                               </div>
                             )
                           })}
