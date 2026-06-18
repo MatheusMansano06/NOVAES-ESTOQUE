@@ -693,6 +693,17 @@ function App() {
     setItensSelecionadosMultiplos(novo)
   }
 
+  // Marca/desmarca todos os registros de um grupo (mesmo produto) de uma vez
+  const toggleSelecaoGrupo = (items: ItemNota[]) => {
+    const novo = new Set(itensSelecionadosMultiplos)
+    const todosSelecionados = items.every((i) => novo.has(i.id))
+    items.forEach((i) => {
+      if (todosSelecionados) novo.delete(i.id)
+      else novo.add(i.id)
+    })
+    setItensSelecionadosMultiplos(novo)
+  }
+
   // Agrupa itens pela descrição
   const agruparItensPorDescricao = (itens: ItemNota[]) => {
     const grupos: { [key: string]: ItemNota[] } = {}
@@ -1617,7 +1628,10 @@ function App() {
                 </div>
                 <div style={{ display: 'grid', gap: '0.75rem' }}>
                   <div style={{ fontSize: '1.75rem', fontWeight: 800, color: '#e65100' }}>
-                    {notasFiltradas.filter(n => n.status === 'em andamento').length}
+                    {notasFiltradas.filter(n => {
+                      const p = calcularProgresso(n.itens)
+                      return p.total > 0 && p.percentual < 100
+                    }).length}
                   </div>
                   <div style={{ fontSize: '0.82rem', color: '#666' }}>
                     Notas em andamento
@@ -2074,16 +2088,25 @@ function App() {
                           <BarraProgresso itens={notaDetalheAberta.itens} />
                         </div>
 
-                        <div style={{ marginBottom: '0.25rem' }}>
-                          <div style={{ color: '#666', fontSize: '0.8rem', fontWeight: '600', margin: '0 0 0.8rem 0' }}>
-                            Clique em &quot;Conferir&quot; para abrir o fluxo antigo de conferência do item.
+                        <div style={{ display: 'flex', justifyContent: 'space-between', gap: '1rem', alignItems: 'center', flexWrap: 'wrap' }}>
+                          <div style={{ color: '#607d8b', fontSize: '0.88rem' }}>
+                            Selecione os registros e clique em <strong>Enviar selecionados em massa</strong> para subir como uma única entrada na Olist.
                           </div>
-                          <button
-                            onClick={() => setModalAdicionarProdutoAberto(true)}
-                            style={{ padding: '0.65rem 1rem', background: '#4caf50', color: '#fff', border: 'none', borderRadius: '8px', fontWeight: 700, cursor: 'pointer' }}
-                          >
-                            + Adicionar Produto Manual
-                          </button>
+                          <div style={{ display: 'flex', gap: '0.6rem', flexWrap: 'wrap' }}>
+                            <button
+                              onClick={() => setModalAdicionarProdutoAberto(true)}
+                              style={{ padding: '0.65rem 1rem', background: '#4caf50', color: '#fff', border: 'none', borderRadius: '8px', fontWeight: 700, cursor: 'pointer' }}
+                            >
+                              + Adicionar Produto Manual
+                            </button>
+                            <button
+                              onClick={enviarMultiplosEmMassa}
+                              disabled={itensSelecionadosMultiplos.size === 0}
+                              style={{ padding: '0.65rem 1rem', background: itensSelecionadosMultiplos.size === 0 ? '#cfd8dc' : '#1976D2', color: '#fff', border: 'none', borderRadius: '8px', cursor: itensSelecionadosMultiplos.size === 0 ? 'not-allowed' : 'pointer', fontWeight: 700 }}
+                            >
+                              Enviar selecionados em massa ({itensSelecionadosMultiplos.size})
+                            </button>
+                          </div>
                         </div>
 
                         <div style={{ border: '1px solid #e0e0e0', borderRadius: '10px', overflow: 'hidden' }}>
@@ -2094,33 +2117,71 @@ function App() {
                             <div style={{ textAlign: 'center' }}>Status</div>
                             <div style={{ textAlign: 'right' }}>Ação</div>
                           </div>
-                          {(notaDetalheAberta.itens || []).map((item, idx) => {
-                            const statusItem = item.divergencia ? 'Divergência' : item.quantidade_confirmada != null ? 'Conferido' : 'Pendente'
-                            const statusColor = item.divergencia ? '#c62828' : item.quantidade_confirmada != null ? '#2e7d32' : '#ef6c00'
+                          {agruparItensPorDescricao(notaDetalheAberta.itens || []).map((grupo, gIdx) => {
+                            const multiplos = grupo.items.length > 1
+                            const todosGrupoSelecionados = grupo.items.every((i) => itensSelecionadosMultiplos.has(i.id))
+                            const conferidosGrupo = grupo.items.filter((i) => i.quantidade_confirmada != null).length
+                            const temDivergencia = grupo.items.some((i) => i.divergencia)
+                            const statusGrupo = temDivergencia ? 'Divergência' : conferidosGrupo === grupo.items.length ? 'Conferido' : conferidosGrupo > 0 ? `${conferidosGrupo}/${grupo.items.length}` : 'Pendente'
+                            const statusGrupoColor = temDivergencia ? '#c62828' : conferidosGrupo === grupo.items.length ? '#2e7d32' : '#ef6c00'
+                            const primeiro = grupo.items[0]
                             return (
-                              <div key={item.id} style={{ display: 'grid', gridTemplateColumns: '42px minmax(240px, 1fr) 90px 120px 160px', gap: '1rem', padding: '0.95rem 1rem', borderTop: idx > 0 ? '1px solid #eef2f4' : 'none', alignItems: 'center' }}>
-                                <div style={{ display: 'flex', justifyContent: 'center' }}>
-                                  <input
-                                    type="checkbox"
-                                    checked={itensSelecionadosMultiplos.has(item.id)}
-                                    onChange={() => toggleSelecaoMultipla(item.id)}
-                                    style={{ width: '18px', height: '18px', cursor: 'pointer' }}
-                                  />
+                              <div key={grupo.descricao} style={{ borderTop: gIdx > 0 ? '1px solid #e0e0e0' : 'none' }}>
+                                <div style={{ display: 'grid', gridTemplateColumns: '42px minmax(240px, 1fr) 90px 120px 160px', gap: '1rem', padding: '0.95rem 1rem', background: multiplos ? '#f0f6ff' : '#fff', alignItems: 'center' }}>
+                                  <div style={{ display: 'flex', justifyContent: 'center' }}>
+                                    <input
+                                      type="checkbox"
+                                      checked={todosGrupoSelecionados}
+                                      onChange={() => toggleSelecaoGrupo(grupo.items)}
+                                      style={{ width: '18px', height: '18px', cursor: 'pointer' }}
+                                    />
+                                  </div>
+                                  <div>
+                                    <div style={{ fontWeight: 700, color: '#1a1a1a' }}>{grupo.descricao}</div>
+                                    <div style={{ color: '#78909c', fontSize: '0.82rem' }}>
+                                      Código: {primeiro.codigo_produto || '—'}{multiplos ? ` · ${grupo.items.length} registros` : ''}
+                                    </div>
+                                  </div>
+                                  <div style={{ textAlign: 'center', fontWeight: 700 }}>{Math.round(grupo.totalQtd)}</div>
+                                  <div style={{ textAlign: 'center', color: statusGrupoColor, fontWeight: 700, fontSize: '0.82rem' }}>{statusGrupo}</div>
+                                  <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                                    {!multiplos && (
+                                      <button
+                                        onClick={() => conferirProduto(primeiro)}
+                                        style={{ padding: '0.55rem 0.9rem', background: '#1976D2', color: '#fff', border: 'none', borderRadius: '8px', cursor: 'pointer', fontWeight: 700 }}
+                                      >
+                                        Conferir
+                                      </button>
+                                    )}
+                                  </div>
                                 </div>
-                                <div>
-                                  <div style={{ fontWeight: 700, color: '#1a1a1a' }}>{item.descricao}</div>
-                                  <div style={{ color: '#78909c', fontSize: '0.82rem' }}>Código: {item.codigo_produto || '—'}</div>
-                                </div>
-                                <div style={{ textAlign: 'center', fontWeight: 700 }}>{Math.round(item.quantidade_nf)}</div>
-                                <div style={{ textAlign: 'center', color: statusColor, fontWeight: 700, fontSize: '0.82rem' }}>{statusItem}</div>
-                                <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-                                  <button
-                                    onClick={() => conferirProduto(item)}
-                                    style={{ padding: '0.55rem 0.9rem', background: '#1976D2', color: '#fff', border: 'none', borderRadius: '8px', cursor: 'pointer', fontWeight: 700 }}
-                                  >
-                                    Conferir
-                                  </button>
-                                </div>
+                                {multiplos && grupo.items.map((item) => {
+                                  const statusItem = item.divergencia ? 'Divergência' : item.quantidade_confirmada != null ? 'Conferido' : 'Pendente'
+                                  const statusColor = item.divergencia ? '#c62828' : item.quantidade_confirmada != null ? '#2e7d32' : '#ef6c00'
+                                  return (
+                                    <div key={item.id} style={{ display: 'grid', gridTemplateColumns: '42px minmax(240px, 1fr) 90px 120px 160px', gap: '1rem', padding: '0.7rem 1rem 0.7rem 2rem', borderTop: '1px solid #eef2f4', alignItems: 'center', background: '#fff' }}>
+                                      <div style={{ display: 'flex', justifyContent: 'center' }}>
+                                        <input
+                                          type="checkbox"
+                                          checked={itensSelecionadosMultiplos.has(item.id)}
+                                          onChange={() => toggleSelecaoMultipla(item.id)}
+                                          style={{ width: '18px', height: '18px', cursor: 'pointer' }}
+                                        />
+                                      </div>
+                                      <div style={{ color: '#546e7a', fontSize: '0.86rem' }}>↳ registro #{item.id}</div>
+                                      <div style={{ textAlign: 'center', fontWeight: 600 }}>{Math.round(item.quantidade_nf)}</div>
+                                      <div style={{ textAlign: 'center', color: statusColor, fontWeight: 700, fontSize: '0.8rem' }}>{statusItem}</div>
+                                      <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                                        <button
+                                          onClick={() => conferirProduto(item)}
+                                          style={{ padding: '0.45rem 0.8rem', background: '#fff', color: '#1976D2', border: '1px solid #1976D2', borderRadius: '8px', cursor: 'pointer', fontWeight: 700, fontSize: '0.82rem' }}
+                                        >
+                                          Conferir
+                                        </button>
+                                      </div>
+                                    </div>
+                                  )
+                                })}
                               </div>
                             )
                           })}
