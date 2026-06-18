@@ -81,6 +81,20 @@ interface LivePriceBreakdown {
   tarifaPct: number | null
 }
 
+interface MarginViewModel {
+  precoOriginal: number
+  precoPromocional: number
+  temPromo: boolean
+  frete: number | null
+  tarifa: number | null
+  tarifaPct: number | null
+  custo: number | null
+  impostoPct: number
+  imposto: number | null
+  margem: number | null
+  margemPct: number | null
+}
+
 function carregarImpostoAtual(): number {
   try {
     const raw = localStorage.getItem('nvs_imposto_pct') || '9'
@@ -88,6 +102,35 @@ function carregarImpostoAtual(): number {
     return Number.isFinite(parsed) ? parsed : 9
   } catch {
     return 9
+  }
+}
+
+function montarResumoMargem(anuncio: Anuncio, resumo?: PricingSnapshot, live?: LivePriceSummary | null, breakdown?: LivePriceBreakdown | null): MarginViewModel {
+  const precoOriginal = live?.cheio ?? (resumo?.precoOriginal && resumo.precoOriginal > 0 ? resumo.precoOriginal : (anuncio.preco_original || anuncio.preco))
+  const precoPromocional = live?.promocional ?? (resumo?.precoPromocional && resumo.precoPromocional > 0 ? resumo.precoPromocional : anuncio.preco)
+  const frete = resumo?.frete ?? breakdown?.frete ?? anuncio.frete_custo ?? null
+  const tarifa = resumo?.tarifa ?? breakdown?.tarifa ?? null
+  const tarifaPct = resumo?.tarifaPct ?? breakdown?.tarifaPct ?? null
+  const custo = resumo?.custo ?? null
+  const impostoPct = resumo?.impostoPct ?? carregarImpostoAtual()
+  const imposto = precoPromocional > 0 ? (precoPromocional * impostoPct) / 100 : null
+  const margem = frete != null && tarifa != null && custo != null && imposto != null
+    ? precoPromocional - frete - tarifa - custo - imposto
+    : null
+  const margemPct = margem != null && precoPromocional > 0 ? (margem / precoPromocional) * 100 : null
+
+  return {
+    precoOriginal,
+    precoPromocional,
+    temPromo: precoPromocional < precoOriginal - 0.01,
+    frete,
+    tarifa,
+    tarifaPct,
+    custo,
+    impostoPct,
+    imposto,
+    margem,
+    margemPct,
   }
 }
 
@@ -364,26 +407,14 @@ function ResumoTooltip({ anuncio, resumo, editavel = false, modal = false, onSav
     return () => { ativo = false }
   }, [anuncio.id])
 
-  const precoOriginal = live?.cheio ?? (resumo?.precoOriginal && resumo.precoOriginal > 0 ? resumo.precoOriginal : (anuncio.preco_original || anuncio.preco))
-  const precoPromocional = live?.promocional ?? (resumo?.precoPromocional && resumo.precoPromocional > 0 ? resumo.precoPromocional : anuncio.preco)
-  const temPromo = precoPromocional < precoOriginal - 0.01
-  const frete = breakdown?.frete ?? resumo?.frete ?? anuncio.frete_custo ?? null
-  const tarifa = breakdown?.tarifa ?? resumo?.tarifa ?? null
-  const tarifaPct = breakdown?.tarifaPct ?? resumo?.tarifaPct ?? null
-  const custo = resumo?.custo ?? null
-  const impostoPct = resumo?.impostoPct ?? carregarImpostoAtual()
-  const imposto = precoPromocional > 0 ? (precoPromocional * impostoPct) / 100 : null
-  const margem = frete != null && tarifa != null && custo != null && imposto != null
-    ? precoPromocional - frete - tarifa - custo - imposto
-    : null
-  const margemPct = margem != null && precoPromocional > 0 ? (margem / precoPromocional) * 100 : null
+  const resumoMargem = montarResumoMargem(anuncio, resumo, live, breakdown)
 
   // Quando abre em modo edição, pré-preenche o input com o preço cheio atual.
   useEffect(() => {
-    if (editavel && novoPreco === '' && precoOriginal > 0) {
-      setNovoPreco(precoOriginal.toFixed(2))
+    if (editavel && novoPreco === '' && resumoMargem.precoOriginal > 0) {
+      setNovoPreco(resumoMargem.precoOriginal.toFixed(2))
     }
-  }, [editavel, precoOriginal, novoPreco])
+  }, [editavel, resumoMargem.precoOriginal, novoPreco])
 
   const salvarPrecoCheio = async () => {
     const v = Number(String(novoPreco).replace(',', '.'))
@@ -421,14 +452,14 @@ function ResumoTooltip({ anuncio, resumo, editavel = false, modal = false, onSav
           <button onClick={(e) => { e.stopPropagation(); onClose?.() }} aria-label="Fechar" style={{ flexShrink: 0, width: 28, height: 28, borderRadius: 8, border: '1px solid #e4e7ec', background: '#fff', color: '#667085', fontSize: '1.1rem', lineHeight: 1, cursor: 'pointer' }}>×</button>
         </div>
       )}
-      <LinhaResumo label="Preco original" valor={brl(precoOriginal)} risco={temPromo} />
-      <LinhaResumo label="Preco promocional" valor={brl(precoPromocional)} cor={temPromo ? '#067647' : undefined} />
-      <LinhaResumo label="Frete" valor={frete != null ? `-${brl(frete)}` : '--'} extra={frete != null ? `${percentual(frete, precoPromocional)}%` : undefined} cor="#b42318" />
-      <LinhaResumo label="Tarifa de venda" valor={tarifa != null ? `-${brl(tarifa)}` : '--'} extra={tarifaPct != null ? `${tarifaPct.toFixed(2)}%` : undefined} cor="#b42318" />
-      <LinhaResumo label="Custo" valor={custo != null ? `-${brl(custo)}` : '--'} cor="#b42318" />
-      <LinhaResumo label="Imposto" valor={imposto != null ? `-${brl(imposto)}` : '--'} extra={impostoPct ? `${impostoPct.toFixed(2)}%` : undefined} cor="#b42318" />
+      <LinhaResumo label="Preco original" valor={brl(resumoMargem.precoOriginal)} risco={resumoMargem.temPromo} />
+      <LinhaResumo label="Preco promocional" valor={brl(resumoMargem.precoPromocional)} cor={resumoMargem.temPromo ? '#067647' : undefined} />
+      <LinhaResumo label="Frete" valor={resumoMargem.frete != null ? `-${brl(resumoMargem.frete)}` : '--'} extra={resumoMargem.frete != null ? `${percentual(resumoMargem.frete, resumoMargem.precoPromocional)}%` : undefined} cor="#b42318" />
+      <LinhaResumo label="Tarifa de venda" valor={resumoMargem.tarifa != null ? `-${brl(resumoMargem.tarifa)}` : '--'} extra={resumoMargem.tarifaPct != null ? `${resumoMargem.tarifaPct.toFixed(2)}%` : undefined} cor="#b42318" />
+      <LinhaResumo label="Custo" valor={resumoMargem.custo != null ? `-${brl(resumoMargem.custo)}` : '--'} cor="#b42318" />
+      <LinhaResumo label="Imposto" valor={resumoMargem.imposto != null ? `-${brl(resumoMargem.imposto)}` : '--'} extra={resumoMargem.impostoPct ? `${resumoMargem.impostoPct.toFixed(2)}%` : undefined} cor="#b42318" />
       <div style={{ height: 1, background: '#e9eef7', margin: '.55rem 0' }} />
-      <LinhaResumo label="Marg. contribuição" valor={margem != null ? brl(margem) : '--'} extra={margemPct != null ? `${margemPct.toFixed(2)}%` : undefined} strong cor={margem != null && margem < 0 ? '#b42318' : '#3483fa'} />
+      <LinhaResumo label="Marg. contribuicao" valor={resumoMargem.margem != null ? brl(resumoMargem.margem) : '--'} extra={resumoMargem.margemPct != null ? `${resumoMargem.margemPct.toFixed(2)}%` : undefined} strong cor={resumoMargem.margem != null && resumoMargem.margem < 0 ? '#b42318' : '#3483fa'} />
       {historico.length > 0 && (
         <div style={{ marginTop: '.6rem', paddingTop: '.55rem', borderTop: '1px solid #e9eef7' }}>
           <div style={{ fontSize: '.68rem', color: '#98a2b3', textTransform: 'uppercase', letterSpacing: '.03em', marginBottom: '.3rem' }}>Histórico de preço</div>
@@ -438,6 +469,11 @@ function ResumoTooltip({ anuncio, resumo, editavel = false, modal = false, onSav
               <span>{brl(h.de)} → <strong style={{ color: '#1d2939' }}>{brl(h.para)}</strong></span>
             </div>
           ))}
+        </div>
+      )}
+      {resumo && (
+        <div style={{ marginTop: '.45rem', fontSize: '.68rem', color: '#98a2b3' }}>
+          * Frete, tarifa, custo e imposto seguem a base salva no Precificador.
         </div>
       )}
       {!resumo && !editavel && (
@@ -519,9 +555,7 @@ function PriceBubble({ anuncio, resumo, statusCor, statusLabel, onPriceChanged }
     return () => { ativo = false }
   }, [hovered, resumo, breakdown, loadingBreakdown, anuncio.id])
 
-  const precoOriginal = live?.cheio ?? (anuncio.preco_original || anuncio.preco)
-  const precoPromocional = live?.promocional ?? anuncio.preco
-  const temPromo = precoPromocional < precoOriginal - 0.01
+  const resumoMargem = montarResumoMargem(anuncio, resumo, live, breakdown)
 
   return (
     <>
@@ -551,30 +585,30 @@ function PriceBubble({ anuncio, resumo, statusCor, statusLabel, onPriceChanged }
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
     >
-      {temPromo && (
+      {resumoMargem.temPromo && (
         <div style={{ display: 'flex', alignItems: 'center', gap: '.35rem', justifyContent: 'flex-start', marginBottom: '.1rem' }}>
           <span style={{ fontSize: '.75rem' }}>🏷️</span>
-          <span style={{ fontSize: '0.78rem', color: '#98a2b3', textDecoration: 'line-through', fontWeight: 700 }}>{brl(precoOriginal)}</span>
+          <span style={{ fontSize: '0.78rem', color: '#98a2b3', textDecoration: 'line-through', fontWeight: 700 }}>{brl(resumoMargem.precoOriginal)}</span>
         </div>
       )}
-      <div style={{ display: 'flex', alignItems: 'baseline', gap: '.42rem', flexWrap: 'wrap' }}>
-        <span style={{ fontWeight: 800, fontSize: '1.02rem', color: '#1a1a1a' }}>{brl(precoPromocional)}</span>
-        {resumo && (
-          <>
-            <span style={{ color: '#d0d5dd', fontWeight: 700 }}>|</span>
-            <span style={{ fontSize: '.92rem', color: resumo.margem >= 0 ? '#3483fa' : '#b42318', fontWeight: 800 }}>
-              {brl(resumo.margem)}
-            </span>
-            <span style={{ fontSize: '.72rem', color: resumo.margem >= 0 ? '#3483fa' : '#b42318', fontWeight: 700 }}>
-              ({resumo.margemPct.toFixed(2)} %)
-            </span>
-          </>
-        )}
+      <div style={{ fontWeight: 800, fontSize: '1.02rem', color: '#1a1a1a' }}>{brl(resumoMargem.precoPromocional)}</div>
+      <div style={{ marginTop: '.38rem', display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: '.38rem' }}>
+        <BubbleMetric label="MC R$" value={resumoMargem.margem != null ? brl(resumoMargem.margem) : '--'} cor={resumoMargem.margem != null && resumoMargem.margem < 0 ? '#b42318' : '#067647'} />
+        <BubbleMetric label="MC %" value={resumoMargem.margemPct != null ? `${resumoMargem.margemPct.toFixed(2)}%` : '--'} cor={resumoMargem.margemPct != null && resumoMargem.margemPct < 0 ? '#b42318' : '#067647'} />
       </div>
       <div style={{ marginTop: '.08rem', fontSize: '0.72rem', fontWeight: 700, color: statusCor, textAlign: 'right' }}>{statusLabel}</div>
       {hovered && !aberto && <ResumoTooltip anuncio={anuncio} resumo={resumo} />}
     </div>
     </>
+  )
+}
+
+function BubbleMetric({ label, value, cor }: { label: string; value: string; cor: string }) {
+  return (
+    <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 8, padding: '.34rem .45rem' }}>
+      <div style={{ fontSize: '.62rem', color: '#98a2b3', fontWeight: 700 }}>{label}</div>
+      <div style={{ fontSize: '.82rem', color: cor, fontWeight: 800, lineHeight: 1.2 }}>{value}</div>
+    </div>
   )
 }
 

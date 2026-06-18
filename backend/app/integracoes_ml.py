@@ -582,6 +582,8 @@ class MLIntegration:
             row.sale_price_json = self._json_dump(sale_price)
             if isinstance(sale_price, dict):
                 row.preco_promocional = sale_price.get("amount")
+                if sale_price.get("regular_amount") is not None:
+                    row.preco_original = sale_price.get("regular_amount")
         elif row.preco_promocional is None:
             row.preco_promocional = row.preco
         if shipping_fee is not None:
@@ -1522,9 +1524,29 @@ class MLIntegration:
         if detail.get("erro"):
             return detail
         item = detail.get("item") or {}
+        prices = detail.get("prices") or []
         sale_price = detail.get("sale_price") or {}
-        cheio = item.get("preco")
-        promocional = sale_price.get("amount") if isinstance(sale_price, dict) and sale_price.get("amount") is not None else (item.get("preco_original") or cheio)
+        cheio = sale_price.get("regular_amount") if isinstance(sale_price, dict) else None
+        if cheio is None:
+            standard = next((
+                p for p in prices
+                if isinstance(p, dict) and p.get("type") == "standard" and p.get("amount") is not None
+            ), None)
+            if isinstance(standard, dict):
+                cheio = standard.get("amount")
+        if cheio is None:
+            cheio = item.get("preco_original") or item.get("preco")
+
+        promocional = sale_price.get("amount") if isinstance(sale_price, dict) and sale_price.get("amount") is not None else None
+        if promocional is None:
+            promotion = next((
+                p for p in prices
+                if isinstance(p, dict) and p.get("type") == "promotion" and p.get("amount") is not None
+            ), None)
+            if isinstance(promotion, dict):
+                promocional = promotion.get("amount")
+        if promocional is None:
+            promocional = item.get("preco") or cheio
         if promocional is None:
             promocional = cheio
         tem_promocao = (cheio is not None and promocional is not None and float(promocional) < float(cheio) - 0.01)
