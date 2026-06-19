@@ -3414,12 +3414,14 @@ async def listar_historico_completo_embale(request: Request):
         if not embale:
             return JSONResponse({"erro": "Inbound não encontrado"}, status_code=404)
 
+        resumo_por_item = {i.id: _resumo_revisao_salva_item(i) for i in embale.itens}
         em_espera = [
             {
                 "item_id": i.id,
                 "titulo_anuncio": i.titulo_anuncio,
                 "sku_inbound": i.sku_inbound,
                 "quantidade_full": _quantidade_planejada_full(i),
+                "estoque_atual": resumo_por_item.get(i.id, {}).get("estoque_atual"),
                 "data_em_espera": i.data_em_espera.isoformat() if i.data_em_espera else None,
             }
             for i in embale.itens if (i.em_espera or 0) == 1
@@ -3438,6 +3440,7 @@ async def listar_historico_completo_embale(request: Request):
                 "sku_inbound": h.sku_inbound,
                 "quantidade_anterior": h.quantidade_anterior,
                 "quantidade_nova": h.quantidade_nova,
+                "estoque_atual": resumo_por_item.get(h.item_id, {}).get("estoque_atual"),
                 "tipo": h.tipo,
                 "criado_em": h.criado_em.isoformat() if h.criado_em else None,
             }

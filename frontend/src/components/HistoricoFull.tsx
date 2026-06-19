@@ -14,6 +14,7 @@ interface ItemEmEspera {
   titulo_anuncio: string
   sku_inbound?: string | null
   quantidade_full: number
+  estoque_atual?: number | null
   data_em_espera?: string | null
 }
 
@@ -24,6 +25,7 @@ interface Alteracao {
   sku_inbound?: string | null
   quantidade_anterior: number
   quantidade_nova: number
+  estoque_atual?: number | null
   tipo: string
   criado_em?: string | null
 }
@@ -43,6 +45,11 @@ const fmtData = (iso?: string | null) => {
   const d = new Date(iso)
   if (isNaN(d.getTime())) return '—'
   return d.toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })
+}
+
+const fmtQtd = (valor?: number | null) => {
+  if (valor === null || valor === undefined || Number.isNaN(Number(valor))) return '—'
+  return String(Math.round(Number(valor)))
 }
 
 export function HistoricoFull() {
@@ -145,7 +152,10 @@ export function HistoricoFull() {
                       <tr key={it.item_id}>
                         <td style={td}>{it.titulo_anuncio}</td>
                         <td style={td}>{it.sku_inbound || '—'}</td>
-                        <td style={{ ...td, fontWeight: 700 }}>{Math.round(it.quantidade_full || 0)}</td>
+                        <td style={td}>
+                          <div style={{ fontWeight: 700 }}>{fmtQtd(it.quantidade_full)}</div>
+                          <div style={{ fontSize: '0.78rem', color: '#666' }}>Olist atual: {fmtQtd(it.estoque_atual)}</div>
+                        </td>
                         <td style={{ ...td, color: '#666' }}>{fmtData(it.data_em_espera)}</td>
                       </tr>
                     ))}
@@ -171,7 +181,7 @@ export function HistoricoFull() {
                       <th style={th}>Produto</th>
                       <th style={th}>SKU</th>
                       <th style={th}>De</th>
-                      <th style={th}>Para</th>
+                      <th style={th}>Vai pro FULL</th>
                       <th style={th}>Tipo</th>
                       <th style={th}>Quando</th>
                     </tr>
@@ -184,7 +194,10 @@ export function HistoricoFull() {
                           <td style={td}>{h.titulo_anuncio}</td>
                           <td style={td}>{h.sku_inbound || '—'}</td>
                           <td style={{ ...td, color: '#888' }}>{Math.round(h.quantidade_anterior || 0)}</td>
-                          <td style={{ ...td, fontWeight: 700 }}>{Math.round(h.quantidade_nova || 0)}</td>
+                          <td style={td}>
+                            <div style={{ fontWeight: 700 }}>{fmtQtd(h.quantidade_nova)}</div>
+                            <div style={{ fontSize: '0.78rem', color: '#666' }}>Olist atual: {fmtQtd(h.estoque_atual)}</div>
+                          </td>
                           <td style={td}>
                             <span style={{ fontSize: '0.78rem', padding: '0.12rem 0.55rem', borderRadius: '999px', fontWeight: 700,
                               background: aumento ? '#e8f5e9' : '#fff3e0', color: aumento ? '#2e7d32' : '#ef6c00' }}>
