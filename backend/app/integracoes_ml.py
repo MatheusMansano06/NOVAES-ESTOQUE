@@ -718,16 +718,22 @@ class MLIntegration:
             scope = self._sync_scope(status)
             state = self._sync_state_query(db, scope)
             query = db.query(MercadoLivreItemCache)
-            if status and status != "todos":
-                query = query.filter(MercadoLivreItemCache.status == status)
             termo = (str(q or "")).strip().lower()
+            # Quando há busca, procura em TODOS os status (o placeholder promete
+            # "todos os anuncios"). Sem busca, mantém o filtro da aba selecionada.
             if termo:
-                like = f"%{termo}%"
-                query = query.filter(or_(
-                    func.lower(func.coalesce(MercadoLivreItemCache.titulo, "")).like(like),
-                    func.lower(func.coalesce(MercadoLivreItemCache.sku, "")).like(like),
-                    func.lower(func.coalesce(MercadoLivreItemCache.item_id, "")).like(like),
-                ))
+                # Multi-palavra: cada token precisa casar (AND) em título, SKU ou
+                # item_id (OR). Assim "painel cg 150" acha "Painel Completo Cg 150"
+                # independente da ordem/posição das palavras.
+                for token in termo.split():
+                    like = f"%{token}%"
+                    query = query.filter(or_(
+                        func.lower(func.coalesce(MercadoLivreItemCache.titulo, "")).like(like),
+                        func.lower(func.coalesce(MercadoLivreItemCache.sku, "")).like(like),
+                        func.lower(func.coalesce(MercadoLivreItemCache.item_id, "")).like(like),
+                    ))
+            elif status and status != "todos":
+                query = query.filter(MercadoLivreItemCache.status == status)
             # Ordenação estável (item_id) p/ paginação consistente; total vem da
             # contagem LOCAL — o catálogo inteiro fica espelhado no cache.
             total = query.count()

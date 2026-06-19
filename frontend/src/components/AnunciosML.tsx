@@ -147,6 +147,7 @@ export function AnunciosML({ onVoltar }: Props) {
   const [loading, setLoading] = useState(true)
   const [erro, setErro] = useState('')
   const [busca, setBusca] = useState('')
+  const [buscaDebounced, setBuscaDebounced] = useState('')
   const [statusConexao, setStatusConexao] = useState<'ok' | 'erro' | 'verificando'>('verificando')
   const [precificando, setPrecificando] = useState<Anuncio | null>(null)
   const [editando, setEditando] = useState<{ anuncio: Anuncio; mode: EditorMode } | null>(null)
@@ -165,7 +166,13 @@ export function AnunciosML({ onVoltar }: Props) {
       .catch(() => { /* mantém vazio */ })
   }, [])
 
-  const termoBusca = busca.trim()
+  // Debounce: só dispara a busca 350ms depois da última tecla (evita 1 request por caractere).
+  useEffect(() => {
+    const t = setTimeout(() => setBuscaDebounced(busca.trim()), 350)
+    return () => clearTimeout(t)
+  }, [busca])
+
+  const termoBusca = buscaDebounced
 
   const carregar = useCallback(async () => {
     setLoading(true)
@@ -199,7 +206,7 @@ export function AnunciosML({ onVoltar }: Props) {
 
   useEffect(() => { carregar() }, [carregar])
 
-  const trocarAba = (novaAba: string) => { setAba(novaAba); setOffset(0); setBusca('') }
+  const trocarAba = (novaAba: string) => { setAba(novaAba); setOffset(0); setBusca(''); setBuscaDebounced('') }
   const aoMudarBusca = (valor: string) => {
     setBusca(valor)
     setOffset(0)
