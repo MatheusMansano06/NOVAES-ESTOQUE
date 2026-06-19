@@ -2960,6 +2960,21 @@ async def kit_componentes_embale(request: Request):
 
         sku = (item.olist_sku or item.sku_inbound or "").strip()
         qtd_full = _quantidade_planejada_full(item)
+
+        # DEBUG temporário: ?debug=1 devolve a estrutura crua do produto na Olist
+        # para descobrir onde a composição/kit está representada na API v3.
+        if request.query_params.get("debug") and item.olist_produto_id:
+            detalhe = olist.obter_detalhes_completo(str(item.olist_produto_id)) or {}
+            achados = {k: detalhe.get(k) for k in detalhe.keys()
+                       if any(t in k.lower() for t in ("kit", "compos", "estrut", "produc", "tipo"))}
+            return JSONResponse({
+                "_debug": True,
+                "produto_id": item.olist_produto_id,
+                "tipo": detalhe.get("tipo"),
+                "chaves": sorted(list(detalhe.keys())),
+                "campos_relevantes": achados,
+            })
+
         if not sku:
             return JSONResponse({"eh_kit": False, "motivo": "Item sem SKU Olist", "qtd_full": qtd_full})
 
