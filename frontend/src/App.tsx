@@ -7,18 +7,29 @@ import { FornecedoresManager } from './components/FornecedoresManager'
 import { EmbaldesManager } from './components/EmbaldesManager'
 import { HistoricoFull } from './components/HistoricoFull'
 import { AnunciosML } from './components/AnunciosML'
+import { OperadoresManager } from './components/OperadoresManager'
 import { AppShell, type ShellNavGroup, type ShellStatusItem } from './components/AppShell'
-import { baixarMultiplosOuPdfs } from './services/api'
+import {
+  baixarMultiplosOuPdfs,
+  buildOperadorHeaders,
+  clearOperadorSessao,
+  getOperadorSessao,
+  setOperadorSessao,
+  type OperadorSessao,
+} from './services/api'
 
 const API_BASE = import.meta.env.VITE_API_URL ?? 'http://127.0.0.1:8000'
 const SHARED_SYNC_INTERVAL_MS = 5000
 
-async function fetchJsonNoCache(url: string) {
+async function fetchJsonNoCache(url: string, init?: RequestInit) {
   const res = await fetch(url, {
+    ...(init || {}),
     cache: 'no-store',
     headers: {
       'Cache-Control': 'no-cache',
       'Pragma': 'no-cache',
+      ...buildOperadorHeaders(),
+      ...((init?.headers as Record<string, string> | undefined) || {}),
     },
   })
   if (!res.ok) throw new Error(`Falha ao carregar ${url}: ${res.status}`)
@@ -69,7 +80,7 @@ interface ProdutoEstoque {
   }>
 }
 
-type Pagina = 'bemvindo' | 'inicial' | 'conferencia' | 'produtos_nota' | 'relacionamento_produto' | 'fornecedores' | 'embaldes' | 'anuncios' | 'notas-fiscais' | 'divergencias' | 'lista-separacao' | 'historico-full'
+type Pagina = 'bemvindo' | 'inicial' | 'conferencia' | 'produtos_nota' | 'relacionamento_produto' | 'fornecedores' | 'embaldes' | 'anuncios' | 'notas-fiscais' | 'divergencias' | 'lista-separacao' | 'historico-full' | 'operadores'
 
 interface Divergencia {
   item_id: number
@@ -99,11 +110,24 @@ interface OlistStatus {
   url_autorizacao?: string | null
 }
 
+interface OperadorOption {
+  id: number
+  nome: string
+  ativo: number
+}
+
 function App() {
   // Estados de navegação
-  const [pagina, setPagina] = useState<Pagina>('bemvindo')
+  const [operadorSessao, setOperadorSessaoState] = useState<OperadorSessao | null>(() => getOperadorSessao())
+  const [pagina, setPagina] = useState<Pagina>(() => (getOperadorSessao() ? 'inicial' : 'bemvindo'))
   const [notaSelecionada, setNotaSelecionada] = useState<NotaFiscal | null>(null)
   const [produtosNota, setProdutosNota] = useState<ItemNota[]>([])
+  const [operadoresDisponiveis, setOperadoresDisponiveis] = useState<OperadorOption[]>([])
+  const [operadoresLoading, setOperadoresLoading] = useState(false)
+  const [operadorSelecionadoId, setOperadorSelecionadoId] = useState('')
+  const [masterPin, setMasterPin] = useState('')
+  const [loginLoading, setLoginLoading] = useState(false)
+  const [loginErro, setLoginErro] = useState('')
 
   // Estados da página inicial
   const [file, setFile] = useState<File | null>(null)
@@ -219,6 +243,110 @@ function App() {
     return { planejado, baixado, restante, percentual, emEspera }
   })()
 
+  const salvarSessaoOperador = (sessao: OperadorSessao | null) => {
+    if (sessao) {
+      setOperadorSessao(sessao)
+    } else {
+      clearOperadorSessao()
+    }
+    setOperadorSessaoState(sessao)
+  }
+
+  const carregarOperadores = async () => {
+    setOperadoresLoading(true)
+    setLoginErro('')
+    try {
+      const data = await fetchJsonNoCache(`${API_BASE}/api/operadores`)
+      const operadores = (data.operadores || []) as OperadorOption[]
+      setOperadoresDisponiveis(operadores)
+      setOperadorSelecionadoId((atual) => atual || (operadores[0] ? String(operadores[0].id) : ''))
+    } catch (err) {
+      console.error('Erro ao carregar operadores:', err)
+      setLoginErro('Não foi possível carregar os operadores.')
+    } finally {
+      setOperadoresLoading(false)
+    }
+  }
+
+  const entrarComoOperador = () => {
+    const operador = operadoresDisponiveis.find((item) => String(item.id) === operadorSelecionadoId)
+    if (!operador) {
+      setLoginErro('Selecione um operador para continuar.')
+      return
+    }
+    salvarSessaoOperador({
+      operadorId: operador.id,
+      operadorNome: operador.nome,
+      role: 'operador',
+    })
+    setLoginErro('')
+    setPagina('inicial')
+  }
+
+  const entrarComoMaster = async () => {
+    if (!masterPin.trim()) {
+      setLoginErro('Digite o PIN do master.')
+      return
+    }
+
+    setLoginLoading(true)
+    setLoginErro('')
+    try {
+      const res = await fetch(`${API_BASE}/api/operadores/master-login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pin: masterPin }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.erro || 'PIN inválido')
+
+      salvarSessaoOperador({
+        operadorId: null,
+        operadorNome: data.nome || 'MASTER',
+        role: 'master',
+      })
+      setMasterPin('')
+      setPagina('inicial')
+    } catch (err: any) {
+      setLoginErro(err?.message || 'Falha ao entrar como master.')
+    } finally {
+      setLoginLoading(false)
+    }
+  }
+
+  const trocarOperador = () => {
+    salvarSessaoOperador(null)
+    setPagina('bemvindo')
+    setMasterPin('')
+    setLoginErro('')
+  }
+
+  useEffect(() => {
+    const originalFetch = window.fetch.bind(window)
+
+    window.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      const headers = new Headers(input instanceof Request ? input.headers : undefined)
+      const initHeaders = new Headers(init?.headers)
+
+      initHeaders.forEach((value, key) => {
+        headers.set(key, value)
+      })
+
+      Object.entries(buildOperadorHeaders()).forEach(([key, value]) => {
+        if (value) headers.set(key, value)
+      })
+
+      return originalFetch(input, {
+        ...(init || {}),
+        headers,
+      })
+    }) as typeof window.fetch
+
+    return () => {
+      window.fetch = originalFetch
+    }
+  }, [operadorSessao])
+
   const loadIntegracoes = async () => {
     try {
       const [mlRes, olistRes] = await Promise.allSettled([
@@ -233,14 +361,21 @@ function App() {
     }
   }
 
+  useEffect(() => {
+    if (!operadorSessao || pagina === 'bemvindo') {
+      carregarOperadores()
+    }
+  }, [operadorSessao, pagina])
+
   // Carregar notas ao iniciar
   useEffect(() => {
+    if (!operadorSessao) return
     loadNotas(false)
     loadEstoque(false)
     loadDivergencias(false)
     loadIntegracoes()
     loadAnunciosPausados()
-  }, [])
+  }, [operadorSessao])
 
   // Carrega anúncios pausados SEM estoque do Mercado Livre (carrossel no dashboard)
   const loadAnunciosPausados = async () => {
@@ -254,6 +389,7 @@ function App() {
   // Diagnóstico de inbounds ATIVOS em tempo real (atualiza a cada 20s).
   // Some quando o inbound é encerrado; some todos => "SEM INBOUND ATIVO".
   useEffect(() => {
+    if (!operadorSessao) return
     const carregar = async () => {
       try {
         const data = await fetchJsonNoCache(`${API_BASE}/api/embaldes?limit=200`)
@@ -265,9 +401,10 @@ function App() {
     carregar()
     const id = setInterval(carregar, SHARED_SYNC_INTERVAL_MS)
     return () => clearInterval(id)
-  }, [])
+  }, [operadorSessao])
 
   useEffect(() => {
+    if (!operadorSessao) return
     const sincronizar = async () => {
       await Promise.allSettled([
         loadNotas(true),
@@ -291,7 +428,7 @@ function App() {
       window.removeEventListener('focus', aoVoltar)
       document.removeEventListener('visibilitychange', aoVoltar)
     }
-  }, [])
+  }, [operadorSessao])
 
   // Ao entrar na tela de vínculo, busca se esse produto já foi vinculado antes
   useEffect(() => {
@@ -1355,6 +1492,17 @@ function App() {
 
   const topStatuses: ShellStatusItem[] = [
     {
+      label: 'Operador',
+      value: operadorSessao?.operadorNome || 'Sem acesso',
+      tone: operadorSessao ? 'positive' : 'warning',
+      onClick: operadorSessao ? trocarOperador : undefined,
+    },
+    {
+      label: 'Perfil',
+      value: operadorSessao?.role === 'master' ? 'Master' : 'Operador',
+      tone: operadorSessao?.role === 'master' ? 'warning' : 'neutral',
+    },
+    {
       label: 'Mercado Livre',
       value: mlConectado ? 'Conectado' : 'Pendente',
       tone: mlConectado ? 'positive' : 'warning',
@@ -1394,6 +1542,15 @@ function App() {
     },
   ]
 
+  if (operadorSessao?.role === 'master') {
+    navGroups.push({
+      label: 'Gestao',
+      items: [
+        { key: 'operadores', label: 'Operadores', icon: 'users', active: pagina === 'operadores', onClick: () => setPagina('operadores') },
+      ],
+    })
+  }
+
   const renderComShell = (title: string, subtitle: string, conteudo: ReactNode) => (
     <AppShell
       title={title}
@@ -1405,6 +1562,180 @@ function App() {
       {conteudo}
     </AppShell>
   )
+
+  if (pagina === 'bemvindo') {
+    const features = [
+      { titulo: 'Turno rastreado', texto: 'Cada ação fica salva com o nome de quem operou.' },
+      { titulo: 'Master liberado', texto: 'PIN numérico para gestão, histórico e cadastro de pessoas.' },
+      { titulo: 'Fluxo contínuo', texto: 'Notas, inbound, baixa e balanço seguem no mesmo painel.' },
+    ]
+
+    return (
+      <div style={{
+        position: 'relative',
+        zIndex: 1,
+        minHeight: '100vh',
+        display: 'grid',
+        gridTemplateColumns: 'minmax(320px, 1.05fr) minmax(360px, 0.95fr)',
+        background: '#eef4fb',
+      }}>
+        <div style={{
+          position: 'relative',
+          overflow: 'hidden',
+          background: 'linear-gradient(155deg, #081b44 0%, #0d2d69 58%, #0e5f8d 100%)',
+          color: '#fff',
+          padding: '3.5rem 3.2rem',
+          display: 'flex',
+          flexDirection: 'column',
+          justifyContent: 'space-between',
+        }}>
+          <div style={{
+            position: 'absolute',
+            inset: 0,
+            background: 'radial-gradient(circle at 18% 20%, rgba(255,255,255,0.16), transparent 28%), radial-gradient(circle at 78% 32%, rgba(255,196,0,0.16), transparent 22%)',
+            pointerEvents: 'none',
+          }} />
+
+          <div style={{ position: 'relative', zIndex: 1 }}>
+            <div style={{
+              width: 104,
+              height: 104,
+              borderRadius: '50%',
+              background: "#ffffff url('/assets/nvs-tech-logo.jpeg') center / 82% auto no-repeat",
+              border: '3px solid rgba(255, 196, 0, 0.9)',
+              boxShadow: '0 14px 32px rgba(0, 0, 0, 0.25)',
+            }} />
+          </div>
+
+          <div style={{ position: 'relative', zIndex: 1, display: 'grid', gap: '1.8rem' }}>
+            <div>
+              <div style={{ display: 'inline-flex', width: 'fit-content', padding: '0.38rem 0.9rem', borderRadius: '999px', background: 'rgba(255,255,255,0.12)', fontWeight: 700, letterSpacing: '0.04em', textTransform: 'uppercase', fontSize: '0.8rem' }}>
+                Operação NVS
+              </div>
+              <h1 style={{ fontSize: '2.35rem', lineHeight: 1.05, fontWeight: 900, margin: '1rem 0 0.8rem 0' }}>
+                Entrada com operador e histórico real da operação
+              </h1>
+              <p style={{ fontSize: '1rem', lineHeight: 1.6, opacity: 0.88, margin: 0, maxWidth: '32rem' }}>
+                Escolha quem está no turno para registrar upload de nota, inbound, separação, baixa, balanço e ajustes com responsabilidade por pessoa.
+              </p>
+            </div>
+
+            <div style={{ display: 'grid', gap: '0.95rem', maxWidth: '34rem' }}>
+              {features.map((feature) => (
+                <div key={feature.titulo} style={{ padding: '1rem 1.1rem', borderRadius: '18px', background: 'rgba(255,255,255,0.1)', backdropFilter: 'blur(10px)', border: '1px solid rgba(255,255,255,0.14)' }}>
+                  <div style={{ fontWeight: 800, marginBottom: '0.25rem' }}>{feature.titulo}</div>
+                  <div style={{ opacity: 0.82, lineHeight: 1.5 }}>{feature.texto}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div style={{ position: 'relative', zIndex: 1, fontSize: '0.8rem', opacity: 0.7 }}>
+            © 2026 NVS TECH. Controle operacional local.
+          </div>
+        </div>
+
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '2rem' }}>
+          <div style={{
+            width: '100%',
+            maxWidth: '520px',
+            background: '#fff',
+            borderRadius: '30px',
+            border: '1px solid #dce6f4',
+            boxShadow: '0 30px 70px rgba(12, 41, 95, 0.12)',
+            padding: '2.2rem',
+            display: 'grid',
+            gap: '1.5rem',
+          }}>
+            <div style={{ display: 'grid', gap: '0.45rem' }}>
+              <div style={{ display: 'inline-flex', width: 'fit-content', padding: '0.4rem 0.9rem', borderRadius: '999px', background: '#edf4ff', color: '#1b5fd1', fontWeight: 800, fontSize: '0.78rem', letterSpacing: '0.04em', textTransform: 'uppercase' }}>
+                Acesso de operador
+              </div>
+              <h2 style={{ fontSize: '2.05rem', fontWeight: 900, color: '#0b2050', margin: 0 }}>
+                Entrar no turno
+              </h2>
+              <p style={{ fontSize: '0.98rem', color: '#667085', lineHeight: 1.6, margin: 0 }}>
+                Selecione seu nome para iniciar o fluxo de picking ou use o PIN master para gestão.
+              </p>
+            </div>
+
+            <div style={{ display: 'grid', gap: '0.9rem' }}>
+              <select
+                value={operadorSelecionadoId}
+                onChange={(e) => setOperadorSelecionadoId(e.target.value)}
+                disabled={operadoresLoading || loginLoading}
+                style={{
+                  width: '100%',
+                  padding: '1.1rem 1rem',
+                  borderRadius: '18px',
+                  border: '2px solid #8cb7ff',
+                  fontSize: '1rem',
+                  color: '#102a5c',
+                  outline: 'none',
+                  boxShadow: '0 0 0 4px rgba(31,111,255,0.08)',
+                }}
+              >
+                <option value="">Selecionar operador</option>
+                {operadoresDisponiveis.map((operador) => (
+                  <option key={operador.id} value={String(operador.id)}>{operador.nome}</option>
+                ))}
+              </select>
+
+              <button
+                type="button"
+                onClick={entrarComoOperador}
+                disabled={operadoresLoading || loginLoading || !operadorSelecionadoId}
+                style={{
+                  width: '100%',
+                  padding: '1rem',
+                  background: 'linear-gradient(135deg, #9bb4f3 0%, #98d9e5 100%)',
+                  color: '#fff',
+                  border: 'none',
+                  borderRadius: '18px',
+                  fontSize: '1.1rem',
+                  fontWeight: 900,
+                  cursor: operadoresLoading || loginLoading || !operadorSelecionadoId ? 'not-allowed' : 'pointer',
+                  opacity: operadoresLoading || loginLoading || !operadorSelecionadoId ? 0.65 : 1,
+                }}
+              >
+                {operadoresLoading ? 'Carregando operadores...' : 'Continuar'}
+              </button>
+            </div>
+
+            <div style={{ display: 'grid', gap: '0.85rem', paddingTop: '0.5rem', borderTop: '1px solid #edf1f6' }}>
+              <div style={{ fontWeight: 800, color: '#0b2050' }}>Acesso master</div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr auto', gap: '0.75rem' }}>
+                <input
+                  type="password"
+                  inputMode="numeric"
+                  pattern="[0-9]*"
+                  maxLength={10}
+                  placeholder="PIN numérico"
+                  value={masterPin}
+                  onChange={(e) => setMasterPin(e.target.value.replace(/\D/g, ''))}
+                  style={{ padding: '0.95rem 1rem', borderRadius: '14px', border: '1px solid #cfd8e3', fontSize: '1rem' }}
+                />
+                <button
+                  type="button"
+                  onClick={entrarComoMaster}
+                  disabled={loginLoading}
+                  style={{ padding: '0.95rem 1.2rem', borderRadius: '14px', border: 'none', background: '#0f2e67', color: '#fff', fontWeight: 800, cursor: loginLoading ? 'wait' : 'pointer' }}
+                >
+                  {loginLoading ? 'Entrando...' : 'Master'}
+                </button>
+              </div>
+            </div>
+
+            {loginErro && (
+              <div style={{ padding: '0.9rem 1rem', borderRadius: '14px', background: '#fff1f1', color: '#b42318', fontWeight: 700 }}>
+                {loginErro}
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    )
+  }
 
   if (pagina === 'bemvindo') {
     const features = [
@@ -3647,6 +3978,28 @@ function App() {
         </header>
         <main className="container main-content">
           <HistoricoFull />
+        </main>
+      </div>
+    )
+  }
+
+  if (pagina === 'operadores' && operadorSessao?.role === 'master') {
+    return renderComShell(
+      'Operadores e Auditoria',
+      'Cadastre pessoas e acompanhe o histórico individual da operação.',
+      <div className="app">
+        <header className="header">
+          <div className="container">
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div>
+                <h1>OPERADORES</h1>
+                <p>Controle de acesso por turno com histórico por pessoa</p>
+              </div>
+            </div>
+          </div>
+        </header>
+        <main className="container main-content">
+          <OperadoresManager />
         </main>
       </div>
     )

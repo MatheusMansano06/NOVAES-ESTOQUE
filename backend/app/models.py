@@ -124,6 +124,36 @@ class Fornecedor(Base):
     notificacoes = relationship("NotificacaoFornecedor", back_populates="fornecedor", cascade="all, delete-orphan")
 
 
+class Operador(Base):
+    """
+    Operadores que podem iniciar turno na aplicação.
+    """
+    __tablename__ = "operadores"
+
+    id = Column(Integer, primary_key=True)
+    nome = Column(String(120), unique=True, index=True)
+    ativo = Column(Integer, default=1)
+    criado_em = Column(DateTime, default=datetime.utcnow)
+
+
+class LogOperacao(Base):
+    """
+    Auditoria das ações feitas na aplicação por operador/master.
+    """
+    __tablename__ = "logs_operacao"
+
+    id = Column(Integer, primary_key=True)
+    operador_id = Column(Integer, ForeignKey("operadores.id"), nullable=True, index=True)
+    operador_nome = Column(String(120), index=True)
+    operador_role = Column(String(30), default="operador", index=True)
+    acao = Column(String(80), index=True)
+    entidade_tipo = Column(String(80), nullable=True, index=True)
+    entidade_id = Column(String(120), nullable=True, index=True)
+    descricao = Column(String(255), nullable=True)
+    detalhes_json = Column(Text, nullable=True)
+    criado_em = Column(DateTime, default=datetime.utcnow, index=True)
+
+
 class HistoricoCompra(Base):
     """
     Rastreamento de quais fornecedores forneceram cada produto.

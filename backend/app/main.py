@@ -21,7 +21,7 @@ from app.models import (
     Fornecedor, HistoricoCompra, ConfiguracaoEstoqueMinimo, NotificacaoFornecedor,
     EmbaleFU, ItemEmbaleFU, ApelidoFornecedor, PrecoVendaProduto,
     MercadoLivreItemCache, MercadoLivreSyncState, HistoricoFullEmbale,
-    CustoProduto
+    CustoProduto, Operador, LogOperacao
 )
 from app.utils.nfe_parser import NFeParsing
 from app.utils.nfe_pdf_generator import NFePDFGenerator
@@ -90,6 +90,94 @@ def _garantir_colunas_sqlite():
 
 _garantir_colunas_sqlite()
 
+OPERADORES_PADRAO = ["Rafael", "Wellington", "Cris", "Cristofer", "Nathan", "Luisa"]
+MASTER_PIN_PADRAO = os.getenv("MASTER_PIN", "1234")
+
+
+def _seed_operadores_padrao():
+    db = SessionLocal()
+    try:
+        existentes = {str(nome).strip().lower() for (nome,) in db.query(Operador.nome).all()}
+        alterou = False
+        for nome in OPERADORES_PADRAO:
+            chave = nome.strip().lower()
+            if chave in existentes:
+                continue
+            db.add(Operador(nome=nome.strip(), ativo=1))
+            alterou = True
+        if alterou:
+            db.commit()
+    except Exception as e:
+        db.rollback()
+        print(f"[OPERADORES] Falha ao seedar operadores padrão: {e}")
+    finally:
+        db.close()
+
+
+def _operador_contexto(request: Request) -> dict:
+    headers = request.headers
+    operador_id = str(headers.get("x-operator-id") or "").strip()
+    operador_nome = str(headers.get("x-operator-name") or "").strip()
+    operador_role = str(headers.get("x-operator-role") or "operador").strip().lower() or "operador"
+
+    if operador_role == "master" and not operador_nome:
+        operador_nome = "MASTER"
+    if not operador_nome:
+        operador_nome = "Nao identificado"
+
+    return {
+        "operador_id": operador_id or None,
+        "operador_nome": operador_nome,
+        "operador_role": operador_role,
+    }
+
+
+def _request_eh_master(request: Request) -> bool:
+    return _operador_contexto(request).get("operador_role") == "master"
+
+
+def _registrar_log_operacao(
+    request: Request,
+    acao: str,
+    entidade_tipo: str | None = None,
+    entidade_id: str | int | None = None,
+    descricao: str | None = None,
+    detalhes: dict | None = None,
+):
+    ctx = _operador_contexto(request)
+    db = SessionLocal()
+    try:
+        operador_id = None
+        if ctx["operador_id"]:
+            try:
+                operador_id = int(ctx["operador_id"])
+            except (TypeError, ValueError):
+                operador_id = None
+
+        if operador_id is None and ctx["operador_role"] != "master" and ctx["operador_nome"]:
+            operador = db.query(Operador).filter(Operador.nome == ctx["operador_nome"]).first()
+            operador_id = operador.id if operador else None
+
+        db.add(LogOperacao(
+            operador_id=operador_id,
+            operador_nome=ctx["operador_nome"],
+            operador_role=ctx["operador_role"],
+            acao=acao,
+            entidade_tipo=entidade_tipo,
+            entidade_id=None if entidade_id is None else str(entidade_id),
+            descricao=descricao,
+            detalhes_json=json.dumps(detalhes, ensure_ascii=False) if detalhes else None,
+        ))
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        print(f"[AUDITORIA] Falha ao registrar log '{acao}': {e}")
+    finally:
+        db.close()
+
+
+_seed_operadores_padrao()
+
 UPLOAD_DIR = os.getenv("UPLOAD_DIR", "./uploads")
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
@@ -100,7 +188,6 @@ olist_access_token_cache = {"token": None, "expires_at": None}
 MIN_AUTO_CONFIDENCE = 0.95  # Vincular automaticamente apenas com 95%+ de confiança
 MIN_FUZZY_CONFIDENCE = 0.80  # Sugerir vinculação com 80%+ de confiança
 MAX_PAGINATION_LIMIT = 1000  # Limite máximo de itens por página
-
 def obter_olist_access_token():
     """Obtém access_token da Olist usando OAuth"""
     global olist_access_token_cache
@@ -348,6 +435,20 @@ async def upload_nfe(request: Request):
                             }
                         })
 
+            _registrar_log_operacao(
+                request,
+                "nota_upload",
+                "nota_fiscal",
+                nf.id,
+                f"Upload da NF {nf.numero_nf}",
+                {
+                    "numero_nf": nf.numero_nf,
+                    "fornecedor": nf.fornecedor,
+                    "itens_encontrados": len(result.get("itens", [])),
+                    "arquivo": safe_filename,
+                },
+            )
+
             return JSONResponse({
                 "id": nf.id,
                 "numero_nf": nf.numero_nf,
@@ -558,6 +659,21 @@ async def registrar_divergencia(request: Request):
         db.add(confirmacao)
         db.commit()
 
+        _registrar_log_operacao(
+            request,
+            "estoque_confirmado",
+            "item_estoque",
+            item.id,
+            f"Conferência do item {item.codigo_produto or item.descricao}",
+            {
+                "item_id": item.id,
+                "codigo_produto": item.codigo_produto,
+                "descricao": item.descricao,
+                "quantidade_confirmada": quantidade_confirmada,
+                "divergencia": divergencia,
+            },
+        )
+
         numero_whatsapp = "19978149245"  # Número padrão
 
         # Log seguro: evita UnicodeEncodeError no console do Windows (cp1252)
@@ -710,6 +826,20 @@ async def adicionar_produto_manual(request: Request):
 
         db.add(item_manual)
         db.commit()
+
+        _registrar_log_operacao(
+            request,
+            "produto_manual_adicionado",
+            "item_estoque",
+            item_manual.id,
+            f"Produto manual adicionado na NF {nf_id}",
+            {
+                "nf_id": nf_id,
+                "codigo": codigo_recebido,
+                "descricao": descricao_recebida,
+                "quantidade": quantidade,
+            },
+        )
 
         return JSONResponse({
             "sucesso": True,
@@ -994,6 +1124,22 @@ async def vincular_produto_olist(request: Request):
 
         db.commit()
 
+        _registrar_log_operacao(
+            request,
+            "vinculo_manual_nota",
+            "item_estoque",
+            item.id,
+            f"Produto vinculado à Olist: {olist_nome}",
+            {
+                "item_id": item.id,
+                "codigo_produto": item.codigo_produto,
+                "descricao": item.descricao,
+                "olist_produto_id": str(olist_produto_id),
+                "olist_sku": olist_sku,
+                "olist_nome": olist_nome,
+            },
+        )
+
         return JSONResponse({
             "sucesso": True,
             "mensagem": f"Produto vinculado: {olist_nome}",
@@ -1052,6 +1198,22 @@ async def aceitar_sugestao_vinculo(request: Request):
             db.add(vinculo)
 
         db.commit()
+
+        _registrar_log_operacao(
+            request,
+            "vinculo_sugestao_aceito",
+            "item_estoque",
+            item.id,
+            f"Sugestão de vínculo aceita: {olist_nome}",
+            {
+                "item_id": item.id,
+                "codigo_produto": item.codigo_produto,
+                "descricao": item.descricao,
+                "olist_produto_id": str(olist_produto_id),
+                "olist_sku": olist_sku,
+                "olist_nome": olist_nome,
+            },
+        )
 
         return JSONResponse({
             "sucesso": True,
@@ -1863,6 +2025,8 @@ async def upload_embale(request: Request):
 
         # Parsear data limite (formato YYYY-MM-DD do input HTML)
         data_limite = None
+        data_limite_anterior = embale.data_limite.isoformat() if embale.data_limite else None
+
         if data_limite_str:
             try:
                 data_limite = datetime.strptime(data_limite_str[:10], "%Y-%m-%d")
@@ -1978,6 +2142,21 @@ async def upload_embale(request: Request):
         msg = f"Inbound {numero_inbound or ''} processado: {items_validados}/{items_processados} items vinculados"
         if substituiu_id:
             msg += " (substituiu um inbound anterior com o mesmo número)"
+
+        _registrar_log_operacao(
+            request,
+            "inbound_upload",
+            "embale",
+            embale.id,
+            f"Upload do inbound {numero_inbound or embale.nome_embalde}",
+            {
+                "nome_embale": embale.nome_embalde,
+                "numero_inbound": numero_inbound,
+                "itens_processados": items_processados,
+                "itens_validados": items_validados,
+                "substituiu_inbound_id": substituiu_id,
+            },
+        )
 
         return JSONResponse({
             "id": embale.id,
@@ -2135,6 +2314,19 @@ async def atualizar_data_limite_embale(request: Request):
             embale.data_limite = None
 
         db.commit()
+        _registrar_log_operacao(
+            request,
+            "data_limite_inbound_atualizada",
+            "embale",
+            embale.id,
+            f"Data limite do inbound #{embale.numero_inbound or embale.id} atualizada",
+            {
+                "embale_id": embale.id,
+                "numero_inbound": embale.numero_inbound,
+                "data_limite_anterior": data_limite_anterior,
+                "data_limite_nova": embale.data_limite.isoformat() if embale.data_limite else None,
+            },
+        )
         return JSONResponse({
             "id": embale.id,
             "data_limite": embale.data_limite.isoformat() if embale.data_limite else None,
@@ -2600,6 +2792,19 @@ async def confirmar_baixa_embale(request: Request):
         db.commit()
 
         resumo_sucesso = sum(1 for r in resultados if r.get("status") in ("ok", "ja_baixado"))
+        _registrar_log_operacao(
+            request,
+            "baixa_full_em_massa",
+            "embale",
+            embale.id,
+            f"Baixa em massa do inbound #{embale.numero_inbound or embale.id}",
+            {
+                "embale_id": embale.id,
+                "sucesso": resumo_sucesso,
+                "total_itens": len(itens),
+                "erros_count": len(erros),
+            },
+        )
         return JSONResponse({
             "embale_id": embale.id,
             "total_itens": len(itens),
@@ -2648,6 +2853,20 @@ async def baixa_item_individual(request: Request):
         db.commit()
 
         status_code = 200 if r["status"] in ("ok", "ja_baixado", "zerado") else 400
+        if r["status"] in ("ok", "ja_baixado", "zerado"):
+            _registrar_log_operacao(
+                request,
+                "baixa_item_full",
+                "item_embale",
+                item.id,
+                f"Baixa individual do item {item.sku_inbound or item.titulo_anuncio}",
+                {
+                    "embale_id": embale.id,
+                    "item_id": item.id,
+                    "quantidade": r.get("quantidade_baixada") or qtd,
+                    "status": r.get("status"),
+                },
+            )
         return JSONResponse(r, status_code=status_code)
 
     except Exception as e:
@@ -2727,6 +2946,21 @@ async def vincular_item_embale(request: Request):
                 ))
 
         db.commit()
+        _registrar_log_operacao(
+            request,
+            "vinculo_item_inbound",
+            "item_embale",
+            item.id,
+            f"Item do inbound vinculado à Olist: {olist_nome}",
+            {
+                "embale_id": embale.id,
+                "item_id": item.id,
+                "sku_inbound": item.sku_inbound,
+                "olist_produto_id": str(olist_produto_id),
+                "olist_sku": olist_sku,
+                "olist_nome": olist_nome,
+            },
+        )
         return JSONResponse({
             "sucesso": True,
             "item_id": item_id,
@@ -2794,6 +3028,21 @@ async def ajustar_quantidade_full_embale(request: Request):
             ))
 
         db.commit()
+
+        if abs(quantidade_full - quantidade_anterior) > 0.0001:
+            _registrar_log_operacao(
+                request,
+                "quantidade_full_ajustada",
+                "item_embale",
+                item.id,
+                f"Quantidade do FULL ajustada para {quantidade_full:g}",
+                {
+                    "embale_id": embale.id,
+                    "item_id": item.id,
+                    "quantidade_anterior": quantidade_anterior,
+                    "quantidade_nova": quantidade_full,
+                },
+            )
 
         return JSONResponse({
             "sucesso": True,
@@ -2885,6 +3134,23 @@ async def balancear_item_embale(request: Request):
             item.data_balanceamento = datetime.utcnow()
             db.add(item)
             db.commit()
+            _registrar_log_operacao(
+                request,
+                "balanco_item_full_divergente",
+                "item_embale",
+                item.id,
+                f"Balanço divergente do item {item.sku_inbound or item.titulo_anuncio}",
+                {
+                    "embale_id": embale.id,
+                    "item_id": item.id,
+                    "sku_inbound": item.sku_inbound,
+                    "quantidade_real": quantidade_real,
+                    "qtd_full": qtd_full,
+                    "falta": item.falta,
+                    "estoque_antes": estoque_antes,
+                    "estoque_depois": estoque_depois,
+                },
+            )
             return JSONResponse({
                 "item_id": item.id,
                 "titulo": item.titulo_anuncio,
@@ -2916,6 +3182,25 @@ async def balancear_item_embale(request: Request):
         item.data_balanceamento = datetime.utcnow()
         db.add(item)
         db.commit()
+        _registrar_log_operacao(
+            request,
+            "balanco_item_full",
+            "item_embale",
+            item.id,
+            f"Balanço do item {item.sku_inbound or item.titulo_anuncio}",
+            {
+                "embale_id": embale.id,
+                "item_id": item.id,
+                "sku_inbound": item.sku_inbound,
+                "quantidade_real": quantidade_real,
+                "qtd_full": qtd_full,
+                "falta": item.falta,
+                "saldo_disponivel": item.saldo_disponivel,
+                "estoque_antes": estoque_antes,
+                "estoque_depois": estoque_depois,
+                "baixa_status": baixa_resultado.get("status"),
+            },
+        )
 
         return JSONResponse({
             "item_id": item.id,
@@ -3187,6 +3472,21 @@ async def balancear_kit_componentes_embale(request: Request):
                 item.data_baixa = datetime.utcnow()
             db.add(item)
             db.commit()
+            _registrar_log_operacao(
+                request,
+                "balanco_kit_componentes",
+                "item_embale",
+                item.id,
+                f"Balanço dos componentes do kit {item.sku_inbound or item.titulo_anuncio}",
+                {
+                    "embale_id": embale.id,
+                    "item_id": item.id,
+                    "qtd_full": qtd_full,
+                    "todos_ok": todos_ok,
+                    "tem_divergencia": tem_divergencia,
+                    "resultados": resultados,
+                },
+            )
         else:
             db.rollback()
 
@@ -3271,6 +3571,19 @@ async def baixar_kit_componentes_embale(request: Request):
             item.data_baixa = datetime.utcnow()
             db.add(item)
             db.commit()
+            _registrar_log_operacao(
+                request,
+                "baixa_kit_componentes",
+                "item_embale",
+                item.id,
+                f"Baixa dos componentes do kit {item.sku_inbound or item.titulo_anuncio}",
+                {
+                    "embale_id": embale.id,
+                    "item_id": item.id,
+                    "qtd_full": item.quantidade_baixar,
+                    "resultados": resultados,
+                },
+            )
         else:
             db.rollback()
 
@@ -3353,6 +3666,19 @@ async def marcar_em_espera_embale(request: Request):
             item.data_em_espera = None
 
         db.commit()
+        _registrar_log_operacao(
+            request,
+            "item_inbound_em_espera" if em_espera == 1 else "item_inbound_retomado",
+            "item_embale",
+            item.id,
+            f"Item {item.sku_inbound or item.titulo_anuncio} {'colocado em espera' if em_espera == 1 else 'retornado para fluxo ativo'}",
+            {
+                "embale_id": embale.id,
+                "item_id": item.id,
+                "em_espera": item.em_espera,
+                "data_em_espera": item.data_em_espera.isoformat() if item.data_em_espera else None,
+            },
+        )
 
         return JSONResponse({
             "item_id": item.id,
@@ -3481,6 +3807,19 @@ async def encerrar_embale(request: Request):
         embale.status = "encerrado"
         embale.data_encerramento = datetime.utcnow()
         db.commit()
+        _registrar_log_operacao(
+            request,
+            "inbound_encerrado",
+            "embale",
+            embale.id,
+            f"Inbound #{embale.numero_inbound or embale.id} encerrado",
+            {
+                "embale_id": embale.id,
+                "numero_inbound": embale.numero_inbound,
+                "nome_embale": embale.nome_embalde,
+                "data_encerramento": embale.data_encerramento.isoformat() if embale.data_encerramento else None,
+            },
+        )
 
         return JSONResponse({
             "id": embale.id,
@@ -3988,8 +4327,21 @@ async def atualizar_nome_embale(request: Request):
         embale = db.query(EmbaleFU).filter(EmbaleFU.id == embale_id).first()
         if not embale:
             return JSONResponse({"erro": "Inbound não encontrado"}, status_code=404)
+        nome_anterior = embale.nome_embalde
         embale.nome_embalde = nome_embale
         db.commit()
+        _registrar_log_operacao(
+            request,
+            "nome_inbound_atualizado",
+            "embale",
+            embale.id,
+            f"Nome do inbound atualizado para {embale.nome_embalde}",
+            {
+                "embale_id": embale.id,
+                "nome_anterior": nome_anterior,
+                "nome_novo": embale.nome_embalde,
+            },
+        )
         return JSONResponse({"id": embale.id, "nome_embale": embale.nome_embalde, "mensagem": "Nome do inbound atualizado"})
     except Exception as e:
         db.rollback()
@@ -4060,8 +4412,127 @@ async def olist_deletar_vinculo(request: Request):
         db.close()
 
 
+async def listar_operadores(request: Request):
+    db = SessionLocal()
+    try:
+        operadores = (db.query(Operador)
+                      .filter(Operador.ativo == 1)
+                      .order_by(Operador.nome.asc())
+                      .all())
+        return JSONResponse({
+            "operadores": [
+                {
+                    "id": op.id,
+                    "nome": op.nome,
+                    "ativo": op.ativo,
+                    "criado_em": op.criado_em.isoformat() if op.criado_em else None,
+                }
+                for op in operadores
+            ]
+        })
+    except Exception as e:
+        return JSONResponse({"erro": str(e)}, status_code=500)
+    finally:
+        db.close()
+
+
+async def master_login_operadores(request: Request):
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    pin = str(body.get("pin") or "").strip()
+    if pin != MASTER_PIN_PADRAO:
+        return JSONResponse({"erro": "PIN inválido"}, status_code=401)
+    return JSONResponse({"sucesso": True, "nome": "MASTER", "role": "master"})
+
+
+async def criar_operador(request: Request):
+    if not _request_eh_master(request):
+        return JSONResponse({"erro": "Acesso restrito ao master"}, status_code=403)
+
+    db = SessionLocal()
+    try:
+        body = await request.json()
+        nome = str(body.get("nome") or "").strip()
+        if not nome:
+            return JSONResponse({"erro": "Nome do operador é obrigatório"}, status_code=400)
+
+        existente = db.query(Operador).filter(Operador.nome.ilike(nome)).first()
+        if existente:
+            if existente.ativo != 1:
+                existente.ativo = 1
+                db.add(existente)
+                db.commit()
+            _registrar_log_operacao(request, "operador_reativado", "operador", existente.id, f"Operador reativado: {existente.nome}", {"nome": existente.nome})
+            return JSONResponse({"id": existente.id, "nome": existente.nome, "ativo": existente.ativo, "mensagem": "Operador reativado"})
+
+        operador = Operador(nome=nome, ativo=1)
+        db.add(operador)
+        db.commit()
+        db.refresh(operador)
+        _registrar_log_operacao(request, "operador_criado", "operador", operador.id, f"Operador criado: {operador.nome}", {"nome": operador.nome})
+        return JSONResponse({"id": operador.id, "nome": operador.nome, "ativo": operador.ativo, "mensagem": "Operador criado"})
+    except Exception as e:
+        db.rollback()
+        return JSONResponse({"erro": str(e)}, status_code=500)
+    finally:
+        db.close()
+
+
+async def historico_operadores(request: Request):
+    if not _request_eh_master(request):
+        return JSONResponse({"erro": "Acesso restrito ao master"}, status_code=403)
+
+    db = SessionLocal()
+    try:
+        operador = str(request.query_params.get("operador") or "").strip()
+        limit = min(int(request.query_params.get("limit", 500)), 1000)
+
+        query = db.query(LogOperacao)
+        if operador:
+            query = query.filter(LogOperacao.operador_nome == operador)
+        logs = query.order_by(LogOperacao.criado_em.desc()).limit(limit).all()
+
+        agrupado = {}
+        for log in logs:
+            chave = log.operador_nome or "Nao identificado"
+            bucket = agrupado.setdefault(chave, {
+                "operador_nome": chave,
+                "operador_role": log.operador_role or "operador",
+                "total_acoes": 0,
+                "ultima_acao": None,
+                "acoes": [],
+            })
+            bucket["total_acoes"] += 1
+            if not bucket["ultima_acao"]:
+                bucket["ultima_acao"] = log.criado_em.isoformat() if log.criado_em else None
+            bucket["acoes"].append({
+                "id": log.id,
+                "acao": log.acao,
+                "entidade_tipo": log.entidade_tipo,
+                "entidade_id": log.entidade_id,
+                "descricao": log.descricao,
+                "detalhes": json.loads(log.detalhes_json) if log.detalhes_json else None,
+                "criado_em": log.criado_em.isoformat() if log.criado_em else None,
+            })
+
+        return JSONResponse({
+            "total_logs": len(logs),
+            "operadores": sorted(agrupado.values(), key=lambda item: item["operador_nome"].lower()),
+        })
+    except Exception as e:
+        return JSONResponse({"erro": str(e)}, status_code=500)
+    finally:
+        db.close()
+
+
 routes = [
     Route("/api/health", root, methods=["GET"]),
+    Route("/api/operadores", listar_operadores, methods=["GET"]),
+    Route("/api/operadores", criar_operador, methods=["POST"]),
+    Route("/api/operadores/master-login", master_login_operadores, methods=["POST"]),
+    Route("/api/operadores/historico", historico_operadores, methods=["GET"]),
     Route("/api/apelidos-fornecedores", apelidos_fornecedores, methods=["GET", "POST"]),
     Route("/api/notas-fiscais/{id:int}/frete", atualizar_frete_nota, methods=["POST"]),
     Route("/api/precos-venda", precos_venda, methods=["GET", "POST"]),
