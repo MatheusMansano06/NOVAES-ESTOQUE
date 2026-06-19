@@ -2939,13 +2939,61 @@ async def balancear_item_embale(request: Request):
         db.close()
 
 
+def _componentes_kit_olist(produto_id: str, qtd_full: float):
+    """Lê os componentes de um produto kit da Olist usando o ID direto.
+    A API v3 traz tipo=='K' e o array 'kit' com {produto:{id,sku,descricao}, quantidade}.
+    Buscar por SKU (detectar_e_buscar_kit) pegava o produto errado — por isso usamos o id.
+    Retorna (eh_kit: bool, tipo: str, componentes: list, nome_kit, sku_kit).
+    """
+    detalhe = olist.obter_detalhes_completo(str(produto_id)) or {}
+    tipo = detalhe.get("tipo")
+    if tipo != "K":
+        return False, tipo, [], None, None
+    componentes = []
+    for c in (detalhe.get("kit") or []):
+        p = c.get("produto") or {}
+        cid = str(p.get("id") or "")
+        por_kit = float(c.get("quantidade") or 1)
+        estoque_atual = None
+        if cid:
+            est = olist.obter_estoque(cid)
+            if isinstance(est, dict):
+                estoque_atual = est.get("saldo", est.get("disponivel"))
+        componentes.append({
+            "produto_id": cid,
+            "sku": p.get("sku") or "",
+            "descricao": p.get("descricao") or "",
+            "estoque_atual": estoque_atual,
+            "quantidade_no_kit": por_kit,
+            "quantidade_sugerida": int(round(por_kit * qtd_full)),
+        })
+    return True, tipo, componentes, detalhe.get("descricao"), detalhe.get("sku")
+
+
+def _kit_equivalente_minimo(componentes: list, campo: str) -> float:
+    """Converte o estoque dos componentes para o equivalente em kits completos."""
+    equivalentes = []
+    for c in componentes:
+        try:
+            por_kit = float((c or {}).get("quantidade_no_kit") or 1)
+        except (TypeError, ValueError):
+            por_kit = 1
+        if por_kit <= 0:
+            por_kit = 1
+        try:
+            valor = float((c or {}).get(campo) or 0)
+        except (TypeError, ValueError):
+            valor = 0
+        equivalentes.append(valor / por_kit)
+    return min(equivalentes) if equivalentes else 0.0
+
+
 async def kit_componentes_embale(request: Request):
     """
     GET /api/embaldes/{embale_id}/itens/{item_id}/kit
     Detecta se o item do inbound é um KIT na Olist e devolve os componentes
-    (anúncios unitários) com a quantidade sugerida para baixar pro FULL.
-    A Olist não deixa baixar o estoque de um kit direto — a baixa tem que ser
-    feita em cada componente.
+    (anúncios unitários) com a quantidade sugerida. A Olist não deixa mexer no
+    estoque de um kit direto — baixa/balanço têm que ser feitos em cada componente.
     """
     db = SessionLocal()
     try:
@@ -2958,52 +3006,208 @@ async def kit_componentes_embale(request: Request):
         if not item:
             return JSONResponse({"erro": "Item não encontrado neste inbound"}, status_code=404)
 
-        sku = (item.olist_sku or item.sku_inbound or "").strip()
         qtd_full = _quantidade_planejada_full(item)
+        pid = str(item.olist_produto_id or "").strip()
+        if not pid:
+            return JSONResponse({"eh_kit": False, "motivo": "Item sem produto Olist vinculado", "qtd_full": qtd_full})
 
-        # DEBUG temporário: ?debug=1 devolve a estrutura crua do produto na Olist
-        # para descobrir onde a composição/kit está representada na API v3.
-        if request.query_params.get("debug") and item.olist_produto_id:
-            detalhe = olist.obter_detalhes_completo(str(item.olist_produto_id)) or {}
-            return JSONResponse({
-                "_debug": True,
-                "produto_id": item.olist_produto_id,
-                "sku_item": item.olist_sku,
-                "tipo": detalhe.get("tipo"),
-                "produtoPai": detalhe.get("produtoPai"),
-                "variacoes": detalhe.get("variacoes"),
-                "kit": detalhe.get("kit"),
-                "descricao": detalhe.get("descricao"),
-            })
-
-        if not sku:
-            return JSONResponse({"eh_kit": False, "motivo": "Item sem SKU Olist", "qtd_full": qtd_full})
-
-        info = olist.detectar_e_buscar_kit(sku) or {}
-        if not info.get("eh_kit"):
-            return JSONResponse({"eh_kit": False, "tipo": info.get("tipo"), "qtd_full": qtd_full})
-
-        componentes = []
-        for c in info.get("componentes", []):
-            por_kit = float(c.get("quantidade_no_kit") or 1)
-            componentes.append({
-                "produto_id": str(c.get("id") or ""),
-                "sku": c.get("sku") or "",
-                "descricao": c.get("nome") or c.get("descricao") or "",
-                "estoque_atual": c.get("estoque_atual"),
-                "quantidade_no_kit": por_kit,
-                # Sugestão = quantos de cada componente para o total de kits do FULL
-                "quantidade_sugerida": int(round(por_kit * qtd_full)),
-            })
+        eh_kit, tipo, componentes, nome_kit, sku_kit = _componentes_kit_olist(pid, qtd_full)
+        if not eh_kit:
+            return JSONResponse({"eh_kit": False, "tipo": tipo, "qtd_full": qtd_full})
 
         return JSONResponse({
             "eh_kit": True,
-            "nome_kit": info.get("nome_kit"),
-            "sku_kit": info.get("sku_principal") or sku,
+            "nome_kit": nome_kit,
+            "sku_kit": sku_kit,
             "qtd_full": qtd_full,
             "componentes": componentes,
         }, headers={"Cache-Control": "no-store"})
     except Exception as e:
+        return JSONResponse({"erro": str(e)}, status_code=500)
+    finally:
+        db.close()
+
+
+async def balancear_kit_componentes_embale(request: Request):
+    """
+    POST /api/embaldes/{embale_id}/itens/{item_id}/balancear-kit
+    Body: {"componentes": [{"produto_id": "...", "sku": "...", "quantidade_real": N,
+                            "quantidade_baixar": N, "quantidade_no_kit": N}]}
+    Faz o balanço dos componentes unitários de um kit. Cada componente é
+    corrigido por balanço (tipo B) e, se houver saldo suficiente, recebe a baixa
+    do FULL (tipo S). O item pai só é marcado como baixado quando TODOS os
+    componentes concluírem a sequência completa.
+    """
+    db = SessionLocal()
+    try:
+        embale_id = int(request.path_params.get("embale_id"))
+        item_id = int(request.path_params.get("item_id"))
+        body = await request.json()
+        componentes = body.get("componentes") if isinstance(body, dict) else None
+        if not isinstance(componentes, list) or not componentes:
+            return JSONResponse({"erro": "Informe os componentes do kit"}, status_code=400)
+
+        embale = db.query(EmbaleFU).filter(EmbaleFU.id == embale_id).first()
+        if not embale:
+            return JSONResponse({"erro": "Inbound não encontrado"}, status_code=404)
+        if embale.status == "encerrado":
+            return JSONResponse({"erro": "Inbound já está encerrado"}, status_code=400)
+
+        item = next((i for i in embale.itens if i.id == item_id), None)
+        if not item:
+            return JSONResponse({"erro": "Item não encontrado neste inbound"}, status_code=404)
+        if item.baixa_aplicada == 1:
+            return JSONResponse({"erro": "Este item já teve a baixa aplicada"}, status_code=400)
+
+        qtd_full = _quantidade_planejada_full(item)
+        resultados = []
+
+        for c in componentes:
+            payload = c or {}
+            pid = str(payload.get("produto_id") or "").strip()
+            sku_c = payload.get("sku") or ""
+            try:
+                qtd_real = float(payload.get("quantidade_real") or 0)
+            except (TypeError, ValueError):
+                qtd_real = -1
+            try:
+                qtd_baixar = float(payload.get("quantidade_baixar") or 0)
+            except (TypeError, ValueError):
+                qtd_baixar = 0
+            try:
+                por_kit = float(payload.get("quantidade_no_kit") or 1)
+            except (TypeError, ValueError):
+                por_kit = 1
+            if por_kit <= 0:
+                por_kit = 1
+
+            if not pid or qtd_real < 0 or qtd_baixar < 0:
+                resultados.append({
+                    "produto_id": pid,
+                    "sku": sku_c,
+                    "status": "invalido",
+                    "sucesso": False,
+                    "quantidade_real": max(0, qtd_real),
+                    "quantidade_baixar": max(0, qtd_baixar),
+                    "quantidade_no_kit": por_kit,
+                    "detalhe": "produto_id ou quantidades inválidos",
+                })
+                continue
+
+            estoque_antes = (olist.obter_estoque(pid, usar_cache=False) or {}).get("saldo", 0) or 0
+            ok_balanco = olist.atualizar_estoque(
+                produto_id=pid,
+                quantidade=qtd_real,
+                tipo="B",
+                observacao=f"Balanço do Inbound #{embale.numero_inbound}: componente do kit {item.sku_inbound or item.titulo_anuncio or ''}",
+            )
+            if not ok_balanco:
+                resultados.append({
+                    "produto_id": pid,
+                    "sku": sku_c,
+                    "status": "falha_balanco",
+                    "sucesso": False,
+                    "quantidade_real": qtd_real,
+                    "quantidade_baixar": qtd_baixar,
+                    "quantidade_no_kit": por_kit,
+                    "estoque_antes": estoque_antes,
+                    "detalhe": olist._ultimo_erro_estoque,
+                })
+                continue
+
+            if qtd_real < qtd_baixar:
+                falta = max(0.0, qtd_baixar - qtd_real)
+                resultados.append({
+                    "produto_id": pid,
+                    "sku": sku_c,
+                    "status": "divergencia",
+                    "sucesso": False,
+                    "quantidade_real": qtd_real,
+                    "quantidade_baixar": qtd_baixar,
+                    "quantidade_no_kit": por_kit,
+                    "estoque_antes": estoque_antes,
+                    "estoque_depois": qtd_real,
+                    "falta": falta,
+                    "detalhe": f"Componente balanceado para {qtd_real:g}, mas faltam {falta:g} un para baixar no FULL.",
+                })
+                continue
+
+            ok_baixa = olist.atualizar_estoque(
+                produto_id=pid,
+                quantidade=qtd_baixar,
+                tipo="S",
+                observacao=f"Baixa do Inbound #{embale.numero_inbound} (FULL) — componente do kit {item.sku_inbound or item.titulo_anuncio or ''}",
+            )
+            if not ok_baixa:
+                resultados.append({
+                    "produto_id": pid,
+                    "sku": sku_c,
+                    "status": "falha_baixa",
+                    "sucesso": False,
+                    "quantidade_real": qtd_real,
+                    "quantidade_baixar": qtd_baixar,
+                    "quantidade_no_kit": por_kit,
+                    "estoque_antes": estoque_antes,
+                    "detalhe": olist._ultimo_erro_estoque,
+                })
+                continue
+
+            resultados.append({
+                "produto_id": pid,
+                "sku": sku_c,
+                "status": "ok",
+                "sucesso": True,
+                "quantidade_real": qtd_real,
+                "quantidade_baixar": qtd_baixar,
+                "quantidade_no_kit": por_kit,
+                "estoque_antes": estoque_antes,
+                "estoque_depois": max(0.0, qtd_real - qtd_baixar),
+                "saldo_disponivel": max(0.0, qtd_real - qtd_baixar),
+            })
+
+        todos_ok = bool(resultados) and all(r.get("status") == "ok" for r in resultados)
+        tem_divergencia = any(r.get("status") == "divergencia" for r in resultados)
+        tem_falha = any(r.get("status") in {"invalido", "falha_balanco", "falha_baixa"} for r in resultados)
+
+        if not tem_falha:
+            kits_reais = _kit_equivalente_minimo(resultados, "quantidade_real")
+            kits_restantes = _kit_equivalente_minimo(
+                resultados,
+                "estoque_depois" if todos_ok else "quantidade_real",
+            )
+            item.olist_estoque_antes = kits_restantes if todos_ok else kits_reais
+            item.falta = max(0.0, qtd_full - kits_reais)
+            item.saldo_disponivel = max(0.0, kits_restantes if todos_ok else 0.0)
+            item.foi_balanceado = 1
+            item.data_balanceamento = datetime.utcnow()
+            if todos_ok:
+                item.quantidade_baixar = qtd_full
+                item.quantidade_baixada = qtd_full
+                item.baixa_aplicada = 1
+                item.data_baixa = datetime.utcnow()
+            db.add(item)
+            db.commit()
+        else:
+            db.rollback()
+
+        mensagem = "Balanço dos componentes concluído com sucesso."
+        if tem_falha:
+            mensagem = "Alguns componentes falharam no balanço/baixa. O item não foi marcado como concluído."
+        elif tem_divergencia:
+            mensagem = "Componentes balanceados, mas faltou estoque em pelo menos um deles. O item segue divergente."
+
+        return JSONResponse({
+            "todos_ok": todos_ok,
+            "tem_divergencia": tem_divergencia,
+            "resultados": resultados,
+            "qtd_full_desconta": qtd_full,
+            "quantidade_real_conferida": None if tem_falha else _kit_equivalente_minimo(resultados, "quantidade_real"),
+            "falta": None if tem_falha else item.falta,
+            "saldo_disponivel": None if tem_falha else item.saldo_disponivel,
+            "mensagem": mensagem,
+        }, status_code=200 if not tem_falha else 502)
+    except Exception as e:
+        db.rollback()
         return JSONResponse({"erro": str(e)}, status_code=500)
     finally:
         db.close()
@@ -3926,6 +4130,7 @@ routes = [
     Route("/api/embaldes/{embale_id}/itens/{item_id}/quantidade-full", ajustar_quantidade_full_embale, methods=["POST"]),
     Route("/api/embaldes/{embale_id}/itens/{item_id}/balancear", balancear_item_embale, methods=["POST"]),
     Route("/api/embaldes/{embale_id}/itens/{item_id}/kit", kit_componentes_embale, methods=["GET"]),
+    Route("/api/embaldes/{embale_id}/itens/{item_id}/balancear-kit", balancear_kit_componentes_embale, methods=["POST"]),
     Route("/api/embaldes/{embale_id}/itens/{item_id}/baixar-kit", baixar_kit_componentes_embale, methods=["POST"]),
     Route("/api/embaldes/{embale_id}/historico-full", listar_historico_full_embale, methods=["GET"]),
     Route("/api/embaldes/{embale_id}/historico-completo", listar_historico_completo_embale, methods=["GET"]),

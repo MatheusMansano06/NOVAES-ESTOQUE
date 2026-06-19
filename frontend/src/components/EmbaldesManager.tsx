@@ -91,6 +91,7 @@ interface KitInfo {
   componentes: KitComponente[]
 }
 type KitEstado = 'carregando' | 'nao' | KitInfo
+type KitBalanceModal = { item: ItemRevisao; kit: KitInfo }
 
 export function EmbaldesManager({ modoSeparacao = false }: { modoSeparacao?: boolean } = {}) {
   const [inbounds, setInbounds] = useState<Inbound[]>([])
@@ -131,6 +132,7 @@ export function EmbaldesManager({ modoSeparacao = false }: { modoSeparacao?: boo
   const [vinculandoProduto, setVinculandoProduto] = useState(false)
   // Balanço de estoque
   const [balanceandoItem, setBalanceandoItem] = useState<ItemRevisao | null>(null)
+  const [balanceandoKit, setBalanceandoKit] = useState<KitBalanceModal | null>(null)
   const [qtdRealConferida, setQtdRealConferida] = useState('')
   const [balanceandoId, setBalanceandoId] = useState<number | null>(null)
   // Itens em espera (bloqueados por fatores externos)
@@ -144,6 +146,7 @@ export function EmbaldesManager({ modoSeparacao = false }: { modoSeparacao?: boo
   // Kit por item (cache da detecção), quantidade por componente e estado da baixa
   const [kitPorItem, setKitPorItem] = useState<Record<number, KitEstado>>({})
   const [kitQtds, setKitQtds] = useState<Record<string, string>>({})
+  const [kitRealQtds, setKitRealQtds] = useState<Record<string, string>>({})
   const [baixandoKit, setBaixandoKit] = useState(false)
   const [kitResultado, setKitResultado] = useState<Record<number, any[]>>({})
 
@@ -436,14 +439,78 @@ export function EmbaldesManager({ modoSeparacao = false }: { modoSeparacao?: boo
         janelaWhats.close()
       }
 
-      setBalanceandoItem(null)
-      setQtdRealConferida('')
+      fecharBalanceamentos()
       await carregarRevisao(embaleId)
     } catch (erro: any) {
       if (janelaWhats) janelaWhats.close()
       const dados = erro.response?.data || {}
       const base = dados.erro || dados.error || String(erro)
       setMessage('Erro: ' + base + (dados.detalhe ? ` — ${dados.detalhe}` : ''))
+    } finally {
+      setBalanceandoId(null)
+    }
+  }
+
+  const balancearKit = async (item: ItemRevisao, kit: KitInfo, embaleId: number): Promise<boolean> => {
+    const componentes = kit.componentes.map((c) => {
+      const realTxt = kitRealQtds[c.produto_id]
+      return {
+        produto_id: c.produto_id,
+        sku: c.sku,
+        quantidade_no_kit: c.quantidade_no_kit,
+        quantidade_real: realTxt === '' ? NaN : Number(realTxt),
+        quantidade_baixar: Math.max(0, Number(kitQtds[c.produto_id] ?? c.quantidade_sugerida) || 0),
+        descricao: c.descricao,
+      }
+    })
+    const invalido = componentes.find((c) => !Number.isFinite(c.quantidade_real) || c.quantidade_real < 0)
+    if (invalido) {
+      setMessage(`Informe a quantidade real conferida para todos os componentes do kit.`)
+      return false
+    }
+
+    let janelaWhats: Window | null = null
+    const haveraDivergencia = componentes.some((c) => c.quantidade_real < c.quantidade_baixar)
+    if (haveraDivergencia) janelaWhats = window.open('', '_blank')
+
+    try {
+      setBalanceandoId(item.item_id)
+      const resultado = await api.post(`/embaldes/${embaleId}/itens/${item.item_id}/balancear-kit`, { componentes })
+      const dados = resultado.data || {}
+      setKitResultado((prev) => ({ ...prev, [item.item_id]: dados.resultados || [] }))
+      setMessage(dados.mensagem || 'Balanço dos componentes concluído')
+
+      if (dados.tem_divergencia) {
+        const faltas = (dados.resultados || [])
+          .filter((r: any) => r.status === 'divergencia')
+          .map((r: any) => `- ${r.sku || r.produto_id}: faltam ${r.falta}`)
+          .join('\n')
+        const mensagem =
+          `⚠️ DIVERGÊNCIA NO INBOUND (KIT)\n\n` +
+          `Produto: ${item.titulo_anuncio}\n` +
+          (item.sku_inbound ? `SKU: ${item.sku_inbound}\n` : '') +
+          `Qtd FULL planejada: ${Math.round(item.quantidade_full || 0)} kit(s)\n\n` +
+          `Componentes com falta:\n${faltas || '- conferir manualmente'}`
+        const url = `https://wa.me/${NUMERO_WHATSAPP}?text=${encodeURIComponent(mensagem)}`
+        if (janelaWhats) janelaWhats.location.href = url
+        else window.open(url, '_blank')
+      } else if (janelaWhats) {
+        janelaWhats.close()
+      }
+
+      if (dados.todos_ok) {
+        setItensBaixados((prev) => ({ ...prev, [item.item_id]: Math.round(item.quantidade_full || 0) }))
+      }
+
+      fecharBalanceamentos()
+      await carregarRevisao(embaleId)
+      return !!dados.todos_ok
+    } catch (erro: any) {
+      if (janelaWhats) janelaWhats.close()
+      const dados = erro.response?.data || {}
+      const base = dados.erro || dados.error || String(erro)
+      setMessage('Erro: ' + base + (dados.detalhe ? ` — ${dados.detalhe}` : ''))
+      return false
     } finally {
       setBalanceandoId(null)
     }
@@ -571,6 +638,26 @@ export function EmbaldesManager({ modoSeparacao = false }: { modoSeparacao?: boo
 
   const abrirBalanceamento = (it: ItemRevisao) => {
     setBalanceandoItem(it)
+    setBalanceandoKit(null)
+    setQtdRealConferida('')
+  }
+
+  const abrirBalanceamentoKit = (it: ItemRevisao, kit: KitInfo) => {
+    setBalanceandoItem(null)
+    setQtdRealConferida('')
+    setBalanceandoKit({ item: it, kit })
+    setKitRealQtds((prev) => {
+      const next = { ...prev }
+      for (const c of kit.componentes) {
+        if (next[c.produto_id] === undefined) next[c.produto_id] = ''
+      }
+      return next
+    })
+  }
+
+  const fecharBalanceamentos = () => {
+    setBalanceandoItem(null)
+    setBalanceandoKit(null)
     setQtdRealConferida('')
   }
 
@@ -1257,9 +1344,9 @@ export function EmbaldesManager({ modoSeparacao = false }: { modoSeparacao?: boo
                                       const res = kitResultado[it.item_id] || []
                                       return (
                                         <div style={{ width: '100%', border: '1px dashed #1976D2', borderRadius: '10px', padding: '0.9rem', background: '#f3f8ff' }}>
-                                          <div style={{ fontWeight: 800, color: '#0d47a1', marginBottom: '0.25rem' }}>🎁 É um kit — baixe os componentes (anúncios unitários)</div>
+                                          <div style={{ fontWeight: 800, color: '#0d47a1', marginBottom: '0.25rem' }}>🎁 É um kit — trabalhe pelos componentes unitários</div>
                                           <div style={{ fontSize: '0.82rem', color: '#555', marginBottom: '0.6rem' }}>
-                                            A Olist não deixa baixar o kit direto. Confira a quantidade de cada componente e baixe.
+                                            A Olist não deixa mexer no kit direto. Faça a baixa ou o balanço nos componentes abaixo.
                                           </div>
                                           {kit.componentes.map((c) => {
                                             const r = res.find((x) => String(x.produto_id) === String(c.produto_id))
@@ -1284,13 +1371,22 @@ export function EmbaldesManager({ modoSeparacao = false }: { modoSeparacao?: boo
                                               </div>
                                             )
                                           })}
-                                          <button
-                                            onClick={async () => { const ok = await baixarKitComponentes(it, kit); if (ok) proximo() }}
-                                            disabled={baixandoKit}
-                                            style={{ marginTop: '0.7rem', padding: '0.7rem 1.4rem', background: '#1976D2', color: '#fff', border: 'none', borderRadius: '8px', cursor: baixandoKit ? 'wait' : 'pointer', fontWeight: 700, fontSize: '0.95rem' }}
-                                          >
-                                            {baixandoKit ? 'Baixando componentes…' : 'Baixar componentes na Olist'}
-                                          </button>
+                                          <div style={{ display: 'flex', gap: '0.6rem', flexWrap: 'wrap', marginTop: '0.7rem' }}>
+                                            <button
+                                              onClick={() => abrirBalanceamentoKit(it, kit)}
+                                              disabled={balanceandoId === it.item_id}
+                                              style={{ padding: '0.7rem 1.4rem', background: '#fff', color: '#d32f2f', border: '1px solid #d32f2f', borderRadius: '8px', cursor: balanceandoId === it.item_id ? 'wait' : 'pointer', fontWeight: 700, fontSize: '0.95rem' }}
+                                            >
+                                              {balanceandoId === it.item_id ? 'Abrindo…' : 'Balancear componentes'}
+                                            </button>
+                                            <button
+                                              onClick={async () => { const ok = await baixarKitComponentes(it, kit); if (ok) proximo() }}
+                                              disabled={baixandoKit}
+                                              style={{ padding: '0.7rem 1.4rem', background: '#1976D2', color: '#fff', border: 'none', borderRadius: '8px', cursor: baixandoKit ? 'wait' : 'pointer', fontWeight: 700, fontSize: '0.95rem' }}
+                                            >
+                                              {baixandoKit ? 'Baixando componentes…' : 'Baixar componentes na Olist'}
+                                            </button>
+                                          </div>
                                         </div>
                                       )
                                     }
@@ -1657,9 +1753,105 @@ export function EmbaldesManager({ modoSeparacao = false }: { modoSeparacao?: boo
       )}
 
       {/* Modal de Balanço de Estoque */}
+      {balanceandoKit && (
+        <div
+          onClick={fecharBalanceamentos}
+          style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{ background: '#fff', borderRadius: '8px', padding: '1.5rem', width: '720px', maxWidth: '94vw', maxHeight: '85vh', overflowY: 'auto', boxShadow: '0 10px 40px rgba(0,0,0,0.3)' }}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start', marginBottom: '1rem' }}>
+              <h3 style={{ margin: 0, color: '#d32f2f' }}>Balancear Kit por Componentes</h3>
+              <button onClick={fecharBalanceamentos} style={{ background: 'none', border: 'none', fontSize: '1.4rem', cursor: 'pointer', color: '#999', lineHeight: 1 }}>×</button>
+            </div>
+
+            <div style={{ background: '#fff3e0', padding: '0.75rem', borderRadius: '4px', marginBottom: '1rem', borderLeft: '4px solid #d32f2f' }}>
+              <div style={{ fontSize: '0.9rem', fontWeight: 'bold', marginBottom: '0.5rem' }}>Kit detectado na Olist</div>
+              <div style={{ fontSize: '0.85rem', color: '#666' }}>
+                <strong>{balanceandoKit.item.titulo_anuncio}</strong>
+                <br />SKU: {balanceandoKit.item.sku_inbound || balanceandoKit.kit.sku_kit || '—'}
+              </div>
+            </div>
+
+            <div style={{ display: 'grid', gap: '0.75rem', marginBottom: '1rem' }}>
+              {balanceandoKit.kit.componentes.map((c) => {
+                const real = kitRealQtds[c.produto_id]
+                const baixar = kitQtds[c.produto_id] ?? String(c.quantidade_sugerida)
+                const realNum = real === '' ? null : Number(real)
+                const baixarNum = Math.max(0, Number(baixar) || 0)
+                const divergente = realNum !== null && Number.isFinite(realNum) && realNum < baixarNum
+                return (
+                  <div key={c.produto_id} style={{ border: '1px solid #eee', borderRadius: '8px', padding: '0.9rem', background: divergente ? '#fff8f6' : '#fafcff' }}>
+                    <div style={{ fontWeight: 700, marginBottom: '0.2rem' }}>{c.descricao || c.sku || c.produto_id}</div>
+                    <div style={{ fontSize: '0.8rem', color: '#666', marginBottom: '0.75rem' }}>
+                      SKU: {c.sku || '—'} · {c.quantidade_no_kit}x por kit · estoque Olist atual: {c.estoque_atual ?? '—'}
+                    </div>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '0.75rem' }}>
+                      <label style={{ display: 'grid', gap: '0.25rem', fontSize: '0.8rem', fontWeight: 700, color: '#555' }}>
+                        Vai pro FULL
+                        <input
+                          type="number"
+                          min="0"
+                          step="1"
+                          value={baixar}
+                          onChange={(e) => setKitQtds({ ...kitQtds, [c.produto_id]: e.target.value })}
+                          style={{ padding: '0.55rem', borderRadius: '6px', border: '1px solid #bbb', fontWeight: 800 }}
+                        />
+                      </label>
+                      <label style={{ display: 'grid', gap: '0.25rem', fontSize: '0.8rem', fontWeight: 700, color: '#555' }}>
+                        Quantidade real no físico
+                        <input
+                          type="number"
+                          min="0"
+                          step="1"
+                          value={real}
+                          onChange={(e) => setKitRealQtds({ ...kitRealQtds, [c.produto_id]: e.target.value })}
+                          placeholder={c.estoque_atual != null ? String(c.estoque_atual) : '0'}
+                          style={{ padding: '0.55rem', borderRadius: '6px', border: '2px solid #d32f2f', fontWeight: 800 }}
+                        />
+                      </label>
+                    </div>
+                    {divergente && (
+                      <div style={{ marginTop: '0.5rem', fontSize: '0.8rem', color: '#c62828', fontWeight: 700 }}>
+                        Faltam {baixarNum - (realNum || 0)} un deste componente para baixar o FULL.
+                      </div>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+
+            <div style={{ background: '#f6f7f9', padding: '0.8rem', borderRadius: '6px', marginBottom: '1rem', fontSize: '0.84rem', color: '#555' }}>
+              O sistema vai balancear cada anúncio unitário com a quantidade real informada e, se houver saldo suficiente, já descontar a quantidade que vai para o FULL.
+            </div>
+
+            <div style={{ display: 'flex', gap: '0.7rem' }}>
+              <button
+                onClick={async () => {
+                  const ok = await balancearKit(balanceandoKit.item, balanceandoKit.kit, revisandoId || 0)
+                  if (ok && modoSeparacao) proximo()
+                }}
+                disabled={balanceandoId !== null}
+                style={{ flex: 1, padding: '0.7rem', background: '#d32f2f', color: '#fff', border: 'none', borderRadius: '4px', cursor: balanceandoId !== null ? 'not-allowed' : 'pointer', fontWeight: 'bold', opacity: balanceandoId !== null ? 0.6 : 1 }}
+              >
+                {balanceandoId !== null ? 'Processando...' : 'Confirmar Balanço dos Componentes'}
+              </button>
+              <button
+                onClick={fecharBalanceamentos}
+                style={{ flex: 1, padding: '0.7rem', background: '#f5f5f5', color: '#666', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold' }}
+              >
+                Cancelar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {balanceandoItem && (
         <div
-          onClick={() => { setBalanceandoItem(null); setQtdRealConferida('') }}
+          onClick={fecharBalanceamentos}
           style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}
         >
           <div
@@ -1668,7 +1860,7 @@ export function EmbaldesManager({ modoSeparacao = false }: { modoSeparacao?: boo
           >
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start', marginBottom: '1rem' }}>
               <h3 style={{ margin: 0, color: '#d32f2f' }}>Balancear Estoque</h3>
-              <button onClick={() => { setBalanceandoItem(null); setQtdRealConferida('') }} style={{ background: 'none', border: 'none', fontSize: '1.4rem', cursor: 'pointer', color: '#999', lineHeight: 1 }}>×</button>
+              <button onClick={fecharBalanceamentos} style={{ background: 'none', border: 'none', fontSize: '1.4rem', cursor: 'pointer', color: '#999', lineHeight: 1 }}>×</button>
             </div>
 
             <div style={{ background: '#fff3e0', padding: '0.75rem', borderRadius: '4px', marginBottom: '1rem', borderLeft: '4px solid #d32f2f' }}>
@@ -1754,7 +1946,7 @@ export function EmbaldesManager({ modoSeparacao = false }: { modoSeparacao?: boo
                 {balanceandoId !== null ? 'Processando...' : 'Confirmar Balanço'}
               </button>
               <button
-                onClick={() => { setBalanceandoItem(null); setQtdRealConferida('') }}
+                onClick={fecharBalanceamentos}
                 style={{ flex: 1, padding: '0.7rem', background: '#f5f5f5', color: '#666', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold' }}
               >
                 Cancelar
