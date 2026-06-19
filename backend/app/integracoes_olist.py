@@ -92,6 +92,10 @@ class OlistIntegration:
         # inteira e o usuario precisa reconectar na mao a cada poucas horas.
         self._token_lock = threading.Lock()
 
+        # Guarda o motivo real da última falha de atualizar_estoque, p/ a API
+        # devolver ao frontend em vez do genérico "Falha ao atualizar estoque".
+        self._ultimo_erro_estoque: Optional[str] = None
+
     def _throttle(self):
         """Garante o intervalo minimo entre requisicoes (rate limit global)."""
         with self._rate_lock:
@@ -854,11 +858,13 @@ class OlistIntegration:
         Atualiza o estoque de um produto na Olist
         tipo: 'E' = Entrada (soma), 'S' = Saida (subtrai), 'B' = Balanco (absoluto)
         """
+        self._ultimo_erro_estoque = None
         token = self.get_access_token()
         if not token:
             # Fallback para token simples (legado v2)
             token = self.token_v2
             if not token:
+                self._ultimo_erro_estoque = "Sem token válido da Olist (reconecte a integração)."
                 return False
 
         url = f"{self.API_BASE}/estoque/{produto_id}"
@@ -894,12 +900,15 @@ class OlistIntegration:
                     time.sleep(espera)
                     continue
                 error_body = e.read().decode("utf-8")
-                print(f"[OLIST] Erro HTTP {e.code} ao atualizar estoque: {error_body[:300]}")
+                print(f"[OLIST] Erro HTTP {e.code} ao atualizar estoque (produto {produto_id}, tipo {tipo}): {error_body[:500]}")
+                self._ultimo_erro_estoque = f"Olist HTTP {e.code}: {error_body[:400]}"
                 return False
             except Exception as e:
                 print(f"[OLIST] Erro ao atualizar estoque: {e}")
+                self._ultimo_erro_estoque = f"Erro de conexão com a Olist: {str(e)[:300]}"
                 return False
 
+        self._ultimo_erro_estoque = "Olist recusou após retentativas (rate limit 429)."
         return False
 
     def sincronizar_historico_vendas(self, db, dias: int = 30) -> int:

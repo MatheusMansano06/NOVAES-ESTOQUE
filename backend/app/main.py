@@ -1519,7 +1519,8 @@ async def atualizar_estoque_olist(request: Request):
         else:
             db.rollback()  # desfaz tb as reservas do inbound
             return JSONResponse({
-                "error": "Falha ao atualizar estoque na Olist"
+                "error": "Falha ao atualizar estoque na Olist",
+                "detalhe": olist._ultimo_erro_estoque,
             }, status_code=500)
 
     except Exception as e:
@@ -2551,7 +2552,8 @@ def _aplicar_baixa_item(db, item, embale, qtd_override=None):
         }
     return {
         "item_id": item.id, "status": "falha",
-        "erro": "Falha ao aplicar baixa na Olist"
+        "erro": "Falha ao aplicar baixa na Olist",
+        "detalhe": olist._ultimo_erro_estoque,
     }
 
 
@@ -2866,7 +2868,10 @@ async def balancear_item_embale(request: Request):
 
         if not sucesso:
             db.rollback()
-            return JSONResponse({"erro": "Falha ao atualizar estoque na Olist"}, status_code=500)
+            return JSONResponse({
+                "erro": "Falha ao atualizar estoque na Olist",
+                "detalhe": olist._ultimo_erro_estoque,
+            }, status_code=500)
 
         if tem_divergencia:
             # Corrige a Olist mas NÃO baixa. Mantém divergência (falta) para o

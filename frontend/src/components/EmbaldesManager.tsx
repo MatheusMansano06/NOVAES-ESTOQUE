@@ -353,7 +353,9 @@ export function EmbaldesManager({ modoSeparacao = false }: { modoSeparacao?: boo
       await carregarRevisao(embaleId)
     } catch (erro: any) {
       if (janelaWhats) janelaWhats.close()
-      setMessage('Erro: ' + (erro.response?.data?.erro || String(erro)))
+      const dados = erro.response?.data || {}
+      const base = dados.erro || dados.error || String(erro)
+      setMessage('Erro: ' + base + (dados.detalhe ? ` — ${dados.detalhe}` : ''))
     } finally {
       setBalanceandoId(null)
     }
@@ -465,11 +467,14 @@ export function EmbaldesManager({ modoSeparacao = false }: { modoSeparacao?: boo
         setMessage(r.mensagem || 'Baixa aplicada')
         return true
       } else {
-        setMessage(r.mensagem || r.erro || 'Não foi possível baixar')
+        const base = r.mensagem || r.erro || 'Não foi possível baixar'
+        setMessage(base + (r.detalhe ? ` — ${r.detalhe}` : ''))
         return false
       }
     } catch (erro: any) {
-      setMessage('Erro: ' + (erro.response?.data?.erro || String(erro)))
+      const dados = erro.response?.data || {}
+      const base = dados.erro || dados.error || String(erro)
+      setMessage('Erro: ' + base + (dados.detalhe ? ` — ${dados.detalhe}` : ''))
       return false
     } finally {
       setBaixandoItemId(null)
