@@ -124,6 +124,36 @@ class Fornecedor(Base):
     notificacoes = relationship("NotificacaoFornecedor", back_populates="fornecedor", cascade="all, delete-orphan")
 
 
+class Operador(Base):
+    """
+    Operadores que podem iniciar turno na aplicação.
+    """
+    __tablename__ = "operadores"
+
+    id = Column(Integer, primary_key=True)
+    nome = Column(String(120), unique=True, index=True)
+    ativo = Column(Integer, default=1)
+    criado_em = Column(DateTime, default=datetime.utcnow)
+
+
+class LogOperacao(Base):
+    """
+    Auditoria das ações feitas na aplicação por operador/master.
+    """
+    __tablename__ = "logs_operacao"
+
+    id = Column(Integer, primary_key=True)
+    operador_id = Column(Integer, ForeignKey("operadores.id"), nullable=True, index=True)
+    operador_nome = Column(String(120), index=True)
+    operador_role = Column(String(30), default="operador", index=True)
+    acao = Column(String(80), index=True)
+    entidade_tipo = Column(String(80), nullable=True, index=True)
+    entidade_id = Column(String(120), nullable=True, index=True)
+    descricao = Column(String(255), nullable=True)
+    detalhes_json = Column(Text, nullable=True)
+    criado_em = Column(DateTime, default=datetime.utcnow, index=True)
+
+
 class HistoricoCompra(Base):
     """
     Rastreamento de quais fornecedores forneceram cada produto.
@@ -198,6 +228,7 @@ class EmbaleFU(Base):
     revisao_salva_em = Column(DateTime, nullable=True)  # Primeira revisao congelada
     status = Column(String(50), default="processando")  # processando, encerrado
     observacoes = Column(Text, nullable=True)
+    ultimo_item_separacao = Column(Integer, nullable=True)  # item_id onde a separação parou (retomar de onde parou)
 
     itens = relationship("ItemEmbaleFU", back_populates="embalde", cascade="all, delete-orphan")
     historico_full = relationship("HistoricoFullEmbale", back_populates="embalde", cascade="all, delete-orphan")
@@ -297,6 +328,22 @@ class PrecoVendaProduto(Base):
     id = Column(Integer, primary_key=True)
     produto_chave = Column(String(150), unique=True, index=True)  # olist_sku ou codigo_produto
     preco_venda = Column(Float, default=0)
+    atualizado_em = Column(DateTime, default=datetime.utcnow)
+
+
+class CustoProduto(Base):
+    """
+    Custo unitário oficial de um produto, definido pelo usuário (ex.: importado da
+    planilha financeira). É a fonte de verdade do custo na margem dos anúncios do
+    Mercado Livre (tem prioridade sobre o custo médio das NFs).
+    Chave = SKU do anúncio (ml_item_cache.sku / olist_sku).
+    """
+    __tablename__ = "custos_produto"
+
+    id = Column(Integer, primary_key=True)
+    produto_chave = Column(String(150), unique=True, index=True)  # SKU
+    custo = Column(Float, default=0)
+    imposto_pct = Column(Float, default=9)
     atualizado_em = Column(DateTime, default=datetime.utcnow)
 
 

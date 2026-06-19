@@ -41,6 +41,9 @@ interface AppShellProps {
   subtitle: string
   navGroups: ShellNavGroup[]
   statuses: ShellStatusItem[]
+  profileName?: string
+  profileSubtitle?: string
+  onProfileClick?: () => void
   syncTimeLabel?: string
   primaryAction?: {
     label: string
@@ -176,6 +179,9 @@ export function AppShell({
   subtitle,
   navGroups,
   statuses,
+  profileName,
+  profileSubtitle,
+  onProfileClick,
   syncTimeLabel,
   primaryAction,
   children,
@@ -265,13 +271,18 @@ export function AppShell({
             <ShellIcon name="bell" />
           </button>
 
-          <div className="nvs-topbar__profile">
+          <div
+            className="nvs-topbar__profile"
+            onClick={onProfileClick}
+            style={onProfileClick ? { cursor: 'pointer' } : undefined}
+            title={onProfileClick ? 'Trocar operador' : undefined}
+          >
             <div className="nvs-topbar__avatar">
               <ShellIcon name="user" />
             </div>
             <div>
-              <strong>NVS Tech</strong>
-              <span>Operacao local</span>
+              <strong>{profileName ?? 'NVS Tech'}</strong>
+              <span>{profileSubtitle ?? 'Operacao local'}</span>
             </div>
           </div>
         </header>

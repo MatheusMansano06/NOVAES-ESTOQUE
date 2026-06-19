@@ -5,19 +5,31 @@ import { ModalDetalhesNota } from './ModalDetalhesNota'
 import { ModalDetalhesNotaFiscal } from './ModalDetalhesNotaFiscal'
 import { FornecedoresManager } from './components/FornecedoresManager'
 import { EmbaldesManager } from './components/EmbaldesManager'
+import { HistoricoFull } from './components/HistoricoFull'
 import { AnunciosML } from './components/AnunciosML'
+import { OperadoresManager } from './components/OperadoresManager'
 import { AppShell, type ShellNavGroup, type ShellStatusItem } from './components/AppShell'
-import { baixarMultiplosOuPdfs } from './services/api'
+import {
+  baixarMultiplosOuPdfs,
+  buildOperadorHeaders,
+  clearOperadorSessao,
+  getOperadorSessao,
+  setOperadorSessao,
+  type OperadorSessao,
+} from './services/api'
 
 const API_BASE = import.meta.env.VITE_API_URL ?? 'http://127.0.0.1:8000'
 const SHARED_SYNC_INTERVAL_MS = 5000
 
-async function fetchJsonNoCache(url: string) {
+async function fetchJsonNoCache(url: string, init?: RequestInit) {
   const res = await fetch(url, {
+    ...(init || {}),
     cache: 'no-store',
     headers: {
       'Cache-Control': 'no-cache',
       'Pragma': 'no-cache',
+      ...buildOperadorHeaders(),
+      ...((init?.headers as Record<string, string> | undefined) || {}),
     },
   })
   if (!res.ok) throw new Error(`Falha ao carregar ${url}: ${res.status}`)
@@ -68,7 +80,7 @@ interface ProdutoEstoque {
   }>
 }
 
-type Pagina = 'bemvindo' | 'inicial' | 'conferencia' | 'produtos_nota' | 'relacionamento_produto' | 'fornecedores' | 'embaldes' | 'anuncios' | 'notas-fiscais' | 'divergencias'
+type Pagina = 'bemvindo' | 'inicial' | 'conferencia' | 'produtos_nota' | 'relacionamento_produto' | 'fornecedores' | 'embaldes' | 'anuncios' | 'notas-fiscais' | 'divergencias' | 'lista-separacao' | 'historico-full' | 'operadores'
 
 interface Divergencia {
   item_id: number
@@ -98,11 +110,24 @@ interface OlistStatus {
   url_autorizacao?: string | null
 }
 
+interface OperadorOption {
+  id: number
+  nome: string
+  ativo: number
+}
+
 function App() {
   // Estados de navegação
-  const [pagina, setPagina] = useState<Pagina>('bemvindo')
+  const [operadorSessao, setOperadorSessaoState] = useState<OperadorSessao | null>(() => getOperadorSessao())
+  const [pagina, setPagina] = useState<Pagina>(() => (getOperadorSessao() ? 'inicial' : 'bemvindo'))
   const [notaSelecionada, setNotaSelecionada] = useState<NotaFiscal | null>(null)
   const [produtosNota, setProdutosNota] = useState<ItemNota[]>([])
+  const [operadoresDisponiveis, setOperadoresDisponiveis] = useState<OperadorOption[]>([])
+  const [operadoresLoading, setOperadoresLoading] = useState(false)
+  const [operadorSelecionadoId, setOperadorSelecionadoId] = useState('')
+  const [masterPin, setMasterPin] = useState('')
+  const [loginLoading, setLoginLoading] = useState(false)
+  const [loginErro, setLoginErro] = useState('')
 
   // Estados da página inicial
   const [file, setFile] = useState<File | null>(null)
@@ -218,6 +243,110 @@ function App() {
     return { planejado, baixado, restante, percentual, emEspera }
   })()
 
+  const salvarSessaoOperador = (sessao: OperadorSessao | null) => {
+    if (sessao) {
+      setOperadorSessao(sessao)
+    } else {
+      clearOperadorSessao()
+    }
+    setOperadorSessaoState(sessao)
+  }
+
+  const carregarOperadores = async () => {
+    setOperadoresLoading(true)
+    setLoginErro('')
+    try {
+      const data = await fetchJsonNoCache(`${API_BASE}/api/operadores`)
+      const operadores = (data.operadores || []) as OperadorOption[]
+      setOperadoresDisponiveis(operadores)
+      setOperadorSelecionadoId((atual) => atual || (operadores[0] ? String(operadores[0].id) : ''))
+    } catch (err) {
+      console.error('Erro ao carregar operadores:', err)
+      setLoginErro('Não foi possível carregar os operadores.')
+    } finally {
+      setOperadoresLoading(false)
+    }
+  }
+
+  const entrarComoOperador = () => {
+    const operador = operadoresDisponiveis.find((item) => String(item.id) === operadorSelecionadoId)
+    if (!operador) {
+      setLoginErro('Selecione um operador para continuar.')
+      return
+    }
+    salvarSessaoOperador({
+      operadorId: operador.id,
+      operadorNome: operador.nome,
+      role: 'operador',
+    })
+    setLoginErro('')
+    setPagina('inicial')
+  }
+
+  const entrarComoMaster = async () => {
+    if (!masterPin.trim()) {
+      setLoginErro('Digite o PIN do master.')
+      return
+    }
+
+    setLoginLoading(true)
+    setLoginErro('')
+    try {
+      const res = await fetch(`${API_BASE}/api/operadores/master-login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pin: masterPin }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.erro || 'PIN inválido')
+
+      salvarSessaoOperador({
+        operadorId: null,
+        operadorNome: data.nome || 'MASTER',
+        role: 'master',
+      })
+      setMasterPin('')
+      setPagina('inicial')
+    } catch (err: any) {
+      setLoginErro(err?.message || 'Falha ao entrar como master.')
+    } finally {
+      setLoginLoading(false)
+    }
+  }
+
+  const trocarOperador = () => {
+    salvarSessaoOperador(null)
+    setPagina('bemvindo')
+    setMasterPin('')
+    setLoginErro('')
+  }
+
+  useEffect(() => {
+    const originalFetch = window.fetch.bind(window)
+
+    window.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      const headers = new Headers(input instanceof Request ? input.headers : undefined)
+      const initHeaders = new Headers(init?.headers)
+
+      initHeaders.forEach((value, key) => {
+        headers.set(key, value)
+      })
+
+      Object.entries(buildOperadorHeaders()).forEach(([key, value]) => {
+        if (value) headers.set(key, value)
+      })
+
+      return originalFetch(input, {
+        ...(init || {}),
+        headers,
+      })
+    }) as typeof window.fetch
+
+    return () => {
+      window.fetch = originalFetch
+    }
+  }, [operadorSessao])
+
   const loadIntegracoes = async () => {
     try {
       const [mlRes, olistRes] = await Promise.allSettled([
@@ -232,14 +361,21 @@ function App() {
     }
   }
 
+  useEffect(() => {
+    if (!operadorSessao || pagina === 'bemvindo') {
+      carregarOperadores()
+    }
+  }, [operadorSessao, pagina])
+
   // Carregar notas ao iniciar
   useEffect(() => {
+    if (!operadorSessao) return
     loadNotas(false)
     loadEstoque(false)
     loadDivergencias(false)
     loadIntegracoes()
     loadAnunciosPausados()
-  }, [])
+  }, [operadorSessao])
 
   // Carrega anúncios pausados SEM estoque do Mercado Livre (carrossel no dashboard)
   const loadAnunciosPausados = async () => {
@@ -253,6 +389,7 @@ function App() {
   // Diagnóstico de inbounds ATIVOS em tempo real (atualiza a cada 20s).
   // Some quando o inbound é encerrado; some todos => "SEM INBOUND ATIVO".
   useEffect(() => {
+    if (!operadorSessao) return
     const carregar = async () => {
       try {
         const data = await fetchJsonNoCache(`${API_BASE}/api/embaldes?limit=200`)
@@ -264,9 +401,10 @@ function App() {
     carregar()
     const id = setInterval(carregar, SHARED_SYNC_INTERVAL_MS)
     return () => clearInterval(id)
-  }, [])
+  }, [operadorSessao])
 
   useEffect(() => {
+    if (!operadorSessao) return
     const sincronizar = async () => {
       await Promise.allSettled([
         loadNotas(true),
@@ -290,7 +428,7 @@ function App() {
       window.removeEventListener('focus', aoVoltar)
       document.removeEventListener('visibilitychange', aoVoltar)
     }
-  }, [])
+  }, [operadorSessao])
 
   // Ao entrar na tela de vínculo, busca se esse produto já foi vinculado antes
   useEffect(() => {
@@ -589,6 +727,7 @@ function App() {
       const res = await fetch(`${API_BASE}/api/notas-fiscais/${notaId}`)
       const data: NotaFiscal = await res.json()
       setNotaDetalheAberta(data)
+      setGruposExpandidos(new Set())
       setNotaSelecionada(data)
       setProdutosNota(data.itens || [])
       setAbaDetalhe('detalhes')
@@ -607,6 +746,7 @@ function App() {
     setNotaDetalheAberta(null)
     setAbaDetalhe('detalhes')
     setItensSelecionadosMultiplos(new Set())
+    setGruposExpandidos(new Set())
   }
 
   // Notas filtradas pela busca (nº, nome, CNPJ) e data
@@ -688,6 +828,17 @@ function App() {
     } else {
       novo.add(itemId)
     }
+    setItensSelecionadosMultiplos(novo)
+  }
+
+  // Marca/desmarca todos os registros de um grupo (mesmo produto) de uma vez
+  const toggleSelecaoGrupo = (items: ItemNota[]) => {
+    const novo = new Set(itensSelecionadosMultiplos)
+    const todosSelecionados = items.every((i) => novo.has(i.id))
+    items.forEach((i) => {
+      if (todosSelecionados) novo.delete(i.id)
+      else novo.add(i.id)
+    })
     setItensSelecionadosMultiplos(novo)
   }
 
@@ -1111,7 +1262,12 @@ function App() {
     }
 
     const qtdNF = Math.round(produtoSelecionado.quantidade_nf)
-    const novoTotal = real + qtdNF
+    const reservaFull = Math.min(reservaInbound, qtdNF)
+    const qtdSubir = Math.max(0, qtdNF - reservaFull)
+    const novoTotal = real + qtdSubir
+    const reservaInfo = reservaFull > 0
+      ? `\n⚠️ ${reservaFull} un estão reservadas para o FULL (${reservaInboundInbs || 'inbound ativo'}) e NÃO vão subir na Olist.\n`
+      : ''
 
     const confirmar = window.confirm(
       `Confirmar BALANÇO de estoque na Olist?\n\n` +
@@ -1121,6 +1277,8 @@ function App() {
       `por estar incorreto.\n\n` +
       `Estoque real informado: ${real} un\n` +
       `Quantidade da NF: ${qtdNF} un\n` +
+      reservaInfo +
+      `→ Vai subir na Olist: ${qtdSubir} un\n` +
       `= Novo estoque total na Olist: ${novoTotal} un\n\n` +
       `Deseja continuar?`
     )
@@ -1358,6 +1516,7 @@ function App() {
       items: [
         { key: 'dashboard', label: 'Dashboard', icon: 'dashboard', active: pagina === 'inicial', onClick: () => setPagina('inicial') },
         { key: 'notas', label: 'Notas fiscais', icon: 'receipt', badge: notas.length, active: pagina === 'notas-fiscais', onClick: () => setPagina('notas-fiscais') },
+        { key: 'lista-sep', label: 'Lista de separação', icon: 'box', active: pagina === 'lista-separacao', onClick: () => setPagina('lista-separacao') },
         { key: 'fornecedores', label: 'Fornecedores', icon: 'users', active: pagina === 'fornecedores', onClick: () => setPagina('fornecedores') },
       ],
     },
@@ -1366,10 +1525,20 @@ function App() {
       items: [
         { key: 'anuncios', label: 'Anuncios ML', icon: 'megaphone', active: pagina === 'anuncios', onClick: () => setPagina('anuncios') },
         { key: 'inbound', label: 'Inbound FULL', icon: 'truck', active: pagina === 'embaldes', badge: inboundsAtivos.length, onClick: () => setPagina('embaldes') },
+        { key: 'historico-full', label: 'Histórico FULL', icon: 'sync', active: pagina === 'historico-full', onClick: () => setPagina('historico-full') },
         { key: 'divergencias', label: 'Divergencias', icon: 'warning', badge: divergencias.length, active: pagina === 'divergencias', onClick: () => setPagina('divergencias') },
       ],
     },
   ]
+
+  if (operadorSessao?.role === 'master') {
+    navGroups.push({
+      label: 'Gestao',
+      items: [
+        { key: 'operadores', label: 'Operadores', icon: 'users', active: pagina === 'operadores', onClick: () => setPagina('operadores') },
+      ],
+    })
+  }
 
   const renderComShell = (title: string, subtitle: string, conteudo: ReactNode) => (
     <AppShell
@@ -1377,12 +1546,188 @@ function App() {
       subtitle={subtitle}
       navGroups={navGroups}
       statuses={topStatuses}
+      profileName={operadorSessao?.operadorNome || 'NVS Tech'}
+      profileSubtitle={operadorSessao?.role === 'master' ? 'Master conectado' : 'Operador conectado'}
+      onProfileClick={operadorSessao ? trocarOperador : undefined}
       syncTimeLabel={fmtHora(ultimaSincronizacao)}
-      primaryAction={{ label: 'Sincronizar agora', onClick: () => loadIntegracoes() }}
     >
       {conteudo}
     </AppShell>
   )
+
+  if (false && pagina === 'bemvindo') {
+    const features = [
+      { titulo: 'Turno rastreado', texto: 'Cada ação fica salva com o nome de quem operou.' },
+      { titulo: 'Master liberado', texto: 'PIN numérico para gestão, histórico e cadastro de pessoas.' },
+      { titulo: 'Fluxo contínuo', texto: 'Notas, inbound, baixa e balanço seguem no mesmo painel.' },
+    ]
+
+    return (
+      <div style={{
+        position: 'relative',
+        zIndex: 1,
+        minHeight: '100vh',
+        display: 'grid',
+        gridTemplateColumns: 'minmax(320px, 1.05fr) minmax(360px, 0.95fr)',
+        background: '#eef4fb',
+      }}>
+        <div style={{
+          position: 'relative',
+          overflow: 'hidden',
+          background: 'linear-gradient(155deg, #081b44 0%, #0d2d69 58%, #0e5f8d 100%)',
+          color: '#fff',
+          padding: '3.5rem 3.2rem',
+          display: 'flex',
+          flexDirection: 'column',
+          justifyContent: 'space-between',
+        }}>
+          <div style={{
+            position: 'absolute',
+            inset: 0,
+            background: 'radial-gradient(circle at 18% 20%, rgba(255,255,255,0.16), transparent 28%), radial-gradient(circle at 78% 32%, rgba(255,196,0,0.16), transparent 22%)',
+            pointerEvents: 'none',
+          }} />
+
+          <div style={{ position: 'relative', zIndex: 1 }}>
+            <div style={{
+              width: 104,
+              height: 104,
+              borderRadius: '50%',
+              background: "#ffffff url('/assets/nvs-tech-logo.jpeg') center / 82% auto no-repeat",
+              border: '3px solid rgba(255, 196, 0, 0.9)',
+              boxShadow: '0 14px 32px rgba(0, 0, 0, 0.25)',
+            }} />
+          </div>
+
+          <div style={{ position: 'relative', zIndex: 1, display: 'grid', gap: '1.8rem' }}>
+            <div>
+              <div style={{ display: 'inline-flex', width: 'fit-content', padding: '0.38rem 0.9rem', borderRadius: '999px', background: 'rgba(255,255,255,0.12)', fontWeight: 700, letterSpacing: '0.04em', textTransform: 'uppercase', fontSize: '0.8rem' }}>
+                Operação NVS
+              </div>
+              <h1 style={{ fontSize: '2.35rem', lineHeight: 1.05, fontWeight: 900, margin: '1rem 0 0.8rem 0' }}>
+                Entrada com operador e histórico real da operação
+              </h1>
+              <p style={{ fontSize: '1rem', lineHeight: 1.6, opacity: 0.88, margin: 0, maxWidth: '32rem' }}>
+                Escolha quem está no turno para registrar upload de nota, inbound, separação, baixa, balanço e ajustes com responsabilidade por pessoa.
+              </p>
+            </div>
+
+            <div style={{ display: 'grid', gap: '0.95rem', maxWidth: '34rem' }}>
+              {features.map((feature) => (
+                <div key={feature.titulo} style={{ padding: '1rem 1.1rem', borderRadius: '18px', background: 'rgba(255,255,255,0.1)', backdropFilter: 'blur(10px)', border: '1px solid rgba(255,255,255,0.14)' }}>
+                  <div style={{ fontWeight: 800, marginBottom: '0.25rem' }}>{feature.titulo}</div>
+                  <div style={{ opacity: 0.82, lineHeight: 1.5 }}>{feature.texto}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div style={{ position: 'relative', zIndex: 1, fontSize: '0.8rem', opacity: 0.7 }}>
+            © 2026 NVS TECH. Controle operacional local.
+          </div>
+        </div>
+
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '2rem' }}>
+          <div style={{
+            width: '100%',
+            maxWidth: '520px',
+            background: '#fff',
+            borderRadius: '30px',
+            border: '1px solid #dce6f4',
+            boxShadow: '0 30px 70px rgba(12, 41, 95, 0.12)',
+            padding: '2.2rem',
+            display: 'grid',
+            gap: '1.5rem',
+          }}>
+            <div style={{ display: 'grid', gap: '0.45rem' }}>
+              <div style={{ display: 'inline-flex', width: 'fit-content', padding: '0.4rem 0.9rem', borderRadius: '999px', background: '#edf4ff', color: '#1b5fd1', fontWeight: 800, fontSize: '0.78rem', letterSpacing: '0.04em', textTransform: 'uppercase' }}>
+                Acesso de operador
+              </div>
+              <h2 style={{ fontSize: '2.05rem', fontWeight: 900, color: '#0b2050', margin: 0 }}>
+                Entrar no turno
+              </h2>
+              <p style={{ fontSize: '0.98rem', color: '#667085', lineHeight: 1.6, margin: 0 }}>
+                Selecione seu nome para iniciar o fluxo de picking ou use o PIN master para gestão.
+              </p>
+            </div>
+
+            <div style={{ display: 'grid', gap: '0.9rem' }}>
+              <select
+                value={operadorSelecionadoId}
+                onChange={(e) => setOperadorSelecionadoId(e.target.value)}
+                disabled={operadoresLoading || loginLoading}
+                style={{
+                  width: '100%',
+                  padding: '1.1rem 1rem',
+                  borderRadius: '18px',
+                  border: '2px solid #8cb7ff',
+                  fontSize: '1rem',
+                  color: '#102a5c',
+                  outline: 'none',
+                  boxShadow: '0 0 0 4px rgba(31,111,255,0.08)',
+                }}
+              >
+                <option value="">Selecionar operador</option>
+                {operadoresDisponiveis.map((operador) => (
+                  <option key={operador.id} value={String(operador.id)}>{operador.nome}</option>
+                ))}
+              </select>
+
+              <button
+                type="button"
+                onClick={entrarComoOperador}
+                disabled={operadoresLoading || loginLoading || !operadorSelecionadoId}
+                style={{
+                  width: '100%',
+                  padding: '1rem',
+                  background: 'linear-gradient(135deg, #9bb4f3 0%, #98d9e5 100%)',
+                  color: '#fff',
+                  border: 'none',
+                  borderRadius: '18px',
+                  fontSize: '1.1rem',
+                  fontWeight: 900,
+                  cursor: operadoresLoading || loginLoading || !operadorSelecionadoId ? 'not-allowed' : 'pointer',
+                  opacity: operadoresLoading || loginLoading || !operadorSelecionadoId ? 0.65 : 1,
+                }}
+              >
+                {operadoresLoading ? 'Carregando operadores...' : 'Continuar'}
+              </button>
+            </div>
+
+            <div style={{ display: 'grid', gap: '0.85rem', paddingTop: '0.5rem', borderTop: '1px solid #edf1f6' }}>
+              <div style={{ fontWeight: 800, color: '#0b2050' }}>Acesso master</div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr auto', gap: '0.75rem' }}>
+                <input
+                  type="password"
+                  inputMode="numeric"
+                  pattern="[0-9]*"
+                  maxLength={10}
+                  placeholder="PIN numérico"
+                  value={masterPin}
+                  onChange={(e) => setMasterPin(e.target.value.replace(/\D/g, ''))}
+                  style={{ padding: '0.95rem 1rem', borderRadius: '14px', border: '1px solid #cfd8e3', fontSize: '1rem' }}
+                />
+                <button
+                  type="button"
+                  onClick={entrarComoMaster}
+                  disabled={loginLoading}
+                  style={{ padding: '0.95rem 1.2rem', borderRadius: '14px', border: 'none', background: '#0f2e67', color: '#fff', fontWeight: 800, cursor: loginLoading ? 'wait' : 'pointer' }}
+                >
+                  {loginLoading ? 'Entrando...' : 'Master'}
+                </button>
+              </div>
+            </div>
+
+            {loginErro && (
+              <div style={{ padding: '0.9rem 1rem', borderRadius: '14px', background: '#fff1f1', color: '#b42318', fontWeight: 700 }}>
+                {loginErro}
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    )
+  }
 
   if (pagina === 'bemvindo') {
     const features = [
@@ -1499,9 +1844,31 @@ function App() {
               </p>
             </div>
 
+            <select
+              value={operadorSelecionadoId}
+              onChange={(e) => setOperadorSelecionadoId(e.target.value)}
+              disabled={operadoresLoading || loginLoading}
+              style={{
+                width: '100%',
+                padding: '1rem',
+                borderRadius: '10px',
+                border: '2px solid #cfe0ff',
+                fontSize: '1rem',
+                color: '#0b2050',
+                background: '#fff',
+                outline: 'none',
+              }}
+            >
+              <option value="">Selecionar operador</option>
+              {operadoresDisponiveis.map((operador) => (
+                <option key={operador.id} value={String(operador.id)}>{operador.nome}</option>
+              ))}
+            </select>
+
             <button
               type="button"
-              onClick={() => setPagina('inicial')}
+              onClick={entrarComoOperador}
+              disabled={operadoresLoading || loginLoading || !operadorSelecionadoId}
               style={{
                 width: '100%',
                 padding: '1rem',
@@ -1511,15 +1878,75 @@ function App() {
                 borderRadius: '10px',
                 fontSize: '1.05rem',
                 fontWeight: 800,
-                cursor: 'pointer',
+                cursor: operadoresLoading || loginLoading || !operadorSelecionadoId ? 'not-allowed' : 'pointer',
+                opacity: operadoresLoading || loginLoading || !operadorSelecionadoId ? 0.65 : 1,
                 boxShadow: '0 12px 26px rgba(31, 111, 255, 0.35)',
                 transition: 'transform 0.12s ease, box-shadow 0.12s ease'
               }}
-              onMouseEnter={(e) => { const el = e.currentTarget; el.style.transform = 'translateY(-1px)'; el.style.boxShadow = '0 16px 32px rgba(31, 111, 255, 0.42)' }}
-              onMouseLeave={(e) => { const el = e.currentTarget; el.style.transform = 'none'; el.style.boxShadow = '0 12px 26px rgba(31, 111, 255, 0.35)' }}
+              onMouseEnter={(e) => {
+                if (!operadoresLoading && !loginLoading && operadorSelecionadoId) {
+                  const el = e.currentTarget
+                  el.style.transform = 'translateY(-1px)'
+                  el.style.boxShadow = '0 16px 32px rgba(31, 111, 255, 0.42)'
+                }
+              }}
+              onMouseLeave={(e) => {
+                const el = e.currentTarget
+                el.style.transform = 'none'
+                el.style.boxShadow = '0 12px 26px rgba(31, 111, 255, 0.35)'
+              }}
             >
-              Entrar
+              {operadoresLoading ? 'Carregando operadores...' : 'Continuar'}
             </button>
+
+            <div style={{ display: 'grid', gap: '0.75rem', paddingTop: '0.25rem', borderTop: '1px solid #e8edf5' }}>
+              <div style={{ fontSize: '0.9rem', fontWeight: 700, color: '#0b2050' }}>
+                Acesso master
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr auto', gap: '0.65rem' }}>
+                <input
+                  type="password"
+                  inputMode="numeric"
+                  pattern="[0-9]*"
+                  maxLength={10}
+                  placeholder="PIN numérico"
+                  value={masterPin}
+                  onChange={(e) => setMasterPin(e.target.value.replace(/\D/g, ''))}
+                  style={{
+                    width: '100%',
+                    padding: '0.95rem 1rem',
+                    borderRadius: '10px',
+                    border: '1px solid #cfe0ff',
+                    fontSize: '0.98rem',
+                    color: '#0b2050',
+                    outline: 'none',
+                  }}
+                />
+                <button
+                  type="button"
+                  onClick={entrarComoMaster}
+                  disabled={loginLoading}
+                  style={{
+                    padding: '0.95rem 1rem',
+                    background: '#12357a',
+                    color: '#fff',
+                    border: 'none',
+                    borderRadius: '10px',
+                    fontSize: '0.95rem',
+                    fontWeight: 800,
+                    cursor: loginLoading ? 'wait' : 'pointer',
+                  }}
+                >
+                  {loginLoading ? '...' : 'Master'}
+                </button>
+              </div>
+            </div>
+
+            {loginErro && (
+              <div style={{ textAlign: 'center', fontSize: '0.85rem', color: '#c62828', fontWeight: 700 }}>
+                {loginErro}
+              </div>
+            )}
 
             <div style={{ textAlign: 'center', fontSize: '0.85rem', color: '#98a2b3' }}>
               Precisa de ajuda? <span style={{ color: '#1f6fff', fontWeight: 600 }}>Fale com o suporte</span>
@@ -1614,7 +2041,10 @@ function App() {
                 </div>
                 <div style={{ display: 'grid', gap: '0.75rem' }}>
                   <div style={{ fontSize: '1.75rem', fontWeight: 800, color: '#e65100' }}>
-                    {notasFiltradas.filter(n => n.status === 'em andamento').length}
+                    {notasFiltradas.filter(n => {
+                      const p = calcularProgresso(n.itens)
+                      return p.total > 0 && p.percentual < 100
+                    }).length}
                   </div>
                   <div style={{ fontSize: '0.82rem', color: '#666' }}>
                     Notas em andamento
@@ -1719,6 +2149,15 @@ function App() {
 
               </div>
             </div>
+
+            <a
+              href="https://www.nfe.fazenda.gov.br/portal/consultaRecaptcha.aspx?tipoConsulta=resumo&tipoConteudo=7PhJ+gAVw2g="
+              target="_blank"
+              rel="noreferrer noopener"
+              style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem', padding: '0.75rem 1rem', background: '#1976D2', color: '#fff', borderRadius: '8px', fontWeight: 700, fontSize: '0.95rem', textDecoration: 'none', whiteSpace: 'nowrap' }}
+            >
+              🔎 Baixar XMLs novos (SEFAZ)
+            </a>
 
             </div>
 
@@ -2066,68 +2505,162 @@ function App() {
                     )}
 
                     {abaDetalhe === 'conferencia' && (
-                      <div style={{ display: 'grid', gap: '1rem' }}>
-                        <div style={{ background: '#f7f9fa', border: '1px solid #e0e0e0', borderRadius: '10px', padding: '1rem' }}>
-                          <div style={{ fontWeight: 700, color: '#1a1a1a', marginBottom: '0.6rem' }}>Progresso da nota</div>
+                      <div style={{ display: 'grid', gap: '1.25rem' }}>
+                        <div style={{ background: '#fff', border: '1px solid #e0e0e0', borderRadius: '10px', padding: '1rem 1.25rem' }}>
                           <BarraProgresso itens={notaDetalheAberta.itens} />
                         </div>
 
-                        <div style={{ display: 'flex', justifyContent: 'space-between', gap: '1rem', alignItems: 'center', flexWrap: 'wrap' }}>
-                          <div style={{ color: '#607d8b', fontSize: '0.88rem' }}>
-                            Clique em `Conferir` para abrir o fluxo antigo de conferência do item.
-                          </div>
-                          <button
-                            onClick={enviarMultiplosEmMassa}
-                            disabled={itensSelecionadosMultiplos.size === 0}
-                            style={{
-                              padding: '0.65rem 1rem',
-                              background: itensSelecionadosMultiplos.size === 0 ? '#cfd8dc' : '#1976D2',
-                              color: '#fff',
-                              border: 'none',
-                              borderRadius: '8px',
-                              cursor: itensSelecionadosMultiplos.size === 0 ? 'not-allowed' : 'pointer',
-                              fontWeight: 700,
-                            }}
-                          >
-                            Enviar selecionados em massa
-                          </button>
+                        <div style={{ marginBottom: '1rem' }}>
+                          <button onClick={() => setModalAdicionarProdutoAberto(true)} style={{ padding: '0.6rem 1.1rem', background: '#4caf50', color: '#fff', border: 'none', borderRadius: 6, fontWeight: 600, cursor: 'pointer' }}>+ Adicionar Produto Manual</button>
                         </div>
 
-                        <div style={{ border: '1px solid #e0e0e0', borderRadius: '10px', overflow: 'hidden' }}>
-                          <div style={{ display: 'grid', gridTemplateColumns: '42px minmax(240px, 1fr) 90px 120px 160px', gap: '1rem', padding: '0.9rem 1rem', background: '#f7f9fa', fontSize: '0.78rem', fontWeight: 700, color: '#78909c', textTransform: 'uppercase', alignItems: 'center' }}>
-                            <div />
-                            <div>Produto</div>
-                            <div style={{ textAlign: 'center' }}>Qtd</div>
-                            <div style={{ textAlign: 'center' }}>Status</div>
-                            <div style={{ textAlign: 'right' }}>Ação</div>
-                          </div>
-                          {(notaDetalheAberta.itens || []).map((item, idx) => {
-                            const statusItem = item.divergencia ? 'Divergência' : item.quantidade_confirmada != null ? 'Conferido' : 'Pendente'
-                            const statusColor = item.divergencia ? '#c62828' : item.quantidade_confirmada != null ? '#2e7d32' : '#ef6c00'
+                        {/* Produtos agrupados por descrição */}
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
+                          {agruparItensPorDescricao(notaDetalheAberta.itens || []).map((grupo) => {
+                            const temSelecionados = grupo.selecionados.length > 0
+                            const multi = grupo.items.length > 1
+                            const expandido = !multi || gruposExpandidos.has(grupo.descricao)
+                            const qSubidos = grupo.items.filter(i => i.estoque_olist_atualizado_em).length
+                            const qConf = grupo.items.filter(i => (i.quantidade_confirmada !== null && i.quantidade_confirmada !== undefined) && !i.estoque_olist_atualizado_em).length
+                            const qFalta = grupo.items.length - qSubidos - qConf
+                            const toggleExpandir = () => {
+                              const novo = new Set(gruposExpandidos)
+                              if (novo.has(grupo.descricao)) novo.delete(grupo.descricao)
+                              else novo.add(grupo.descricao)
+                              setGruposExpandidos(novo)
+                            }
                             return (
-                              <div key={item.id} style={{ display: 'grid', gridTemplateColumns: '42px minmax(240px, 1fr) 90px 120px 160px', gap: '1rem', padding: '0.95rem 1rem', borderTop: idx > 0 ? '1px solid #eef2f4' : 'none', alignItems: 'center' }}>
-                                <div style={{ display: 'flex', justifyContent: 'center' }}>
-                                  <input
-                                    type="checkbox"
-                                    checked={itensSelecionadosMultiplos.has(item.id)}
-                                    onChange={() => toggleSelecaoMultipla(item.id)}
-                                    style={{ width: '18px', height: '18px', cursor: 'pointer' }}
-                                  />
-                                </div>
-                                <div>
-                                  <div style={{ fontWeight: 700, color: '#1a1a1a' }}>{item.descricao}</div>
-                                  <div style={{ color: '#78909c', fontSize: '0.82rem' }}>Código: {item.codigo_produto || '—'}</div>
-                                </div>
-                                <div style={{ textAlign: 'center', fontWeight: 700 }}>{Math.round(item.quantidade_nf)}</div>
-                                <div style={{ textAlign: 'center', color: statusColor, fontWeight: 700, fontSize: '0.82rem' }}>{statusItem}</div>
-                                <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-                                  <button
-                                    onClick={() => conferirProduto(item)}
-                                    style={{ padding: '0.55rem 0.9rem', background: '#1976D2', color: '#fff', border: 'none', borderRadius: '8px', cursor: 'pointer', fontWeight: 700 }}
+                              <div key={grupo.descricao} style={{ border: temSelecionados ? '2px solid #2196F3' : '1px solid #e0e0e0', borderRadius: 8, overflow: 'hidden', background: temSelecionados ? '#e3f2fd' : '#fff' }}>
+                                {/* Header do grupo */}
+                                <div style={{ background: temSelecionados ? '#bbdefb' : '#f5f5f5', padding: '1rem 1.25rem', borderBottom: '1px solid #e0e0e0', display: 'flex', alignItems: 'center', gap: '1rem', justifyContent: 'space-between', flexWrap: 'wrap' }}>
+                                  <div
+                                    style={{ flex: 1, minWidth: '250px', display: 'flex', alignItems: 'center', gap: '0.6rem', cursor: multi ? 'pointer' : 'default' }}
+                                    onClick={multi ? toggleExpandir : undefined}
                                   >
-                                    Conferir
-                                  </button>
+                                    {multi && (
+                                      <span
+                                        style={{ fontSize: '0.9rem', color: '#555', transition: 'transform 0.15s', transform: expandido ? 'rotate(90deg)' : 'rotate(0deg)', userSelect: 'none' }}
+                                        aria-label={expandido ? 'Recolher' : 'Expandir'}
+                                      >▶</span>
+                                    )}
+                                    <div>
+                                      <div style={{ fontWeight: 700, color: '#1a1a1a', fontSize: '1rem' }}>{grupo.descricao}</div>
+                                      <div style={{ color: '#666', fontSize: '0.85rem' }}>
+                                        {grupo.items.length} registro{grupo.items.length !== 1 ? 's' : ''} · Total: {Math.round(grupo.totalQtd)} un
+                                        {grupo.selecionados.length > 0 && <span style={{ color: '#2196F3', fontWeight: 700, marginLeft: '0.5rem' }}>· {grupo.selecionados.length} selecionado{grupo.selecionados.length !== 1 ? 's' : ''}</span>}
+                                      </div>
+                                      {multi && (
+                                        <div style={{ display: 'flex', gap: '0.4rem', marginTop: '0.35rem', flexWrap: 'wrap' }}>
+                                          {qSubidos > 0 && <span style={{ background: '#e8f5e9', color: '#2e7d32', fontSize: '0.68rem', fontWeight: 700, padding: '0.1rem 0.45rem', borderRadius: 999 }}>✅ {qSubidos} subido{qSubidos !== 1 ? 's' : ''}</span>}
+                                          {qConf > 0 && <span style={{ background: '#e3f2fd', color: '#1565c0', fontSize: '0.68rem', fontWeight: 700, padding: '0.1rem 0.45rem', borderRadius: 999 }}>🔄 {qConf} conferido{qConf !== 1 ? 's' : ''}</span>}
+                                          {qFalta > 0 && <span style={{ background: '#fff3e0', color: '#e65100', fontSize: '0.68rem', fontWeight: 700, padding: '0.1rem 0.45rem', borderRadius: 999 }}>🆕 {qFalta} a conferir</span>}
+                                          <span style={{ color: '#2196F3', fontSize: '0.68rem', fontWeight: 700 }}>{expandido ? '· clique para recolher' : '· clique para ver todos'}</span>
+                                        </div>
+                                      )}
+                                    </div>
+                                  </div>
+                                  <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+                                    {grupo.items.length > 1 && grupo.selecionados.length > 0 && (
+                                      <button
+                                        onClick={() => {
+                                          if (!notaDetalheAberta) return
+                                          const primeiroItem = grupo.selecionados[0]
+                                          const qtdTotal = grupo.selecionados.reduce((s, i) => s + i.quantidade_nf, 0)
+                                          const msg = `Confirmar envio em massa?\n\nProduto: ${grupo.descricao}\nQuantidade de registros: ${grupo.selecionados.length}\nQuantidade total: ${Math.round(qtdTotal)} unidades\n\nOs registros serão agrupados e enviados como uma única entrada para a Olist.`
+                                          if (!window.confirm(msg)) return
+
+                                          setProdutoSelecionado({
+                                            id_item: primeiroItem.id,
+                                            ids_massa: grupo.selecionados.map(i => i.id),
+                                            descricao: grupo.descricao,
+                                            codigo_produto: primeiroItem.codigo_produto,
+                                            quantidade_total: qtdTotal,
+                                            quantidade_nf: qtdTotal,
+                                            quantidade_confirmada: qtdTotal,
+                                            preco_unitario: primeiroItem.preco_unitario,
+                                            notas_fiscais: grupo.selecionados.map(i => ({
+                                              numero_nf: notaDetalheAberta.numero_nf || '',
+                                              serie: notaDetalheAberta.serie || '',
+                                              fornecedor: notaDetalheAberta.fornecedor || '',
+                                              quantidade: i.quantidade_nf
+                                            }))
+                                          } as any)
+                                          setItensSelecionadosMultiplos(new Set())
+                                          setModalOpen(true)
+                                        }}
+                                        style={{ padding: '0.4rem 0.8rem', background: '#2196F3', color: '#fff', border: 'none', borderRadius: 4, fontSize: '0.75rem', fontWeight: 600, cursor: 'pointer', whiteSpace: 'nowrap' }}
+                                      >
+                                        📦 {grupo.selecionados.length} em Massa
+                                      </button>
+                                    )}
+                                    {grupo.items.length > 1 && (
+                                      <button
+                                        onClick={() => toggleSelecaoGrupo(grupo.items)}
+                                        style={{ padding: '0.4rem 0.8rem', background: temSelecionados ? '#1976D2' : '#e0e0e0', color: temSelecionados ? '#fff' : '#666', border: 'none', borderRadius: 4, fontSize: '0.75rem', fontWeight: 600, cursor: 'pointer', whiteSpace: 'nowrap' }}
+                                      >
+                                        {grupo.items.every(i => itensSelecionadosMultiplos.has(i.id)) ? '✓ Desselecionar' : '☐ Selecionar'}
+                                      </button>
+                                    )}
+                                  </div>
                                 </div>
+
+                                {/* Items do grupo (só quando expandido) */}
+                                {expandido && (
+                                <div>
+                                  {grupo.items.map((item, idx) => {
+                                    const subido = !!item.estoque_olist_atualizado_em
+                                    const conferido = item.quantidade_confirmada !== null && item.quantidade_confirmada !== undefined
+                                    const selecionado = itensSelecionadosMultiplos.has(item.id)
+                                    return (
+                                      <div
+                                        key={item.id}
+                                        style={{
+                                          display: 'grid',
+                                          gridTemplateColumns: grupo.items.length > 1 ? '30px 1fr auto' : '1fr auto',
+                                          gap: '1rem',
+                                          alignItems: 'center',
+                                          padding: '1rem 1.25rem',
+                                          borderTop: idx > 0 ? '1px solid #eee' : 'none',
+                                          background: selecionado ? '#e3f2fd' : idx % 2 === 0 ? '#fff' : '#fafafa'
+                                        }}
+                                      >
+                                        {grupo.items.length > 1 && (
+                                          <input
+                                            type="checkbox"
+                                            checked={selecionado}
+                                            onChange={() => toggleSelecaoMultipla(item.id)}
+                                            style={{ width: '18px', height: '18px', cursor: 'pointer' }}
+                                          />
+                                        )}
+
+                                        <div>
+                                          <div style={{ fontWeight: 600, color: '#1a1a1a' }}>
+                                            {grupo.items.length > 1 && <span style={{ color: '#999', marginRight: '0.5rem' }}>({grupo.items.indexOf(item) + 1})</span>}
+                                            {Math.round(item.quantidade_nf)} un
+                                          </div>
+                                          <div style={{ color: '#90a4ae', fontSize: '0.8rem' }}>
+                                            Cód: {item.codigo_produto}{conferido ? ` · Recebido: ${Math.round(item.quantidade_confirmada as number)}` : ''}
+                                          </div>
+                                          <div style={{ marginTop: 4 }}>
+                                            {subido
+                                              ? <span style={{ background: '#e8f5e9', color: '#2e7d32', fontSize: '0.7rem', fontWeight: 700, padding: '0.15rem 0.5rem', borderRadius: 999 }}>✅ Subido na Olist</span>
+                                              : conferido
+                                                ? <span style={{ background: '#e3f2fd', color: '#1565c0', fontSize: '0.7rem', fontWeight: 700, padding: '0.15rem 0.5rem', borderRadius: 999 }}>🔄 Conferido</span>
+                                                : <span style={{ background: '#fff3e0', color: '#e65100', fontSize: '0.7rem', fontWeight: 700, padding: '0.15rem 0.5rem', borderRadius: 999 }}>🆕 A conferir</span>}
+                                          </div>
+                                        </div>
+
+                                        <button
+                                          onClick={() => conferirProduto(item)}
+                                          style={{ padding: '0.6rem 1rem', background: '#007acc', color: '#fff', border: 'none', borderRadius: 6, fontWeight: 600, cursor: 'pointer', whiteSpace: 'nowrap', fontSize: '0.85rem' }}
+                                        >
+                                          Conferir
+                                        </button>
+                                      </div>
+                                    )
+                                  })}
+                                </div>
+                                )}
                               </div>
                             )
                           })}
@@ -3292,8 +3825,17 @@ function App() {
                 <p style={{ color: '#666', fontSize: '0.88rem', marginTop: 0 }}>
                   O estoque atual da Olist (<strong>{produtoOlistSelecionado.estoque_saldo} un</strong>) está incorreto?
                   Informe abaixo o estoque <strong>REAL</strong> que você tem hoje. O sistema vai corrigir a base
-                  e somar a quantidade da NF por cima.
+                  e somar só o que realmente sobe na Olist, descontando a reserva do FULL.
                 </p>
+                {(() => {
+                  const qtdNF = Math.round(produtoSelecionado.quantidade_nf)
+                  const reserva = Math.min(reservaInbound, qtdNF)
+                  const qtdSubir = Math.max(0, qtdNF - reserva)
+                  const novoTotal = estoqueRealNF.trim() !== '' && !isNaN(Number(estoqueRealNF))
+                    ? Math.round(Number(estoqueRealNF)) + qtdSubir
+                    : null
+                  return (
+                    <>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '1.5rem', flexWrap: 'wrap', marginTop: '1rem' }}>
                   <div>
                     <label style={{ display: 'block', color: '#666', fontSize: '0.8rem', fontWeight: '600', marginBottom: '0.3rem' }}>
@@ -3311,21 +3853,32 @@ function App() {
                   </div>
                   <div style={{ fontSize: '1.5rem', color: '#ff9800', fontWeight: '700' }}>+</div>
                   <div>
-                    <p style={{ color: '#666', fontSize: '0.8rem', fontWeight: '600', margin: 0 }}>QTD DA NF</p>
+                    <p style={{ color: '#666', fontSize: '0.8rem', fontWeight: '600', margin: 0 }}>QTD A SUBIR</p>
                     <p style={{ color: '#007acc', fontSize: '1.5rem', fontWeight: '700', margin: 0 }}>
-                      {Math.round(produtoSelecionado.quantidade_nf)}
+                      {qtdSubir}
                     </p>
+                    {reserva > 0 && (
+                      <p style={{ color: '#999', fontSize: '0.7rem', margin: '0.15rem 0 0 0' }}>
+                        ({qtdNF} da NF - {reserva} pro FULL)
+                      </p>
+                    )}
                   </div>
                   <div style={{ fontSize: '1.5rem', color: '#ff9800', fontWeight: '700' }}>=</div>
                   <div>
                     <p style={{ color: '#666', fontSize: '0.8rem', fontWeight: '600', margin: 0 }}>NOVO ESTOQUE TOTAL</p>
                     <p style={{ color: '#e65100', fontSize: '1.8rem', fontWeight: '800', margin: 0 }}>
-                      {estoqueRealNF.trim() !== '' && !isNaN(Number(estoqueRealNF))
-                        ? Math.round(Number(estoqueRealNF)) + Math.round(produtoSelecionado.quantidade_nf)
-                        : '—'}
+                      {novoTotal ?? '—'}
                     </p>
                   </div>
                 </div>
+                {reserva > 0 && (
+                  <div style={{ marginTop: '1rem', padding: '0.75rem 1rem', background: '#fff8e1', border: '1px solid #ffb74d', borderRadius: '6px', color: '#e65100', fontSize: '0.88rem' }}>
+                    ⚠️ No balanço também vamos segurar <strong>{reserva} un</strong> para o FULL no inbound {reservaInboundInbs}. Então entra só <strong>{qtdSubir} un</strong> no estoque da Olist.
+                  </div>
+                )}
+                    </>
+                  )
+                })()}
               </div>
             )}
 
@@ -3453,6 +4006,74 @@ function App() {
         </header>
         <main className="container main-content">
           <EmbaldesManager />
+        </main>
+      </div>
+    )
+  }
+
+  // ===== PÁGINA LISTA DE SEPARAÇÃO =====
+  if (pagina === 'lista-separacao') {
+    return renderComShell(
+      'Lista de Separação',
+      'Separe produtos do inbound com ações visuais',
+      <div className="app">
+        <header className="header">
+          <div className="container">
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div>
+                <h1>LISTA DE SEPARAÇÃO</h1>
+                <p>Separe produtos com balanço, baixa ou espera</p>
+              </div>
+            </div>
+          </div>
+        </header>
+        <main className="container main-content">
+          <EmbaldesManager modoSeparacao={true} />
+        </main>
+      </div>
+    )
+  }
+
+  // ===== PÁGINA HISTÓRICO FULL =====
+  if (pagina === 'historico-full') {
+    return renderComShell(
+      'Histórico do FULL',
+      'Itens em espera e alterações de quantidade que vai pro FULL, por inbound',
+      <div className="app">
+        <header className="header">
+          <div className="container">
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div>
+                <h1>HISTÓRICO FULL</h1>
+                <p>Em espera e mudanças de quantidade do que vai ser enviado</p>
+              </div>
+            </div>
+          </div>
+        </header>
+        <main className="container main-content">
+          <HistoricoFull />
+        </main>
+      </div>
+    )
+  }
+
+  if (pagina === 'operadores' && operadorSessao?.role === 'master') {
+    return renderComShell(
+      'Operadores e Auditoria',
+      'Cadastre pessoas e acompanhe o histórico individual da operação.',
+      <div className="app">
+        <header className="header">
+          <div className="container">
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div>
+                <h1>OPERADORES</h1>
+                <p>Controle de acesso por turno com histórico por pessoa</p>
+              </div>
+            </div>
+          </div>
+        </header>
+        <main className="container main-content">
+          <OperadoresManager />
         </main>
       </div>
     )

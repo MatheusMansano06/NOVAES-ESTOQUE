@@ -24,6 +24,7 @@ from datetime import datetime, timedelta
 from typing import Optional, Dict, List, Any
 from dotenv import load_dotenv
 from sqlalchemy.orm import Session
+from sqlalchemy import or_, func
 
 from database import SessionLocal
 from app.models import MercadoLivreItemCache, MercadoLivreSyncState
@@ -581,6 +582,8 @@ class MLIntegration:
             row.sale_price_json = self._json_dump(sale_price)
             if isinstance(sale_price, dict):
                 row.preco_promocional = sale_price.get("amount")
+                if sale_price.get("regular_amount") is not None:
+                    row.preco_original = sale_price.get("regular_amount")
         elif row.preco_promocional is None:
             row.preco_promocional = row.preco
         if shipping_fee is not None:
@@ -709,18 +712,32 @@ class MLIntegration:
         state.cache_expires_at = now + timedelta(seconds=ttl_seconds)
         state.last_error = last_error
 
-    def _listar_anuncios_cache(self, status: str, offset: int, limit: int) -> Dict[str, Any]:
+    def _listar_anuncios_cache(self, status: str, offset: int, limit: int, q: str = "") -> Dict[str, Any]:
         db = self._db()
         try:
             scope = self._sync_scope(status)
             state = self._sync_state_query(db, scope)
-            q = db.query(MercadoLivreItemCache)
-            if status and status != "todos":
-                q = q.filter(MercadoLivreItemCache.status == status)
+            query = db.query(MercadoLivreItemCache)
+            termo = (str(q or "")).strip().lower()
+            # Quando há busca, procura em TODOS os status (o placeholder promete
+            # "todos os anuncios"). Sem busca, mantém o filtro da aba selecionada.
+            if termo:
+                # Multi-palavra: cada token precisa casar (AND) em título, SKU ou
+                # item_id (OR). Assim "painel cg 150" acha "Painel Completo Cg 150"
+                # independente da ordem/posição das palavras.
+                for token in termo.split():
+                    like = f"%{token}%"
+                    query = query.filter(or_(
+                        func.lower(func.coalesce(MercadoLivreItemCache.titulo, "")).like(like),
+                        func.lower(func.coalesce(MercadoLivreItemCache.sku, "")).like(like),
+                        func.lower(func.coalesce(MercadoLivreItemCache.item_id, "")).like(like),
+                    ))
+            elif status and status != "todos":
+                query = query.filter(MercadoLivreItemCache.status == status)
             # Ordenação estável (item_id) p/ paginação consistente; total vem da
             # contagem LOCAL — o catálogo inteiro fica espelhado no cache.
-            total = q.count()
-            rows = q.order_by(MercadoLivreItemCache.item_id.asc()).offset(offset).limit(limit).all()
+            total = query.count()
+            rows = query.order_by(MercadoLivreItemCache.item_id.asc()).offset(offset).limit(limit).all()
             anuncios = [self._cache_to_simple_item(row) for row in rows]
             return {
                 "total": total,
@@ -730,6 +747,7 @@ class MLIntegration:
                 "cache": {
                     "fonte": "sqlite",
                     "scope": scope,
+                    "q": termo or None,
                     "synced_at": state.synced_at.isoformat() if state and state.synced_at else None,
                     "expires_at": state.cache_expires_at.isoformat() if state and state.cache_expires_at else None,
                     "stale": not self._is_fresh(state.cache_expires_at if state else None),
@@ -1076,6 +1094,25 @@ class MLIntegration:
                 "permalink": r.permalink,
             }
         return {"margens": out, "total": len(out)}
+
+    def imagens_por_sku(self) -> Dict[str, Any]:
+        """Mapa SKU -> imagem do anúncio, lendo TODO o cache local (qualquer status).
+        Usado na Lista de Separação p/ mostrar a foto de cada item do inbound.
+        Direto do SQLite, sem chamada ao vivo e sem o teto de paginação."""
+        db = self._db()
+        try:
+            rows = db.query(MercadoLivreItemCache).all()
+        finally:
+            db.close()
+        out: Dict[str, str] = {}
+        for r in rows:
+            s = (r.sku or "").strip().upper()
+            img = r.imagem_principal or r.thumbnail
+            if not s or not img:
+                continue
+            # se houver mais de um anúncio com o mesmo SKU, mantém o primeiro com imagem
+            out.setdefault(s, img)
+        return {"imagens": out, "total": len(out)}
 
     def precificacao(self, price: float, category_id: Optional[str] = None) -> Dict:
         """Tarifa de venda real do ML (Clássico=gold_special, Premium=gold_pro) p/ um preço/categoria."""
@@ -1512,9 +1549,29 @@ class MLIntegration:
         if detail.get("erro"):
             return detail
         item = detail.get("item") or {}
+        prices = detail.get("prices") or []
         sale_price = detail.get("sale_price") or {}
-        cheio = item.get("preco")
-        promocional = sale_price.get("amount") if isinstance(sale_price, dict) and sale_price.get("amount") is not None else (item.get("preco_original") or cheio)
+        cheio = sale_price.get("regular_amount") if isinstance(sale_price, dict) else None
+        if cheio is None:
+            standard = next((
+                p for p in prices
+                if isinstance(p, dict) and p.get("type") == "standard" and p.get("amount") is not None
+            ), None)
+            if isinstance(standard, dict):
+                cheio = standard.get("amount")
+        if cheio is None:
+            cheio = item.get("preco_original") or item.get("preco")
+
+        promocional = sale_price.get("amount") if isinstance(sale_price, dict) and sale_price.get("amount") is not None else None
+        if promocional is None:
+            promotion = next((
+                p for p in prices
+                if isinstance(p, dict) and p.get("type") == "promotion" and p.get("amount") is not None
+            ), None)
+            if isinstance(promotion, dict):
+                promocional = promotion.get("amount")
+        if promocional is None:
+            promocional = item.get("preco") or cheio
         if promocional is None:
             promocional = cheio
         tem_promocao = (cheio is not None and promocional is not None and float(promocional) < float(cheio) - 0.01)
@@ -1638,26 +1695,27 @@ class MLIntegration:
         self.sync_item(item_id, force=True)
         return {"ok": True, "aplicado": True, "preco_anterior": preco_anterior, "preco_novo": preco}
 
-    def listar_anuncios(self, status: str = "active", offset: int = 0, limit: int = 50, force_refresh: bool = False) -> Dict:
+    def listar_anuncios(self, status: str = "active", offset: int = 0, limit: int = 50, force_refresh: bool = False, q: str = "") -> Dict:
         """Lista anúncios servindo do cache local (SQLite). Abrir a página NÃO bate
         na API — a atualização vem do polling incremental em segundo plano.
         force_refresh dispara uma sincronização incremental na hora.
         """
+        termo_busca = q
         if force_refresh:
             self.sync_catalogo(status=status, force_full=False)
         else:
             db = self._db()
             try:
-                q = db.query(MercadoLivreItemCache.id)
+                cache_query = db.query(MercadoLivreItemCache.id)
                 if status and status != "todos":
-                    q = q.filter(MercadoLivreItemCache.status == status)
-                tem_cache = q.first() is not None
+                    cache_query = cache_query.filter(MercadoLivreItemCache.status == status)
+                tem_cache = cache_query.first() is not None
             finally:
                 db.close()
             # cold start: cache vazio p/ este status -> popula em background e já responde
             if not tem_cache:
                 self._sync_catalogo_async(status)
-        return self._listar_anuncios_cache(status=status, offset=offset, limit=limit)
+        return self._listar_anuncios_cache(status=status, offset=offset, limit=limit, q=termo_busca)
 
 
 ml = MLIntegration()

@@ -2,12 +2,63 @@ import axios, { AxiosInstance } from 'axios'
 
 const API_ORIGIN = import.meta.env.VITE_API_URL ?? 'http://127.0.0.1:8000'
 const API_BASE_URL = `${API_ORIGIN}/api`
+export const OPERADOR_SESSION_KEY = 'nvs_operador_sessao'
+
+export interface OperadorSessao {
+  operadorId?: number | null
+  operadorNome: string
+  role: 'operador' | 'master'
+}
 
 const api: AxiosInstance = axios.create({
   baseURL: API_BASE_URL,
   headers: {
     'Content-Type': 'application/json',
   },
+})
+
+export function getOperadorSessao(): OperadorSessao | null {
+  try {
+    const raw = localStorage.getItem(OPERADOR_SESSION_KEY)
+    if (!raw) return null
+    const parsed = JSON.parse(raw)
+    if (!parsed || !parsed.operadorNome || !parsed.role) return null
+    return {
+      operadorId: parsed.operadorId ?? null,
+      operadorNome: String(parsed.operadorNome),
+      role: parsed.role === 'master' ? 'master' : 'operador',
+    }
+  } catch {
+    return null
+  }
+}
+
+export function setOperadorSessao(sessao: OperadorSessao) {
+  localStorage.setItem(OPERADOR_SESSION_KEY, JSON.stringify(sessao))
+}
+
+export function clearOperadorSessao() {
+  localStorage.removeItem(OPERADOR_SESSION_KEY)
+}
+
+export function buildOperadorHeaders() {
+  const sessao = getOperadorSessao()
+  if (!sessao) return {}
+
+  return {
+    'x-operator-id': sessao.operadorId == null ? '' : String(sessao.operadorId),
+    'x-operator-name': sessao.operadorNome,
+    'x-operator-role': sessao.role,
+  }
+}
+
+api.interceptors.request.use((config) => {
+  const headers = buildOperadorHeaders()
+  config.headers = {
+    ...(config.headers ?? {}),
+    ...headers,
+  }
+  return config
 })
 
 export interface VinculoSugestao {

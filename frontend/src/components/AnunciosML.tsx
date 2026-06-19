@@ -1,9 +1,10 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, type CSSProperties } from 'react'
 import { Precificador, type PricingSnapshot, loadPricingSummaryMap, loadPriceHistory } from './Precificador'
 import { MLAnuncioEditorModal } from './MLAnuncioEditorModal'
 
 const API_BASE = import.meta.env.VITE_API_URL ?? 'http://127.0.0.1:8000'
-const PAGINA = 50
+const PAGE_SIZE_OPTIONS = [10, 20, 30, 40, 50] as const
+const DEFAULT_PAGE_SIZE = 20
 
 interface Anuncio {
   id: string
@@ -80,6 +81,23 @@ interface LivePriceBreakdown {
   tarifaPct: number | null
 }
 
+interface MarginViewModel {
+  precoOriginal: number
+  precoPromocional: number
+  temPromo: boolean
+  frete: number | null
+  tarifa: number | null
+  tarifaPct: number | null
+  custo: number | null
+  impostoPct: number
+  imposto: number | null
+  margem: number | null
+  margemPct: number | null
+}
+
+interface CustoOficial { custo: number; imposto_pct: number }
+type CustosOficiais = Record<string, CustoOficial>
+
 function carregarImpostoAtual(): number {
   try {
     const raw = localStorage.getItem('nvs_imposto_pct') || '9'
@@ -90,32 +108,88 @@ function carregarImpostoAtual(): number {
   }
 }
 
+function montarResumoMargem(anuncio: Anuncio, resumo?: PricingSnapshot, live?: LivePriceSummary | null, breakdown?: LivePriceBreakdown | null, custoOficial?: CustoOficial | null): MarginViewModel {
+  const precoOriginal = live?.cheio ?? (resumo?.precoOriginal && resumo.precoOriginal > 0 ? resumo.precoOriginal : (anuncio.preco_original || anuncio.preco))
+  const precoPromocional = live?.promocional ?? (resumo?.precoPromocional && resumo.precoPromocional > 0 ? resumo.precoPromocional : anuncio.preco)
+  const frete = resumo?.frete ?? breakdown?.frete ?? anuncio.frete_custo ?? null
+  const tarifa = resumo?.tarifa ?? breakdown?.tarifa ?? null
+  const tarifaPct = resumo?.tarifaPct ?? breakdown?.tarifaPct ?? null
+  // Custo oficial (planilha/banco) tem prioridade sobre o snapshot do Precificador.
+  const custo = custoOficial?.custo ?? resumo?.custo ?? null
+  const impostoPct = custoOficial?.imposto_pct ?? resumo?.impostoPct ?? carregarImpostoAtual()
+  const imposto = precoPromocional > 0 ? (precoPromocional * impostoPct) / 100 : null
+  const margem = frete != null && tarifa != null && custo != null && imposto != null
+    ? precoPromocional - frete - tarifa - custo - imposto
+    : null
+  const margemPct = margem != null && precoPromocional > 0 ? (margem / precoPromocional) * 100 : null
+
+  return {
+    precoOriginal,
+    precoPromocional,
+    temPromo: precoPromocional < precoOriginal - 0.01,
+    frete,
+    tarifa,
+    tarifaPct,
+    custo,
+    impostoPct,
+    imposto,
+    margem,
+    margemPct,
+  }
+}
+
 export function AnunciosML({ onVoltar }: Props) {
   const [aba, setAba] = useState('active')
   const [anuncios, setAnuncios] = useState<Anuncio[]>([])
   const [total, setTotal] = useState(0)
   const [offset, setOffset] = useState(0)
+  const [pageSize, setPageSize] = useState<number>(DEFAULT_PAGE_SIZE)
   const [loading, setLoading] = useState(true)
   const [erro, setErro] = useState('')
   const [busca, setBusca] = useState('')
+  const [buscaDebounced, setBuscaDebounced] = useState('')
   const [statusConexao, setStatusConexao] = useState<'ok' | 'erro' | 'verificando'>('verificando')
   const [precificando, setPrecificando] = useState<Anuncio | null>(null)
   const [editando, setEditando] = useState<{ anuncio: Anuncio; mode: EditorMode } | null>(null)
   const [resumos, setResumos] = useState<Record<string, PricingSnapshot>>({})
+  const [custosOficiais, setCustosOficiais] = useState<CustosOficiais>({})
 
   useEffect(() => {
     setResumos(loadPricingSummaryMap())
   }, [])
 
+  // Custo oficial por SKU (planilha/banco) — fonte de verdade da margem.
+  useEffect(() => {
+    fetch(`${API_BASE}/api/custos`, { cache: 'no-store' })
+      .then(r => r.json())
+      .then(d => { if (d && d.custos) setCustosOficiais(d.custos as CustosOficiais) })
+      .catch(() => { /* mantém vazio */ })
+  }, [])
+
+  // Debounce: só dispara a busca 350ms depois da última tecla (evita 1 request por caractere).
+  useEffect(() => {
+    const t = setTimeout(() => setBuscaDebounced(busca.trim()), 350)
+    return () => clearTimeout(t)
+  }, [busca])
+
+  const termoBusca = buscaDebounced
+
   const carregar = useCallback(async () => {
     setLoading(true)
     setErro('')
     try {
-      const r = await fetch(`${API_BASE}/api/ml/anuncios?status=${aba}&offset=${offset}&limit=${PAGINA}`, { cache: 'no-store' })
+      const params = new URLSearchParams({
+        status: aba,
+        offset: String(offset),
+        limit: String(pageSize),
+      })
+      if (termoBusca) params.set('q', termoBusca)
+      const r = await fetch(`${API_BASE}/api/ml/anuncios?${params.toString()}`, { cache: 'no-store' })
       const d = await r.json()
       if (!r.ok || d.erro) {
         setErro(d.erro || 'Falha ao carregar anuncios')
         setAnuncios([])
+        setTotal(0)
         setStatusConexao('erro')
       } else {
         setAnuncios(d.anuncios || [])
@@ -128,19 +202,22 @@ export function AnunciosML({ onVoltar }: Props) {
     } finally {
       setLoading(false)
     }
-  }, [aba, offset])
+  }, [aba, offset, pageSize, termoBusca])
 
   useEffect(() => { carregar() }, [carregar])
 
-  const trocarAba = (novaAba: string) => { setAba(novaAba); setOffset(0); setBusca('') }
+  const trocarAba = (novaAba: string) => { setAba(novaAba); setOffset(0); setBusca(''); setBuscaDebounced('') }
+  const aoMudarBusca = (valor: string) => {
+    setBusca(valor)
+    setOffset(0)
+  }
+  const aoMudarPageSize = (valor: number) => {
+    setPageSize(valor)
+    setOffset(0)
+  }
 
-  const termo = busca.trim().toLowerCase()
-  const filtrados = termo === '' ? anuncios : anuncios.filter(a =>
-    a.titulo.toLowerCase().includes(termo) || a.sku.toLowerCase().includes(termo) || a.id.toLowerCase().includes(termo)
-  )
-
-  const totalPaginas = Math.max(1, Math.ceil(total / PAGINA))
-  const paginaAtual = Math.floor(offset / PAGINA) + 1
+  const totalPaginas = Math.max(1, Math.ceil(total / pageSize))
+  const paginaAtual = Math.floor(offset / pageSize) + 1
 
   const corStatus = (s: string) => s === 'active' ? '#2e7d32' : s === 'paused' ? '#e65100' : '#9e9e9e'
   const labelStatus = (s: string) => s === 'active' ? 'Ativo' : s === 'paused' ? 'Pausado' : s === 'closed' ? 'Finalizado' : s
@@ -167,8 +244,28 @@ export function AnunciosML({ onVoltar }: Props) {
           ))}
         </div>
 
-        <input type="text" placeholder="Buscar nesta pagina por titulo, SKU ou MLB..." value={busca} onChange={e => setBusca(e.target.value)}
-          style={{ width: '100%', padding: '0.75rem 1rem', border: '1px solid #cfd8dc', borderRadius: '6px', fontSize: '0.95rem', marginBottom: '1.5rem', boxSizing: 'border-box' }} />
+        <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center', flexWrap: 'wrap', marginBottom: '1.5rem' }}>
+          <input
+            type="text"
+            placeholder="Buscar em todos os anuncios por titulo, SKU ou MLB..."
+            value={busca}
+            onChange={e => aoMudarBusca(e.target.value)}
+            style={{ flex: '1 1 420px', minWidth: '280px', padding: '0.75rem 1rem', border: '1px solid #cfd8dc', borderRadius: '6px', fontSize: '0.95rem', boxSizing: 'border-box' }}
+          />
+          <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.92rem', color: '#455a64', fontWeight: 600 }}>
+            Mostrar
+            <select
+              value={pageSize}
+              onChange={e => aoMudarPageSize(Number(e.target.value))}
+              style={{ padding: '0.72rem 0.85rem', border: '1px solid #cfd8dc', borderRadius: '6px', fontSize: '0.92rem', background: '#fff', color: '#1a1a1a' }}
+            >
+              {PAGE_SIZE_OPTIONS.map(opcao => (
+                <option key={opcao} value={opcao}>{opcao}</option>
+              ))}
+            </select>
+            por pagina
+          </label>
+        </div>
 
         {erro && (
           <div style={{ padding: '1rem', background: '#ffebee', border: '1px solid #ef5350', borderRadius: '8px', color: '#c62828', marginBottom: '1.5rem' }}>
@@ -181,11 +278,11 @@ export function AnunciosML({ onVoltar }: Props) {
 
         {loading ? (
           <p style={{ textAlign: 'center', color: '#999', padding: '2rem' }}>Carregando anuncios...</p>
-        ) : filtrados.length === 0 ? (
+        ) : anuncios.length === 0 ? (
           <p style={{ textAlign: 'center', color: '#999', padding: '2rem' }}>{erro ? '' : 'Nenhum anuncio encontrado.'}</p>
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-            {filtrados.map(a => {
+            {anuncios.map(a => {
               const resumo = resumos[a.id]
               return (
                 <div key={a.id} style={{ padding: '1rem', background: '#fff', border: '1px solid #e0e0e0', borderRadius: '10px' }}>
@@ -212,7 +309,7 @@ export function AnunciosML({ onVoltar }: Props) {
                       <div style={{ fontSize: '0.7rem', color: '#999' }}>Vendidos</div>
                       <div style={{ fontWeight: 700, color: '#1a1a1a' }}>{a.vendidos}</div>
                     </div>
-                    <PriceBubble anuncio={a} resumo={resumo} statusCor={corStatus(a.status)} statusLabel={labelStatus(a.status)} />
+                    <PriceBubble anuncio={a} resumo={resumo} custoOficial={custosOficiais[a.sku]} statusCor={corStatus(a.status)} statusLabel={labelStatus(a.status)} onPriceChanged={carregar} />
                   </div>
 
                   <div style={{ marginTop: '0.9rem', paddingTop: '0.9rem', borderTop: '1px solid #f0f0f0', display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))', gap: '0.6rem' }}>
@@ -258,12 +355,12 @@ export function AnunciosML({ onVoltar }: Props) {
           </div>
         )}
 
-        {!loading && total > PAGINA && (
+        {!loading && total > pageSize && (
           <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '1rem', marginTop: '2rem' }}>
-            <button disabled={offset === 0} onClick={() => setOffset(Math.max(0, offset - PAGINA))}
+            <button disabled={offset === 0} onClick={() => setOffset(Math.max(0, offset - pageSize))}
               style={{ padding: '0.6rem 1.2rem', background: offset === 0 ? '#f5f5f5' : '#fff', border: '1px solid #ddd', borderRadius: '6px', cursor: offset === 0 ? 'not-allowed' : 'pointer', fontWeight: 600 }}>Anterior</button>
             <span style={{ color: '#666', fontSize: '0.9rem' }}>Pagina {paginaAtual} de {totalPaginas}</span>
-            <button disabled={paginaAtual >= totalPaginas} onClick={() => setOffset(offset + PAGINA)}
+            <button disabled={paginaAtual >= totalPaginas} onClick={() => setOffset(offset + pageSize)}
               style={{ padding: '0.6rem 1.2rem', background: paginaAtual >= totalPaginas ? '#f5f5f5' : '#fff', border: '1px solid #ddd', borderRadius: '6px', cursor: paginaAtual >= totalPaginas ? 'not-allowed' : 'pointer', fontWeight: 600 }}>Proxima</button>
           </div>
         )}
@@ -275,12 +372,23 @@ export function AnunciosML({ onVoltar }: Props) {
           itemId={precificando.id}
           precoInicial={precificando.preco}
           precoOriginal={precificando.preco_original}
+          custoInicial={custosOficiais[precificando.sku]?.custo ?? 0}
           freteInicial={precificando.frete_custo || 0}
           categoryId={precificando.categoria_id}
           tipoAtualId={precificando.tipo_anuncio_id}
           onClose={() => setPrecificando(null)}
           onSaved={(snapshot) => {
             setResumos(prev => ({ ...prev, [snapshot.itemId]: snapshot }))
+            // Persiste o custo editado como custo oficial (autoritário) no backend.
+            const sku = precificando.sku
+            if (sku) {
+              setCustosOficiais(prev => ({ ...prev, [sku]: { custo: snapshot.custo, imposto_pct: snapshot.impostoPct } }))
+              fetch(`${API_BASE}/api/custos`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ sku, custo: snapshot.custo, imposto_pct: snapshot.impostoPct }),
+              }).catch(() => { /* mantém estado local mesmo se falhar */ })
+            }
             setPrecificando(null)
           }}
         />
@@ -301,9 +409,12 @@ export function AnunciosML({ onVoltar }: Props) {
   )
 }
 
-function ResumoTooltip({ anuncio, resumo }: { anuncio: Anuncio; resumo?: PricingSnapshot }) {
+function ResumoTooltip({ anuncio, resumo, editavel = false, modal = false, onSaved, onClose, custoOficial }: { anuncio: Anuncio; resumo?: PricingSnapshot; editavel?: boolean; modal?: boolean; onSaved?: () => void; onClose?: () => void; custoOficial?: CustoOficial | null }) {
   const [live, setLive] = useState<LivePriceSummary | null>(null)
   const [breakdown, setBreakdown] = useState<LivePriceBreakdown | null>(null)
+  const [novoPreco, setNovoPreco] = useState('')
+  const [salvando, setSalvando] = useState(false)
+  const [msg, setMsg] = useState<{ tipo: 'ok' | 'erro'; texto: string } | null>(null)
   const historico = resumo ? loadPriceHistory(anuncio.id) : []
 
   useEffect(() => {
@@ -327,30 +438,59 @@ function ResumoTooltip({ anuncio, resumo }: { anuncio: Anuncio; resumo?: Pricing
     return () => { ativo = false }
   }, [anuncio.id])
 
-  const precoOriginal = live?.cheio ?? (resumo?.precoOriginal && resumo.precoOriginal > 0 ? resumo.precoOriginal : (anuncio.preco_original || anuncio.preco))
-  const precoPromocional = live?.promocional ?? (resumo?.precoPromocional && resumo.precoPromocional > 0 ? resumo.precoPromocional : anuncio.preco)
-  const temPromo = precoPromocional < precoOriginal - 0.01
-  const frete = breakdown?.frete ?? resumo?.frete ?? anuncio.frete_custo ?? null
-  const tarifa = breakdown?.tarifa ?? resumo?.tarifa ?? null
-  const tarifaPct = breakdown?.tarifaPct ?? resumo?.tarifaPct ?? null
-  const custo = resumo?.custo ?? null
-  const impostoPct = resumo?.impostoPct ?? carregarImpostoAtual()
-  const imposto = precoPromocional > 0 ? (precoPromocional * impostoPct) / 100 : null
-  const margem = frete != null && tarifa != null && custo != null && imposto != null
-    ? precoPromocional - frete - tarifa - custo - imposto
-    : null
-  const margemPct = margem != null && precoPromocional > 0 ? (margem / precoPromocional) * 100 : null
+  const resumoMargem = montarResumoMargem(anuncio, resumo, live, breakdown, custoOficial)
+
+  // Quando abre em modo edição, pré-preenche o input com o preço cheio atual.
+  useEffect(() => {
+    if (editavel && novoPreco === '' && resumoMargem.precoOriginal > 0) {
+      setNovoPreco(resumoMargem.precoOriginal.toFixed(2))
+    }
+  }, [editavel, resumoMargem.precoOriginal, novoPreco])
+
+  const salvarPrecoCheio = async () => {
+    const v = Number(String(novoPreco).replace(',', '.'))
+    if (!v || v <= 0) { setMsg({ tipo: 'erro', texto: 'Informe um preço válido' }); return }
+    if (!window.confirm(`Alterar o preço cheio para ${brl(v)}?\n\nIsso pode tirar o anúncio de promoções ativas no Mercado Livre.`)) return
+    setSalvando(true); setMsg(null)
+    try {
+      const r = await fetch(`${API_BASE}/api/ml/anuncios/${anuncio.id}/preco`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ preco: v }),
+      })
+      const d = await r.json()
+      if (!r.ok || d.erro) throw new Error(d.erro || 'Falha ao aplicar o preço')
+      const aplicado = Number(d.preco_novo || v)
+      setMsg({ tipo: 'ok', texto: `Preço cheio atualizado: ${brl(aplicado)}` })
+      setLive(prev => ({ cheio: aplicado, promocional: prev?.promocional ?? null }))
+      onSaved?.()
+    } catch (e) {
+      setMsg({ tipo: 'erro', texto: String(e instanceof Error ? e.message : e) })
+    } finally {
+      setSalvando(false)
+    }
+  }
+
+  const rootStyle: CSSProperties = modal
+    ? { position: 'relative', width: '100%', background: '#ffffff', color: '#1d2939', border: '1px solid #cfe0ff', borderRadius: '14px', padding: '1.1rem 1.25rem', boxShadow: '0 24px 60px rgba(16,24,40,.28)', textAlign: 'left' }
+    : { position: 'absolute', right: 0, top: 'calc(100% + 10px)', width: '304px', background: '#ffffff', color: '#1d2939', border: '1px solid #cfe0ff', borderRadius: '12px', padding: '.9rem 1rem', boxShadow: '0 14px 30px rgba(16,24,40,.14)', zIndex: 30, textAlign: 'left' }
 
   return (
-    <div style={{ position: 'absolute', right: 0, top: 'calc(100% + 10px)', width: '304px', background: '#ffffff', color: '#1d2939', border: '1px solid #cfe0ff', borderRadius: '12px', padding: '.9rem 1rem', boxShadow: '0 14px 30px rgba(16,24,40,.14)', zIndex: 30, textAlign: 'left' }}>
-      <LinhaResumo label="Preco original" valor={brl(precoOriginal)} risco={temPromo} />
-      <LinhaResumo label="Preco promocional" valor={brl(precoPromocional)} cor={temPromo ? '#067647' : undefined} />
-      <LinhaResumo label="Frete" valor={frete != null ? `-${brl(frete)}` : '--'} extra={frete != null ? `${percentual(frete, precoPromocional)}%` : undefined} cor="#b42318" />
-      <LinhaResumo label="Tarifa de venda" valor={tarifa != null ? `-${brl(tarifa)}` : '--'} extra={tarifaPct != null ? `${tarifaPct.toFixed(2)}%` : undefined} cor="#b42318" />
-      <LinhaResumo label="Custo" valor={custo != null ? `-${brl(custo)}` : '--'} cor="#b42318" />
-      <LinhaResumo label="Imposto" valor={imposto != null ? `-${brl(imposto)}` : '--'} extra={impostoPct ? `${impostoPct.toFixed(2)}%` : undefined} cor="#b42318" />
+    <div onClick={editavel ? (e) => e.stopPropagation() : undefined} style={rootStyle}>
+      {modal && (
+        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '.75rem', marginBottom: '.75rem', paddingBottom: '.6rem', borderBottom: '1px solid #e9eef7' }}>
+          <div style={{ fontSize: '.9rem', fontWeight: 800, color: '#1d2939', lineHeight: 1.3, overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' }}>{anuncio.titulo}</div>
+          <button onClick={(e) => { e.stopPropagation(); onClose?.() }} aria-label="Fechar" style={{ flexShrink: 0, width: 28, height: 28, borderRadius: 8, border: '1px solid #e4e7ec', background: '#fff', color: '#667085', fontSize: '1.1rem', lineHeight: 1, cursor: 'pointer' }}>×</button>
+        </div>
+      )}
+      <LinhaResumo label="Preco original" valor={brl(resumoMargem.precoOriginal)} risco={resumoMargem.temPromo} />
+      <LinhaResumo label="Preco promocional" valor={brl(resumoMargem.precoPromocional)} cor={resumoMargem.temPromo ? '#067647' : undefined} />
+      <LinhaResumo label="Frete" valor={resumoMargem.frete != null ? `-${brl(resumoMargem.frete)}` : '--'} extra={resumoMargem.frete != null ? `${percentual(resumoMargem.frete, resumoMargem.precoPromocional)}%` : undefined} cor="#b42318" />
+      <LinhaResumo label="Tarifa de venda" valor={resumoMargem.tarifa != null ? `-${brl(resumoMargem.tarifa)}` : '--'} extra={resumoMargem.tarifaPct != null ? `${resumoMargem.tarifaPct.toFixed(2)}%` : undefined} cor="#b42318" />
+      <LinhaResumo label="Custo" valor={resumoMargem.custo != null ? `-${brl(resumoMargem.custo)}` : '--'} cor="#b42318" />
+      <LinhaResumo label="Imposto" valor={resumoMargem.imposto != null ? `-${brl(resumoMargem.imposto)}` : '--'} extra={resumoMargem.impostoPct ? `${resumoMargem.impostoPct.toFixed(2)}%` : undefined} cor="#b42318" />
       <div style={{ height: 1, background: '#e9eef7', margin: '.55rem 0' }} />
-      <LinhaResumo label="Marg. contribuição" valor={margem != null ? brl(margem) : '--'} extra={margemPct != null ? `${margemPct.toFixed(2)}%` : undefined} strong cor={margem != null && margem < 0 ? '#b42318' : '#3483fa'} />
+      <LinhaResumo label="Marg. contribuicao" valor={resumoMargem.margem != null ? brl(resumoMargem.margem) : '--'} extra={resumoMargem.margemPct != null ? `${resumoMargem.margemPct.toFixed(2)}%` : undefined} strong cor={resumoMargem.margem != null && resumoMargem.margem < 0 ? '#b42318' : '#3483fa'} />
       {historico.length > 0 && (
         <div style={{ marginTop: '.6rem', paddingTop: '.55rem', borderTop: '1px solid #e9eef7' }}>
           <div style={{ fontSize: '.68rem', color: '#98a2b3', textTransform: 'uppercase', letterSpacing: '.03em', marginBottom: '.3rem' }}>Histórico de preço</div>
@@ -362,18 +502,53 @@ function ResumoTooltip({ anuncio, resumo }: { anuncio: Anuncio; resumo?: Pricing
           ))}
         </div>
       )}
-      {!resumo && (
+      {resumo && (
+        <div style={{ marginTop: '.45rem', fontSize: '.68rem', color: '#98a2b3' }}>
+          * Frete, tarifa, custo e imposto seguem a base salva no Precificador.
+        </div>
+      )}
+      {!resumo && !editavel && (
         <div style={{ marginTop: '.45rem', fontSize: '.68rem', color: '#98a2b3' }}>
           * Frete e tarifa vêm direto do ML. Para custo/margem exatos, salve os dados no Precificador.
         </div>
       )}
-      <div style={{ position: 'absolute', top: -7, right: 32, width: 14, height: 14, background: '#ffffff', borderLeft: '1px solid #cfe0ff', borderTop: '1px solid #cfe0ff', transform: 'rotate(45deg)' }} />
+      {editavel && (
+        <div style={{ marginTop: '.6rem', paddingTop: '.55rem', borderTop: '1px solid #e9eef7' }}>
+          <div style={{ fontSize: '.68rem', color: '#98a2b3', textTransform: 'uppercase', letterSpacing: '.03em', marginBottom: '.4rem' }}>Editar preço cheio</div>
+          <div style={{ display: 'flex', gap: '.4rem', alignItems: 'center' }}>
+            <span style={{ fontSize: '.85rem', color: '#475467', fontWeight: 700 }}>R$</span>
+            <input
+              type="text"
+              inputMode="decimal"
+              value={novoPreco}
+              onChange={e => setNovoPreco(e.target.value)}
+              onClick={e => e.stopPropagation()}
+              style={{ flex: 1, minWidth: 0, padding: '.45rem .6rem', border: '1px solid #cfd8dc', borderRadius: 6, fontSize: '.9rem', fontWeight: 700, boxSizing: 'border-box' }}
+            />
+            <button
+              onClick={(e) => { e.stopPropagation(); salvarPrecoCheio() }}
+              disabled={salvando}
+              style={{ padding: '.45rem .8rem', background: '#5b3cc4', color: '#fff', border: 'none', borderRadius: 6, fontWeight: 700, cursor: salvando ? 'wait' : 'pointer', whiteSpace: 'nowrap' }}
+            >
+              {salvando ? '...' : 'Salvar'}
+            </button>
+          </div>
+          <div style={{ marginTop: '.4rem', fontSize: '.7rem', color: '#b54708', background: '#fffaeb', border: '1px solid #fedf89', borderRadius: 6, padding: '.4rem .5rem' }}>
+            ⚠️ Alterar o preço cheio pode tirar o anúncio de promoções ativas no Mercado Livre.
+          </div>
+          {msg && (
+            <div style={{ marginTop: '.4rem', fontSize: '.72rem', fontWeight: 700, color: msg.tipo === 'ok' ? '#067647' : '#b42318' }}>{msg.texto}</div>
+          )}
+        </div>
+      )}
+      {!modal && <div style={{ position: 'absolute', top: -7, right: 32, width: 14, height: 14, background: '#ffffff', borderLeft: '1px solid #cfe0ff', borderTop: '1px solid #cfe0ff', transform: 'rotate(45deg)' }} />}
     </div>
   )
 }
 
-function PriceBubble({ anuncio, resumo, statusCor, statusLabel }: { anuncio: Anuncio; resumo?: PricingSnapshot; statusCor: string; statusLabel: string }) {
+function PriceBubble({ anuncio, resumo, statusCor, statusLabel, onPriceChanged, custoOficial }: { anuncio: Anuncio; resumo?: PricingSnapshot; statusCor: string; statusLabel: string; onPriceChanged?: () => void; custoOficial?: CustoOficial | null }) {
   const [hovered, setHovered] = useState(false)
+  const [aberto, setAberto] = useState(false)
   const [live, setLive] = useState<LivePriceSummary | null>(null)
   const [breakdown, setBreakdown] = useState<LivePriceBreakdown | null>(null)
   const [loadingBreakdown, setLoadingBreakdown] = useState(false)
@@ -411,12 +586,22 @@ function PriceBubble({ anuncio, resumo, statusCor, statusLabel }: { anuncio: Anu
     return () => { ativo = false }
   }, [hovered, resumo, breakdown, loadingBreakdown, anuncio.id])
 
-  const precoOriginal = live?.cheio ?? (anuncio.preco_original || anuncio.preco)
-  const precoPromocional = live?.promocional ?? anuncio.preco
-  const temPromo = precoPromocional < precoOriginal - 0.01
+  const resumoMargem = montarResumoMargem(anuncio, resumo, live, breakdown, custoOficial)
 
   return (
+    <>
+    {aberto && (
+      <div
+        onClick={() => setAberto(false)}
+        style={{ position: 'fixed', inset: 0, background: 'rgba(16,24,40,.45)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '1rem' }}
+      >
+        <div onClick={e => e.stopPropagation()} style={{ width: '100%', maxWidth: 380 }}>
+          <ResumoTooltip anuncio={anuncio} resumo={resumo} custoOficial={custoOficial} editavel modal onSaved={onPriceChanged} onClose={() => setAberto(false)} />
+        </div>
+      </div>
+    )}
     <div
+      onClick={() => setAberto(v => !v)}
       style={{
         position: 'relative',
         minWidth: '148px',
@@ -424,34 +609,36 @@ function PriceBubble({ anuncio, resumo, statusCor, statusLabel }: { anuncio: Anu
         padding: '.42rem .7rem .48rem',
         borderRadius: '10px',
         background: '#fff',
-        border: '1px solid #9fc2ff',
-        boxShadow: hovered ? '0 10px 24px rgba(52,131,250,.18)' : 'none',
+        border: aberto ? '1px solid #5b3cc4' : '1px solid #9fc2ff',
+        boxShadow: (hovered || aberto) ? '0 10px 24px rgba(52,131,250,.18)' : 'none',
+        cursor: 'pointer',
       }}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
     >
-      {temPromo && (
+      {resumoMargem.temPromo && (
         <div style={{ display: 'flex', alignItems: 'center', gap: '.35rem', justifyContent: 'flex-start', marginBottom: '.1rem' }}>
           <span style={{ fontSize: '.75rem' }}>🏷️</span>
-          <span style={{ fontSize: '0.78rem', color: '#98a2b3', textDecoration: 'line-through', fontWeight: 700 }}>{brl(precoOriginal)}</span>
+          <span style={{ fontSize: '0.78rem', color: '#98a2b3', textDecoration: 'line-through', fontWeight: 700 }}>{brl(resumoMargem.precoOriginal)}</span>
         </div>
       )}
-      <div style={{ display: 'flex', alignItems: 'baseline', gap: '.42rem', flexWrap: 'wrap' }}>
-        <span style={{ fontWeight: 800, fontSize: '1.02rem', color: '#1a1a1a' }}>{brl(precoPromocional)}</span>
-        {resumo && (
-          <>
-            <span style={{ color: '#d0d5dd', fontWeight: 700 }}>|</span>
-            <span style={{ fontSize: '.92rem', color: resumo.margem >= 0 ? '#3483fa' : '#b42318', fontWeight: 800 }}>
-              {brl(resumo.margem)}
-            </span>
-            <span style={{ fontSize: '.72rem', color: resumo.margem >= 0 ? '#3483fa' : '#b42318', fontWeight: 700 }}>
-              ({resumo.margemPct.toFixed(2)} %)
-            </span>
-          </>
-        )}
+      <div style={{ fontWeight: 800, fontSize: '1.02rem', color: '#1a1a1a' }}>{brl(resumoMargem.precoPromocional)}</div>
+      <div style={{ marginTop: '.38rem', display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: '.38rem' }}>
+        <BubbleMetric label="MC R$" value={resumoMargem.margem != null ? brl(resumoMargem.margem) : '--'} cor={resumoMargem.margem != null && resumoMargem.margem < 0 ? '#b42318' : '#067647'} />
+        <BubbleMetric label="MC %" value={resumoMargem.margemPct != null ? `${resumoMargem.margemPct.toFixed(2)}%` : '--'} cor={resumoMargem.margemPct != null && resumoMargem.margemPct < 0 ? '#b42318' : '#067647'} />
       </div>
       <div style={{ marginTop: '.08rem', fontSize: '0.72rem', fontWeight: 700, color: statusCor, textAlign: 'right' }}>{statusLabel}</div>
-      {hovered && <ResumoTooltip anuncio={anuncio} resumo={resumo} />}
+      {hovered && !aberto && <ResumoTooltip anuncio={anuncio} resumo={resumo} custoOficial={custoOficial} />}
+    </div>
+    </>
+  )
+}
+
+function BubbleMetric({ label, value, cor }: { label: string; value: string; cor: string }) {
+  return (
+    <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 8, padding: '.34rem .45rem' }}>
+      <div style={{ fontSize: '.62rem', color: '#98a2b3', fontWeight: 700 }}>{label}</div>
+      <div style={{ fontSize: '.82rem', color: cor, fontWeight: 800, lineHeight: 1.2 }}>{value}</div>
     </div>
   )
 }

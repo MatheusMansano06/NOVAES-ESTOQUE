@@ -68,9 +68,30 @@ interface Revisao {
   numero_inbound?: string
   status: string
   revisao_salva_em?: string
+  ultimo_item_separacao?: number | null
   resumo: { total: number; encontrados: number; nao_encontrados: number; com_falta: number }
   itens: ItemRevisao[]
 }
+
+// Kit da Olist: produto montado a partir de outros. A Olist não deixa baixar o
+// estoque do kit direto — a baixa é feita em cada componente (anúncio unitário).
+interface KitComponente {
+  produto_id: string
+  sku: string
+  descricao: string
+  estoque_atual?: number | null
+  quantidade_no_kit: number
+  quantidade_sugerida: number
+}
+interface KitInfo {
+  eh_kit: true
+  nome_kit?: string
+  sku_kit?: string
+  qtd_full: number
+  componentes: KitComponente[]
+}
+type KitEstado = 'carregando' | 'nao' | KitInfo
+type KitBalanceModal = { item: ItemRevisao; kit: KitInfo }
 
 export function EmbaldesManager({ modoSeparacao = false }: { modoSeparacao?: boolean } = {}) {
   const [inbounds, setInbounds] = useState<Inbound[]>([])
@@ -82,7 +103,7 @@ export function EmbaldesManager({ modoSeparacao = false }: { modoSeparacao?: boo
   const [arquivo, setArquivo] = useState<File | null>(null)
   const [inboundSelecionado, setInboundSelecionado] = useState<Inbound | null>(null)
   const [aba, setAba] = useState<Aba>('processando')
-  const [visao, setVisao] = useState<VisaoInbound>('upload')
+  const [visao, setVisao] = useState<VisaoInbound>(modoSeparacao ? 'lista' : 'upload')
   const [editandoData, setEditandoData] = useState<number | null>(null)
   const [novaData, setNovaData] = useState('')
   const [editandoNome, setEditandoNome] = useState<number | null>(null)
@@ -111,6 +132,7 @@ export function EmbaldesManager({ modoSeparacao = false }: { modoSeparacao?: boo
   const [vinculandoProduto, setVinculandoProduto] = useState(false)
   // Balanço de estoque
   const [balanceandoItem, setBalanceandoItem] = useState<ItemRevisao | null>(null)
+  const [balanceandoKit, setBalanceandoKit] = useState<KitBalanceModal | null>(null)
   const [qtdRealConferida, setQtdRealConferida] = useState('')
   const [balanceandoId, setBalanceandoId] = useState<number | null>(null)
   // Itens em espera (bloqueados por fatores externos)
@@ -119,6 +141,14 @@ export function EmbaldesManager({ modoSeparacao = false }: { modoSeparacao?: boo
   // Modo "Lista de separação": um produto por vez, em tela cheia
   const [sepIndex, setSepIndex] = useState(0)
   const [skuImg, setSkuImg] = useState<Record<string, string>>({})
+  // Filtro do picker: mostrar só os itens que tiveram a qtd do FULL alterada
+  const [soEditados, setSoEditados] = useState(false)
+  // Kit por item (cache da detecção), quantidade por componente e estado da baixa
+  const [kitPorItem, setKitPorItem] = useState<Record<number, KitEstado>>({})
+  const [kitQtds, setKitQtds] = useState<Record<string, string>>({})
+  const [kitRealQtds, setKitRealQtds] = useState<Record<string, string>>({})
+  const [baixandoKit, setBaixandoKit] = useState(false)
+  const [kitResultado, setKitResultado] = useState<Record<number, any[]>>({})
 
   // Mapa SKU -> imagem do anúncio (ML), usado só no modo separação p/ mostrar a foto.
   useEffect(() => {
@@ -126,12 +156,12 @@ export function EmbaldesManager({ modoSeparacao = false }: { modoSeparacao?: boo
     let cancelado = false
     ;(async () => {
       try {
-        const r = await api.get('/ml/anuncios?status=todos&offset=0&limit=1000')
+        // Endpoint dedicado: mapa SKU->imagem de TODO o cache do ML (sem o teto de 50
+        // da listagem paginada de anúncios, que fazia a maioria das fotos sumir).
+        const r = await api.get('/ml/imagens')
         const mapa: Record<string, string> = {}
-        for (const a of r.data?.anuncios || []) {
-          const sku = String(a.sku || '').trim().toUpperCase()
-          const img = a.imagem_principal || a.thumbnail
-          if (sku && img) mapa[sku] = img
+        for (const [sku, img] of Object.entries(r.data?.imagens || {})) {
+          if (sku && img) mapa[String(sku).trim().toUpperCase()] = String(img)
         }
         if (!cancelado) setSkuImg(mapa)
       } catch { /* foto é opcional — não trava as ações */ }
@@ -160,6 +190,70 @@ export function EmbaldesManager({ modoSeparacao = false }: { modoSeparacao?: boo
       document.removeEventListener('visibilitychange', recarregarAoVoltar)
     }
   }, [visao])
+
+  // Auto-detecção de kit: ao exibir um item no picker, verifica se é kit na Olist
+  // (cacheado por item). Se for, o picker mostra os componentes p/ baixar cada um.
+  useEffect(() => {
+    if (!modoSeparacao || !revisao) return
+    const lista = soEditados ? revisao.itens.filter((x) => x.tem_historico_full) : revisao.itens
+    if (lista.length === 0) return
+    const it = lista[Math.min(sepIndex, lista.length - 1)]
+    if (!it) return
+    const jaBaixado = it.baixa_aplicada === 1 || !!itensBaixados[it.item_id]
+    const vinc = it.vinculado === 1 || !!it.olist_produto_id
+    if (jaBaixado || !vinc) return
+    if (kitPorItem[it.item_id] !== undefined) return // já checado/carregando
+    setKitPorItem((prev) => ({ ...prev, [it.item_id]: 'carregando' }))
+    api.get(`/embaldes/${revisao.embale_id}/itens/${it.item_id}/kit`)
+      .then((r) => {
+        const d = r.data
+        if (d && d.eh_kit) {
+          setKitPorItem((prev) => ({ ...prev, [it.item_id]: d as KitInfo }))
+          setKitQtds((prev) => {
+            const novo = { ...prev }
+            for (const c of (d.componentes || [])) {
+              if (novo[c.produto_id] === undefined) novo[c.produto_id] = String(c.quantidade_sugerida ?? 0)
+            }
+            return novo
+          })
+        } else {
+          setKitPorItem((prev) => ({ ...prev, [it.item_id]: 'nao' }))
+        }
+      })
+      .catch(() => setKitPorItem((prev) => ({ ...prev, [it.item_id]: 'nao' })))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [modoSeparacao, revisao?.embale_id, sepIndex, soEditados])
+
+  // Baixa os componentes do kit na Olist (cada um vira uma saída). Retorna true se todos OK.
+  const baixarKitComponentes = async (it: ItemRevisao, kit: KitInfo): Promise<boolean> => {
+    if (!revisao) return false
+    const componentes = kit.componentes.map((c) => ({
+      produto_id: c.produto_id,
+      sku: c.sku,
+      quantidade: Math.max(0, Number(kitQtds[c.produto_id] ?? c.quantidade_sugerida) || 0),
+    }))
+    const resumo = componentes.map((c) => `• ${c.sku || c.produto_id}: ${c.quantidade}`).join('\n')
+    if (!confirm(`Baixar os componentes do kit "${it.titulo_anuncio}" na Olist?\n\n${resumo}\n\nNão há volta.`)) return false
+    try {
+      setBaixandoKit(true)
+      const r = await api.post(`/embaldes/${revisao.embale_id}/itens/${it.item_id}/baixar-kit`, { componentes })
+      const d = r.data
+      setKitResultado((prev) => ({ ...prev, [it.item_id]: d.resultados || [] }))
+      if (d.todos_ok) {
+        setItensBaixados((prev) => ({ ...prev, [it.item_id]: 1 }))
+        setMessage(d.mensagem || 'Componentes do kit baixados na Olist')
+        return true
+      }
+      setMessage(d.mensagem || 'Alguns componentes do kit falharam')
+      return false
+    } catch (erro: any) {
+      const dados = erro.response?.data || {}
+      setMessage('Erro: ' + (dados.erro || dados.error || String(erro)) + (dados.detalhe ? ` — ${dados.detalhe}` : ''))
+      return false
+    } finally {
+      setBaixandoKit(false)
+    }
+  }
 
   const carregarInbounds = async () => {
     try {
@@ -345,12 +439,78 @@ export function EmbaldesManager({ modoSeparacao = false }: { modoSeparacao?: boo
         janelaWhats.close()
       }
 
-      setBalanceandoItem(null)
-      setQtdRealConferida('')
+      fecharBalanceamentos()
       await carregarRevisao(embaleId)
     } catch (erro: any) {
       if (janelaWhats) janelaWhats.close()
-      setMessage('Erro: ' + (erro.response?.data?.erro || String(erro)))
+      const dados = erro.response?.data || {}
+      const base = dados.erro || dados.error || String(erro)
+      setMessage('Erro: ' + base + (dados.detalhe ? ` — ${dados.detalhe}` : ''))
+    } finally {
+      setBalanceandoId(null)
+    }
+  }
+
+  const balancearKit = async (item: ItemRevisao, kit: KitInfo, embaleId: number): Promise<boolean> => {
+    const componentes = kit.componentes.map((c) => {
+      const realTxt = kitRealQtds[c.produto_id]
+      return {
+        produto_id: c.produto_id,
+        sku: c.sku,
+        quantidade_no_kit: c.quantidade_no_kit,
+        quantidade_real: realTxt === '' ? NaN : Number(realTxt),
+        quantidade_baixar: Math.max(0, Number(kitQtds[c.produto_id] ?? c.quantidade_sugerida) || 0),
+        descricao: c.descricao,
+      }
+    })
+    const invalido = componentes.find((c) => !Number.isFinite(c.quantidade_real) || c.quantidade_real < 0)
+    if (invalido) {
+      setMessage(`Informe a quantidade real conferida para todos os componentes do kit.`)
+      return false
+    }
+
+    let janelaWhats: Window | null = null
+    const haveraDivergencia = componentes.some((c) => c.quantidade_real < c.quantidade_baixar)
+    if (haveraDivergencia) janelaWhats = window.open('', '_blank')
+
+    try {
+      setBalanceandoId(item.item_id)
+      const resultado = await api.post(`/embaldes/${embaleId}/itens/${item.item_id}/balancear-kit`, { componentes })
+      const dados = resultado.data || {}
+      setKitResultado((prev) => ({ ...prev, [item.item_id]: dados.resultados || [] }))
+      setMessage(dados.mensagem || 'Balanço dos componentes concluído')
+
+      if (dados.tem_divergencia) {
+        const faltas = (dados.resultados || [])
+          .filter((r: any) => r.status === 'divergencia')
+          .map((r: any) => `- ${r.sku || r.produto_id}: faltam ${r.falta}`)
+          .join('\n')
+        const mensagem =
+          `⚠️ DIVERGÊNCIA NO INBOUND (KIT)\n\n` +
+          `Produto: ${item.titulo_anuncio}\n` +
+          (item.sku_inbound ? `SKU: ${item.sku_inbound}\n` : '') +
+          `Qtd FULL planejada: ${Math.round(item.quantidade_full || 0)} kit(s)\n\n` +
+          `Componentes com falta:\n${faltas || '- conferir manualmente'}`
+        const url = `https://wa.me/${NUMERO_WHATSAPP}?text=${encodeURIComponent(mensagem)}`
+        if (janelaWhats) janelaWhats.location.href = url
+        else window.open(url, '_blank')
+      } else if (janelaWhats) {
+        janelaWhats.close()
+      }
+
+      if (dados.todos_ok) {
+        setItensBaixados((prev) => ({ ...prev, [item.item_id]: Math.round(item.quantidade_full || 0) }))
+      }
+
+      fecharBalanceamentos()
+      await carregarRevisao(embaleId)
+      return !!dados.todos_ok
+    } catch (erro: any) {
+      if (janelaWhats) janelaWhats.close()
+      const dados = erro.response?.data || {}
+      const base = dados.erro || dados.error || String(erro)
+      setMessage('Erro: ' + base + (dados.detalhe ? ` — ${dados.detalhe}` : ''))
+      return false
     } finally {
       setBalanceandoId(null)
     }
@@ -387,7 +547,11 @@ export function EmbaldesManager({ modoSeparacao = false }: { modoSeparacao?: boo
       setFiltroRevisao('todos')
       const resposta = await api.get(`/embaldes/${id}/revisao`)
       setRevisao(resposta.data)
-      setSepIndex(0)
+      // Retoma de onde parou: posiciona no item salvo no banco (se ainda existir).
+      const itensRev: ItemRevisao[] = resposta.data.itens || []
+      const ultimoId = resposta.data.ultimo_item_separacao
+      const idxSalvo = ultimoId != null ? itensRev.findIndex((it) => it.item_id === ultimoId) : -1
+      setSepIndex(idxSalvo >= 0 ? idxSalvo : 0)
       const planejadas: Record<number, string> = {}
       for (const it of resposta.data.itens || []) {
         planejadas[it.item_id] = String(Math.round(it.quantidade_full ?? 0))
@@ -411,6 +575,12 @@ export function EmbaldesManager({ modoSeparacao = false }: { modoSeparacao?: boo
     } finally {
       setCarregandoRevisao(false)
     }
+  }
+
+  // Salva no banco o produto onde a separação parou (retomar de onde parou).
+  // Fire-and-forget: não trava a navegação se a rede falhar.
+  const salvarPosicaoSeparacao = (embaleId: number, itemId: number) => {
+    api.post(`/embaldes/${embaleId}/posicao-separacao`, { item_id: itemId }).catch(() => { /* posição é best-effort */ })
   }
 
   const confirmarBaixa = async () => {
@@ -452,11 +622,14 @@ export function EmbaldesManager({ modoSeparacao = false }: { modoSeparacao?: boo
         setMessage(r.mensagem || 'Baixa aplicada')
         return true
       } else {
-        setMessage(r.mensagem || r.erro || 'Não foi possível baixar')
+        const base = r.mensagem || r.erro || 'Não foi possível baixar'
+        setMessage(base + (r.detalhe ? ` — ${r.detalhe}` : ''))
         return false
       }
     } catch (erro: any) {
-      setMessage('Erro: ' + (erro.response?.data?.erro || String(erro)))
+      const dados = erro.response?.data || {}
+      const base = dados.erro || dados.error || String(erro)
+      setMessage('Erro: ' + base + (dados.detalhe ? ` — ${dados.detalhe}` : ''))
       return false
     } finally {
       setBaixandoItemId(null)
@@ -465,6 +638,26 @@ export function EmbaldesManager({ modoSeparacao = false }: { modoSeparacao?: boo
 
   const abrirBalanceamento = (it: ItemRevisao) => {
     setBalanceandoItem(it)
+    setBalanceandoKit(null)
+    setQtdRealConferida('')
+  }
+
+  const abrirBalanceamentoKit = (it: ItemRevisao, kit: KitInfo) => {
+    setBalanceandoItem(null)
+    setQtdRealConferida('')
+    setBalanceandoKit({ item: it, kit })
+    setKitRealQtds((prev) => {
+      const next = { ...prev }
+      for (const c of kit.componentes) {
+        if (next[c.produto_id] === undefined) next[c.produto_id] = ''
+      }
+      return next
+    })
+  }
+
+  const fecharBalanceamentos = () => {
+    setBalanceandoItem(null)
+    setBalanceandoKit(null)
     setQtdRealConferida('')
   }
 
@@ -487,15 +680,18 @@ export function EmbaldesManager({ modoSeparacao = false }: { modoSeparacao?: boo
       })
       const snapshot: ItemRevisao | undefined = resposta.data.snapshot
       if (snapshot) {
+        // Só chegamos aqui quando a qtd mudou de fato (gera registro no histórico),
+        // então marca tem_historico_full p/ o filtro "Qtd FULL alterada" refletir na hora.
+        const snapshotMarcado: ItemRevisao = { ...snapshot, tem_historico_full: true }
         setRevisao((anterior) => anterior ? {
           ...anterior,
           resumo: {
             ...anterior.resumo,
             com_falta: anterior.itens
-              .map((itemAtual) => itemAtual.item_id === snapshot.item_id ? snapshot : itemAtual)
+              .map((itemAtual) => itemAtual.item_id === snapshotMarcado.item_id ? snapshotMarcado : itemAtual)
               .filter((itemAtual) => itemAtual.tem_falta).length,
           },
-          itens: anterior.itens.map((itemAtual) => itemAtual.item_id === snapshot.item_id ? snapshot : itemAtual),
+          itens: anterior.itens.map((itemAtual) => itemAtual.item_id === snapshotMarcado.item_id ? snapshotMarcado : itemAtual),
         } : anterior)
         setQuantidadesFull((anterior) => ({ ...anterior, [it.item_id]: String(Math.round(snapshot.quantidade_full || 0)) }))
         if (!snapshot.tem_falta) {
@@ -978,8 +1174,18 @@ export function EmbaldesManager({ modoSeparacao = false }: { modoSeparacao?: boo
                   ) : revisao ? (
                     modoSeparacao ? (
                       (() => {
-                        const itens = revisao.itens
+                        const qtdEditados = revisao.itens.filter((x) => x.tem_historico_full).length
+                        // Filtro "só editados": navega direto entre os que tiveram a qtd do FULL alterada.
+                        const itens = soEditados ? revisao.itens.filter((x) => x.tem_historico_full) : revisao.itens
                         const total = itens.length
+                        if (soEditados && total === 0) {
+                          return (
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', alignItems: 'center', padding: '2rem', textAlign: 'center', color: '#777' }}>
+                              <div>Nenhum produto teve a quantidade do FULL alterada ainda.</div>
+                              <button onClick={() => setSoEditados(false)} style={{ padding: '0.55rem 1.1rem', background: '#fff', color: '#1976D2', border: '1px solid #1976D2', borderRadius: '8px', cursor: 'pointer', fontWeight: 700 }}>Ver todos os produtos</button>
+                            </div>
+                          )
+                        }
                         if (total === 0) return <div style={{ padding: '2rem', textAlign: 'center', color: '#999' }}>Este inbound não tem itens.</div>
                         const idx = Math.min(sepIndex, total - 1)
                         const it = itens[idx]
@@ -992,15 +1198,41 @@ export function EmbaldesManager({ modoSeparacao = false }: { modoSeparacao?: boo
                         const vinculado = it.vinculado === 1 || !!it.olist_produto_id
                         const img = skuImg[String(it.sku_inbound || '').trim().toUpperCase()]
                         const quantidadeEditavel = quantidadesFull[it.item_id] ?? String(Math.round(it.quantidade_full || 0))
-                        const proximo = () => setSepIndex((i) => Math.min(i + 1, total - 1))
-                        const anterior = () => setSepIndex((i) => Math.max(i - 1, 0))
+                        const irPara = (novoIdx: number) => {
+                          const alvo = itens[novoIdx]
+                          if (alvo) salvarPosicaoSeparacao(revisao.embale_id, alvo.item_id)
+                          setSepIndex(novoIdx)
+                        }
+                        const proximo = () => irPara(Math.min(idx + 1, total - 1))
+                        const anterior = () => irPara(Math.max(idx - 1, 0))
                         const resolvidos = itens.filter((x) => x.baixa_aplicada === 1 || !!itensBaixados[x.item_id] || !!itensEmEspera[x.item_id]).length
                         return (
                           <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                            {/* Filtro: só os que tive a qtd do FULL alterada (retoma direto neles) */}
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
+                              <button
+                                onClick={() => { setSoEditados((v) => !v); setSepIndex(0) }}
+                                disabled={!soEditados && qtdEditados === 0}
+                                title={qtdEditados === 0 ? 'Nenhum produto teve a quantidade do FULL alterada ainda' : 'Mostrar só os produtos com a quantidade do FULL alterada'}
+                                style={{
+                                  padding: '0.5rem 1rem', borderRadius: '999px', fontWeight: 700, fontSize: '0.85rem',
+                                  cursor: (!soEditados && qtdEditados === 0) ? 'not-allowed' : 'pointer',
+                                  border: `1px solid ${soEditados ? '#0d47a1' : '#90caf9'}`,
+                                  background: soEditados ? '#0d47a1' : '#fff',
+                                  color: soEditados ? '#fff' : (qtdEditados === 0 ? '#aaa' : '#0d47a1'),
+                                }}
+                              >
+                                ✏️ Qtd FULL alterada ({qtdEditados})
+                              </button>
+                              {soEditados && (
+                                <span style={{ fontSize: '0.82rem', color: '#666' }}>Mostrando só os editados. <button onClick={() => { setSoEditados(false); setSepIndex(0) }} style={{ background: 'none', border: 'none', color: '#1976D2', cursor: 'pointer', fontWeight: 700, padding: 0 }}>Ver todos</button></span>
+                              )}
+                            </div>
+
                             {/* Barra de progresso */}
                             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '1rem', flexWrap: 'wrap' }}>
                               <div style={{ fontWeight: 700, color: '#0d47a1', fontSize: '1.05rem' }}>
-                                Produto {idx + 1} de {total}
+                                Produto {idx + 1} de {total}{soEditados ? ' (editados)' : ''}
                               </div>
                               <div style={{ fontSize: '0.85rem', color: '#666' }}>
                                 {resolvidos} de {total} resolvidos
@@ -1103,22 +1335,78 @@ export function EmbaldesManager({ modoSeparacao = false }: { modoSeparacao?: boo
                                     <span style={{ padding: '0.6rem 1rem', color: '#2e7d32', fontWeight: 700, background: '#e8f5e9', borderRadius: '8px' }}>✓ Estoque retirado</span>
                                   ) : naoAchado ? (
                                     <button onClick={() => abrirVinculo(it)} style={{ padding: '0.7rem 1.4rem', background: '#fff', color: '#ef6c00', border: '1px solid #ef6c00', borderRadius: '8px', cursor: 'pointer', fontWeight: 700, fontSize: '0.95rem' }}>Vincular na Olist</button>
-                                  ) : (
-                                    <>
-                                      {podeBalancear && (
-                                        <button onClick={() => abrirBalanceamento(it)} style={{ padding: '0.7rem 1.4rem', background: '#fff', color: '#d32f2f', border: '1px solid #d32f2f', borderRadius: '8px', cursor: 'pointer', fontWeight: 700, fontSize: '0.95rem' }}>Balanço</button>
-                                      )}
-                                      {podeBaixar && (
-                                        <button
-                                          onClick={async () => { const ok = await baixarItem(it); if (ok) proximo() }}
-                                          disabled={baixandoItemId === it.item_id}
-                                          style={{ padding: '0.7rem 1.4rem', background: '#1976D2', color: '#fff', border: 'none', borderRadius: '8px', cursor: baixandoItemId === it.item_id ? 'wait' : 'pointer', fontWeight: 700, fontSize: '0.95rem' }}
-                                        >
-                                          {baixandoItemId === it.item_id ? 'Baixando...' : 'Baixar na Olist'}
-                                        </button>
-                                      )}
-                                    </>
-                                  )}
+                                  ) : (() => {
+                                    const kit = kitPorItem[it.item_id]
+                                    if (kit === 'carregando') {
+                                      return <span style={{ padding: '0.6rem 1rem', color: '#1976D2', fontWeight: 700, fontSize: '0.9rem' }}>Verificando se é kit…</span>
+                                    }
+                                    if (kit && typeof kit === 'object') {
+                                      const res = kitResultado[it.item_id] || []
+                                      return (
+                                        <div style={{ width: '100%', border: '1px dashed #1976D2', borderRadius: '10px', padding: '0.9rem', background: '#f3f8ff' }}>
+                                          <div style={{ fontWeight: 800, color: '#0d47a1', marginBottom: '0.25rem' }}>🎁 É um kit — trabalhe pelos componentes unitários</div>
+                                          <div style={{ fontSize: '0.82rem', color: '#555', marginBottom: '0.6rem' }}>
+                                            A Olist não deixa mexer no kit direto. Faça a baixa ou o balanço nos componentes abaixo.
+                                          </div>
+                                          {kit.componentes.map((c) => {
+                                            const r = res.find((x) => String(x.produto_id) === String(c.produto_id))
+                                            return (
+                                              <div key={c.produto_id} style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', flexWrap: 'wrap', padding: '0.45rem 0', borderBottom: '1px solid #e3eefc' }}>
+                                                <div style={{ flex: '1 1 220px', minWidth: 0 }}>
+                                                  <div style={{ fontWeight: 700, fontSize: '0.9rem' }}>{c.descricao || c.sku || c.produto_id}</div>
+                                                  <div style={{ fontSize: '0.78rem', color: '#666' }}>SKU: {c.sku || '—'} · {c.quantidade_no_kit}× por kit{c.estoque_atual != null ? ` · estoque Olist ${c.estoque_atual}` : ''}</div>
+                                                </div>
+                                                <label style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.82rem', color: '#555', fontWeight: 700 }}>
+                                                  Baixar
+                                                  <input
+                                                    type="number" min="0" step="1"
+                                                    value={kitQtds[c.produto_id] ?? String(c.quantidade_sugerida)}
+                                                    onChange={(e) => setKitQtds({ ...kitQtds, [c.produto_id]: e.target.value })}
+                                                    style={{ width: '90px', padding: '0.35rem', borderRadius: '6px', border: '1px solid #90caf9', textAlign: 'center', fontWeight: 800 }}
+                                                  />
+                                                </label>
+                                                {r && (r.sucesso
+                                                  ? <span style={{ color: '#2e7d32', fontWeight: 700, fontSize: '0.8rem' }}>✓ baixado</span>
+                                                  : <span style={{ color: '#c62828', fontWeight: 700, fontSize: '0.8rem' }} title={r.detalhe || ''}>✗ falhou</span>)}
+                                              </div>
+                                            )
+                                          })}
+                                          <div style={{ display: 'flex', gap: '0.6rem', flexWrap: 'wrap', marginTop: '0.7rem' }}>
+                                            <button
+                                              onClick={() => abrirBalanceamentoKit(it, kit)}
+                                              disabled={balanceandoId === it.item_id}
+                                              style={{ padding: '0.7rem 1.4rem', background: '#fff', color: '#d32f2f', border: '1px solid #d32f2f', borderRadius: '8px', cursor: balanceandoId === it.item_id ? 'wait' : 'pointer', fontWeight: 700, fontSize: '0.95rem' }}
+                                            >
+                                              {balanceandoId === it.item_id ? 'Abrindo…' : 'Balancear componentes'}
+                                            </button>
+                                            <button
+                                              onClick={async () => { const ok = await baixarKitComponentes(it, kit); if (ok) proximo() }}
+                                              disabled={baixandoKit}
+                                              style={{ padding: '0.7rem 1.4rem', background: '#1976D2', color: '#fff', border: 'none', borderRadius: '8px', cursor: baixandoKit ? 'wait' : 'pointer', fontWeight: 700, fontSize: '0.95rem' }}
+                                            >
+                                              {baixandoKit ? 'Baixando componentes…' : 'Baixar componentes na Olist'}
+                                            </button>
+                                          </div>
+                                        </div>
+                                      )
+                                    }
+                                    return (
+                                      <>
+                                        {podeBalancear && (
+                                          <button onClick={() => abrirBalanceamento(it)} style={{ padding: '0.7rem 1.4rem', background: '#fff', color: '#d32f2f', border: '1px solid #d32f2f', borderRadius: '8px', cursor: 'pointer', fontWeight: 700, fontSize: '0.95rem' }}>Balanço</button>
+                                        )}
+                                        {podeBaixar && (
+                                          <button
+                                            onClick={async () => { const ok = await baixarItem(it); if (ok) proximo() }}
+                                            disabled={baixandoItemId === it.item_id}
+                                            style={{ padding: '0.7rem 1.4rem', background: '#1976D2', color: '#fff', border: 'none', borderRadius: '8px', cursor: baixandoItemId === it.item_id ? 'wait' : 'pointer', fontWeight: 700, fontSize: '0.95rem' }}
+                                          >
+                                            {baixandoItemId === it.item_id ? 'Baixando...' : 'Baixar na Olist'}
+                                          </button>
+                                        )}
+                                      </>
+                                    )
+                                  })()}
                                 </div>
                               </div>
                             </div>
@@ -1465,9 +1753,105 @@ export function EmbaldesManager({ modoSeparacao = false }: { modoSeparacao?: boo
       )}
 
       {/* Modal de Balanço de Estoque */}
+      {balanceandoKit && (
+        <div
+          onClick={fecharBalanceamentos}
+          style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{ background: '#fff', borderRadius: '8px', padding: '1.5rem', width: '720px', maxWidth: '94vw', maxHeight: '85vh', overflowY: 'auto', boxShadow: '0 10px 40px rgba(0,0,0,0.3)' }}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start', marginBottom: '1rem' }}>
+              <h3 style={{ margin: 0, color: '#d32f2f' }}>Balancear Kit por Componentes</h3>
+              <button onClick={fecharBalanceamentos} style={{ background: 'none', border: 'none', fontSize: '1.4rem', cursor: 'pointer', color: '#999', lineHeight: 1 }}>×</button>
+            </div>
+
+            <div style={{ background: '#fff3e0', padding: '0.75rem', borderRadius: '4px', marginBottom: '1rem', borderLeft: '4px solid #d32f2f' }}>
+              <div style={{ fontSize: '0.9rem', fontWeight: 'bold', marginBottom: '0.5rem' }}>Kit detectado na Olist</div>
+              <div style={{ fontSize: '0.85rem', color: '#666' }}>
+                <strong>{balanceandoKit.item.titulo_anuncio}</strong>
+                <br />SKU: {balanceandoKit.item.sku_inbound || balanceandoKit.kit.sku_kit || '—'}
+              </div>
+            </div>
+
+            <div style={{ display: 'grid', gap: '0.75rem', marginBottom: '1rem' }}>
+              {balanceandoKit.kit.componentes.map((c) => {
+                const real = kitRealQtds[c.produto_id]
+                const baixar = kitQtds[c.produto_id] ?? String(c.quantidade_sugerida)
+                const realNum = real === '' ? null : Number(real)
+                const baixarNum = Math.max(0, Number(baixar) || 0)
+                const divergente = realNum !== null && Number.isFinite(realNum) && realNum < baixarNum
+                return (
+                  <div key={c.produto_id} style={{ border: '1px solid #eee', borderRadius: '8px', padding: '0.9rem', background: divergente ? '#fff8f6' : '#fafcff' }}>
+                    <div style={{ fontWeight: 700, marginBottom: '0.2rem' }}>{c.descricao || c.sku || c.produto_id}</div>
+                    <div style={{ fontSize: '0.8rem', color: '#666', marginBottom: '0.75rem' }}>
+                      SKU: {c.sku || '—'} · {c.quantidade_no_kit}x por kit · estoque Olist atual: {c.estoque_atual ?? '—'}
+                    </div>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '0.75rem' }}>
+                      <label style={{ display: 'grid', gap: '0.25rem', fontSize: '0.8rem', fontWeight: 700, color: '#555' }}>
+                        Vai pro FULL
+                        <input
+                          type="number"
+                          min="0"
+                          step="1"
+                          value={baixar}
+                          onChange={(e) => setKitQtds({ ...kitQtds, [c.produto_id]: e.target.value })}
+                          style={{ padding: '0.55rem', borderRadius: '6px', border: '1px solid #bbb', fontWeight: 800 }}
+                        />
+                      </label>
+                      <label style={{ display: 'grid', gap: '0.25rem', fontSize: '0.8rem', fontWeight: 700, color: '#555' }}>
+                        Quantidade real no físico
+                        <input
+                          type="number"
+                          min="0"
+                          step="1"
+                          value={real}
+                          onChange={(e) => setKitRealQtds({ ...kitRealQtds, [c.produto_id]: e.target.value })}
+                          placeholder={c.estoque_atual != null ? String(c.estoque_atual) : '0'}
+                          style={{ padding: '0.55rem', borderRadius: '6px', border: '2px solid #d32f2f', fontWeight: 800 }}
+                        />
+                      </label>
+                    </div>
+                    {divergente && (
+                      <div style={{ marginTop: '0.5rem', fontSize: '0.8rem', color: '#c62828', fontWeight: 700 }}>
+                        Faltam {baixarNum - (realNum || 0)} un deste componente para baixar o FULL.
+                      </div>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+
+            <div style={{ background: '#f6f7f9', padding: '0.8rem', borderRadius: '6px', marginBottom: '1rem', fontSize: '0.84rem', color: '#555' }}>
+              O sistema vai balancear cada anúncio unitário com a quantidade real informada e, se houver saldo suficiente, já descontar a quantidade que vai para o FULL.
+            </div>
+
+            <div style={{ display: 'flex', gap: '0.7rem' }}>
+              <button
+                onClick={async () => {
+                  const ok = await balancearKit(balanceandoKit.item, balanceandoKit.kit, revisandoId || 0)
+                  if (ok && modoSeparacao) proximo()
+                }}
+                disabled={balanceandoId !== null}
+                style={{ flex: 1, padding: '0.7rem', background: '#d32f2f', color: '#fff', border: 'none', borderRadius: '4px', cursor: balanceandoId !== null ? 'not-allowed' : 'pointer', fontWeight: 'bold', opacity: balanceandoId !== null ? 0.6 : 1 }}
+              >
+                {balanceandoId !== null ? 'Processando...' : 'Confirmar Balanço dos Componentes'}
+              </button>
+              <button
+                onClick={fecharBalanceamentos}
+                style={{ flex: 1, padding: '0.7rem', background: '#f5f5f5', color: '#666', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold' }}
+              >
+                Cancelar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {balanceandoItem && (
         <div
-          onClick={() => { setBalanceandoItem(null); setQtdRealConferida('') }}
+          onClick={fecharBalanceamentos}
           style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}
         >
           <div
@@ -1476,7 +1860,7 @@ export function EmbaldesManager({ modoSeparacao = false }: { modoSeparacao?: boo
           >
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start', marginBottom: '1rem' }}>
               <h3 style={{ margin: 0, color: '#d32f2f' }}>Balancear Estoque</h3>
-              <button onClick={() => { setBalanceandoItem(null); setQtdRealConferida('') }} style={{ background: 'none', border: 'none', fontSize: '1.4rem', cursor: 'pointer', color: '#999', lineHeight: 1 }}>×</button>
+              <button onClick={fecharBalanceamentos} style={{ background: 'none', border: 'none', fontSize: '1.4rem', cursor: 'pointer', color: '#999', lineHeight: 1 }}>×</button>
             </div>
 
             <div style={{ background: '#fff3e0', padding: '0.75rem', borderRadius: '4px', marginBottom: '1rem', borderLeft: '4px solid #d32f2f' }}>
@@ -1562,7 +1946,7 @@ export function EmbaldesManager({ modoSeparacao = false }: { modoSeparacao?: boo
                 {balanceandoId !== null ? 'Processando...' : 'Confirmar Balanço'}
               </button>
               <button
-                onClick={() => { setBalanceandoItem(null); setQtdRealConferida('') }}
+                onClick={fecharBalanceamentos}
                 style={{ flex: 1, padding: '0.7rem', background: '#f5f5f5', color: '#666', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold' }}
               >
                 Cancelar
