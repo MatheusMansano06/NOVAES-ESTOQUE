@@ -1563,7 +1563,7 @@ function App() {
     </AppShell>
   )
 
-  if (pagina === 'bemvindo') {
+  if (false && pagina === 'bemvindo') {
     const features = [
       { titulo: 'Turno rastreado', texto: 'Cada ação fica salva com o nome de quem operou.' },
       { titulo: 'Master liberado', texto: 'PIN numérico para gestão, histórico e cadastro de pessoas.' },
@@ -1852,9 +1852,31 @@ function App() {
               </p>
             </div>
 
+            <select
+              value={operadorSelecionadoId}
+              onChange={(e) => setOperadorSelecionadoId(e.target.value)}
+              disabled={operadoresLoading || loginLoading}
+              style={{
+                width: '100%',
+                padding: '1rem',
+                borderRadius: '10px',
+                border: '2px solid #cfe0ff',
+                fontSize: '1rem',
+                color: '#0b2050',
+                background: '#fff',
+                outline: 'none',
+              }}
+            >
+              <option value="">Selecionar operador</option>
+              {operadoresDisponiveis.map((operador) => (
+                <option key={operador.id} value={String(operador.id)}>{operador.nome}</option>
+              ))}
+            </select>
+
             <button
               type="button"
-              onClick={() => setPagina('inicial')}
+              onClick={entrarComoOperador}
+              disabled={operadoresLoading || loginLoading || !operadorSelecionadoId}
               style={{
                 width: '100%',
                 padding: '1rem',
@@ -1864,15 +1886,75 @@ function App() {
                 borderRadius: '10px',
                 fontSize: '1.05rem',
                 fontWeight: 800,
-                cursor: 'pointer',
+                cursor: operadoresLoading || loginLoading || !operadorSelecionadoId ? 'not-allowed' : 'pointer',
+                opacity: operadoresLoading || loginLoading || !operadorSelecionadoId ? 0.65 : 1,
                 boxShadow: '0 12px 26px rgba(31, 111, 255, 0.35)',
                 transition: 'transform 0.12s ease, box-shadow 0.12s ease'
               }}
-              onMouseEnter={(e) => { const el = e.currentTarget; el.style.transform = 'translateY(-1px)'; el.style.boxShadow = '0 16px 32px rgba(31, 111, 255, 0.42)' }}
-              onMouseLeave={(e) => { const el = e.currentTarget; el.style.transform = 'none'; el.style.boxShadow = '0 12px 26px rgba(31, 111, 255, 0.35)' }}
+              onMouseEnter={(e) => {
+                if (!operadoresLoading && !loginLoading && operadorSelecionadoId) {
+                  const el = e.currentTarget
+                  el.style.transform = 'translateY(-1px)'
+                  el.style.boxShadow = '0 16px 32px rgba(31, 111, 255, 0.42)'
+                }
+              }}
+              onMouseLeave={(e) => {
+                const el = e.currentTarget
+                el.style.transform = 'none'
+                el.style.boxShadow = '0 12px 26px rgba(31, 111, 255, 0.35)'
+              }}
             >
-              Entrar
+              {operadoresLoading ? 'Carregando operadores...' : 'Continuar'}
             </button>
+
+            <div style={{ display: 'grid', gap: '0.75rem', paddingTop: '0.25rem', borderTop: '1px solid #e8edf5' }}>
+              <div style={{ fontSize: '0.9rem', fontWeight: 700, color: '#0b2050' }}>
+                Acesso master
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr auto', gap: '0.65rem' }}>
+                <input
+                  type="password"
+                  inputMode="numeric"
+                  pattern="[0-9]*"
+                  maxLength={10}
+                  placeholder="PIN numérico"
+                  value={masterPin}
+                  onChange={(e) => setMasterPin(e.target.value.replace(/\D/g, ''))}
+                  style={{
+                    width: '100%',
+                    padding: '0.95rem 1rem',
+                    borderRadius: '10px',
+                    border: '1px solid #cfe0ff',
+                    fontSize: '0.98rem',
+                    color: '#0b2050',
+                    outline: 'none',
+                  }}
+                />
+                <button
+                  type="button"
+                  onClick={entrarComoMaster}
+                  disabled={loginLoading}
+                  style={{
+                    padding: '0.95rem 1rem',
+                    background: '#12357a',
+                    color: '#fff',
+                    border: 'none',
+                    borderRadius: '10px',
+                    fontSize: '0.95rem',
+                    fontWeight: 800,
+                    cursor: loginLoading ? 'wait' : 'pointer',
+                  }}
+                >
+                  {loginLoading ? '...' : 'Master'}
+                </button>
+              </div>
+            </div>
+
+            {loginErro && (
+              <div style={{ textAlign: 'center', fontSize: '0.85rem', color: '#c62828', fontWeight: 700 }}>
+                {loginErro}
+              </div>
+            )}
 
             <div style={{ textAlign: 'center', fontSize: '0.85rem', color: '#98a2b3' }}>
               Precisa de ajuda? <span style={{ color: '#1f6fff', fontWeight: 600 }}>Fale com o suporte</span>
