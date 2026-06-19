@@ -2965,14 +2965,15 @@ async def kit_componentes_embale(request: Request):
         # para descobrir onde a composição/kit está representada na API v3.
         if request.query_params.get("debug") and item.olist_produto_id:
             detalhe = olist.obter_detalhes_completo(str(item.olist_produto_id)) or {}
-            achados = {k: detalhe.get(k) for k in detalhe.keys()
-                       if any(t in k.lower() for t in ("kit", "compos", "estrut", "produc", "tipo"))}
             return JSONResponse({
                 "_debug": True,
                 "produto_id": item.olist_produto_id,
+                "sku_item": item.olist_sku,
                 "tipo": detalhe.get("tipo"),
-                "chaves": sorted(list(detalhe.keys())),
-                "campos_relevantes": achados,
+                "produtoPai": detalhe.get("produtoPai"),
+                "variacoes": detalhe.get("variacoes"),
+                "kit": detalhe.get("kit"),
+                "descricao": detalhe.get("descricao"),
             })
 
         if not sku:
