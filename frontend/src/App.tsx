@@ -1492,17 +1492,6 @@ function App() {
 
   const topStatuses: ShellStatusItem[] = [
     {
-      label: 'Operador',
-      value: operadorSessao?.operadorNome || 'Sem acesso',
-      tone: operadorSessao ? 'positive' : 'warning',
-      onClick: operadorSessao ? trocarOperador : undefined,
-    },
-    {
-      label: 'Perfil',
-      value: operadorSessao?.role === 'master' ? 'Master' : 'Operador',
-      tone: operadorSessao?.role === 'master' ? 'warning' : 'neutral',
-    },
-    {
       label: 'Mercado Livre',
       value: mlConectado ? 'Conectado' : 'Pendente',
       tone: mlConectado ? 'positive' : 'warning',
@@ -1557,6 +1546,9 @@ function App() {
       subtitle={subtitle}
       navGroups={navGroups}
       statuses={topStatuses}
+      profileName={operadorSessao?.operadorNome || 'NVS Tech'}
+      profileSubtitle={operadorSessao?.role === 'master' ? 'Master conectado' : 'Operador conectado'}
+      onProfileClick={operadorSessao ? trocarOperador : undefined}
       syncTimeLabel={fmtHora(ultimaSincronizacao)}
     >
       {conteudo}
