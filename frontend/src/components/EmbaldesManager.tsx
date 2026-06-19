@@ -73,6 +73,25 @@ interface Revisao {
   itens: ItemRevisao[]
 }
 
+// Kit da Olist: produto montado a partir de outros. A Olist não deixa baixar o
+// estoque do kit direto — a baixa é feita em cada componente (anúncio unitário).
+interface KitComponente {
+  produto_id: string
+  sku: string
+  descricao: string
+  estoque_atual?: number | null
+  quantidade_no_kit: number
+  quantidade_sugerida: number
+}
+interface KitInfo {
+  eh_kit: true
+  nome_kit?: string
+  sku_kit?: string
+  qtd_full: number
+  componentes: KitComponente[]
+}
+type KitEstado = 'carregando' | 'nao' | KitInfo
+
 export function EmbaldesManager({ modoSeparacao = false }: { modoSeparacao?: boolean } = {}) {
   const [inbounds, setInbounds] = useState<Inbound[]>([])
   const [loading, setLoading] = useState(false)
@@ -122,6 +141,11 @@ export function EmbaldesManager({ modoSeparacao = false }: { modoSeparacao?: boo
   const [skuImg, setSkuImg] = useState<Record<string, string>>({})
   // Filtro do picker: mostrar só os itens que tiveram a qtd do FULL alterada
   const [soEditados, setSoEditados] = useState(false)
+  // Kit por item (cache da detecção), quantidade por componente e estado da baixa
+  const [kitPorItem, setKitPorItem] = useState<Record<number, KitEstado>>({})
+  const [kitQtds, setKitQtds] = useState<Record<string, string>>({})
+  const [baixandoKit, setBaixandoKit] = useState(false)
+  const [kitResultado, setKitResultado] = useState<Record<number, any[]>>({})
 
   // Mapa SKU -> imagem do anúncio (ML), usado só no modo separação p/ mostrar a foto.
   useEffect(() => {
@@ -163,6 +187,70 @@ export function EmbaldesManager({ modoSeparacao = false }: { modoSeparacao?: boo
       document.removeEventListener('visibilitychange', recarregarAoVoltar)
     }
   }, [visao])
+
+  // Auto-detecção de kit: ao exibir um item no picker, verifica se é kit na Olist
+  // (cacheado por item). Se for, o picker mostra os componentes p/ baixar cada um.
+  useEffect(() => {
+    if (!modoSeparacao || !revisao) return
+    const lista = soEditados ? revisao.itens.filter((x) => x.tem_historico_full) : revisao.itens
+    if (lista.length === 0) return
+    const it = lista[Math.min(sepIndex, lista.length - 1)]
+    if (!it) return
+    const jaBaixado = it.baixa_aplicada === 1 || !!itensBaixados[it.item_id]
+    const vinc = it.vinculado === 1 || !!it.olist_produto_id
+    if (jaBaixado || !vinc) return
+    if (kitPorItem[it.item_id] !== undefined) return // já checado/carregando
+    setKitPorItem((prev) => ({ ...prev, [it.item_id]: 'carregando' }))
+    api.get(`/embaldes/${revisao.embale_id}/itens/${it.item_id}/kit`)
+      .then((r) => {
+        const d = r.data
+        if (d && d.eh_kit) {
+          setKitPorItem((prev) => ({ ...prev, [it.item_id]: d as KitInfo }))
+          setKitQtds((prev) => {
+            const novo = { ...prev }
+            for (const c of (d.componentes || [])) {
+              if (novo[c.produto_id] === undefined) novo[c.produto_id] = String(c.quantidade_sugerida ?? 0)
+            }
+            return novo
+          })
+        } else {
+          setKitPorItem((prev) => ({ ...prev, [it.item_id]: 'nao' }))
+        }
+      })
+      .catch(() => setKitPorItem((prev) => ({ ...prev, [it.item_id]: 'nao' })))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [modoSeparacao, revisao?.embale_id, sepIndex, soEditados])
+
+  // Baixa os componentes do kit na Olist (cada um vira uma saída). Retorna true se todos OK.
+  const baixarKitComponentes = async (it: ItemRevisao, kit: KitInfo): Promise<boolean> => {
+    if (!revisao) return false
+    const componentes = kit.componentes.map((c) => ({
+      produto_id: c.produto_id,
+      sku: c.sku,
+      quantidade: Math.max(0, Number(kitQtds[c.produto_id] ?? c.quantidade_sugerida) || 0),
+    }))
+    const resumo = componentes.map((c) => `• ${c.sku || c.produto_id}: ${c.quantidade}`).join('\n')
+    if (!confirm(`Baixar os componentes do kit "${it.titulo_anuncio}" na Olist?\n\n${resumo}\n\nNão há volta.`)) return false
+    try {
+      setBaixandoKit(true)
+      const r = await api.post(`/embaldes/${revisao.embale_id}/itens/${it.item_id}/baixar-kit`, { componentes })
+      const d = r.data
+      setKitResultado((prev) => ({ ...prev, [it.item_id]: d.resultados || [] }))
+      if (d.todos_ok) {
+        setItensBaixados((prev) => ({ ...prev, [it.item_id]: 1 }))
+        setMessage(d.mensagem || 'Componentes do kit baixados na Olist')
+        return true
+      }
+      setMessage(d.mensagem || 'Alguns componentes do kit falharam')
+      return false
+    } catch (erro: any) {
+      const dados = erro.response?.data || {}
+      setMessage('Erro: ' + (dados.erro || dados.error || String(erro)) + (dados.detalhe ? ` — ${dados.detalhe}` : ''))
+      return false
+    } finally {
+      setBaixandoKit(false)
+    }
+  }
 
   const carregarInbounds = async () => {
     try {
@@ -1160,22 +1248,69 @@ export function EmbaldesManager({ modoSeparacao = false }: { modoSeparacao?: boo
                                     <span style={{ padding: '0.6rem 1rem', color: '#2e7d32', fontWeight: 700, background: '#e8f5e9', borderRadius: '8px' }}>✓ Estoque retirado</span>
                                   ) : naoAchado ? (
                                     <button onClick={() => abrirVinculo(it)} style={{ padding: '0.7rem 1.4rem', background: '#fff', color: '#ef6c00', border: '1px solid #ef6c00', borderRadius: '8px', cursor: 'pointer', fontWeight: 700, fontSize: '0.95rem' }}>Vincular na Olist</button>
-                                  ) : (
-                                    <>
-                                      {podeBalancear && (
-                                        <button onClick={() => abrirBalanceamento(it)} style={{ padding: '0.7rem 1.4rem', background: '#fff', color: '#d32f2f', border: '1px solid #d32f2f', borderRadius: '8px', cursor: 'pointer', fontWeight: 700, fontSize: '0.95rem' }}>Balanço</button>
-                                      )}
-                                      {podeBaixar && (
-                                        <button
-                                          onClick={async () => { const ok = await baixarItem(it); if (ok) proximo() }}
-                                          disabled={baixandoItemId === it.item_id}
-                                          style={{ padding: '0.7rem 1.4rem', background: '#1976D2', color: '#fff', border: 'none', borderRadius: '8px', cursor: baixandoItemId === it.item_id ? 'wait' : 'pointer', fontWeight: 700, fontSize: '0.95rem' }}
-                                        >
-                                          {baixandoItemId === it.item_id ? 'Baixando...' : 'Baixar na Olist'}
-                                        </button>
-                                      )}
-                                    </>
-                                  )}
+                                  ) : (() => {
+                                    const kit = kitPorItem[it.item_id]
+                                    if (kit === 'carregando') {
+                                      return <span style={{ padding: '0.6rem 1rem', color: '#1976D2', fontWeight: 700, fontSize: '0.9rem' }}>Verificando se é kit…</span>
+                                    }
+                                    if (kit && typeof kit === 'object') {
+                                      const res = kitResultado[it.item_id] || []
+                                      return (
+                                        <div style={{ width: '100%', border: '1px dashed #1976D2', borderRadius: '10px', padding: '0.9rem', background: '#f3f8ff' }}>
+                                          <div style={{ fontWeight: 800, color: '#0d47a1', marginBottom: '0.25rem' }}>🎁 É um kit — baixe os componentes (anúncios unitários)</div>
+                                          <div style={{ fontSize: '0.82rem', color: '#555', marginBottom: '0.6rem' }}>
+                                            A Olist não deixa baixar o kit direto. Confira a quantidade de cada componente e baixe.
+                                          </div>
+                                          {kit.componentes.map((c) => {
+                                            const r = res.find((x) => String(x.produto_id) === String(c.produto_id))
+                                            return (
+                                              <div key={c.produto_id} style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', flexWrap: 'wrap', padding: '0.45rem 0', borderBottom: '1px solid #e3eefc' }}>
+                                                <div style={{ flex: '1 1 220px', minWidth: 0 }}>
+                                                  <div style={{ fontWeight: 700, fontSize: '0.9rem' }}>{c.descricao || c.sku || c.produto_id}</div>
+                                                  <div style={{ fontSize: '0.78rem', color: '#666' }}>SKU: {c.sku || '—'} · {c.quantidade_no_kit}× por kit{c.estoque_atual != null ? ` · estoque Olist ${c.estoque_atual}` : ''}</div>
+                                                </div>
+                                                <label style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.82rem', color: '#555', fontWeight: 700 }}>
+                                                  Baixar
+                                                  <input
+                                                    type="number" min="0" step="1"
+                                                    value={kitQtds[c.produto_id] ?? String(c.quantidade_sugerida)}
+                                                    onChange={(e) => setKitQtds({ ...kitQtds, [c.produto_id]: e.target.value })}
+                                                    style={{ width: '90px', padding: '0.35rem', borderRadius: '6px', border: '1px solid #90caf9', textAlign: 'center', fontWeight: 800 }}
+                                                  />
+                                                </label>
+                                                {r && (r.sucesso
+                                                  ? <span style={{ color: '#2e7d32', fontWeight: 700, fontSize: '0.8rem' }}>✓ baixado</span>
+                                                  : <span style={{ color: '#c62828', fontWeight: 700, fontSize: '0.8rem' }} title={r.detalhe || ''}>✗ falhou</span>)}
+                                              </div>
+                                            )
+                                          })}
+                                          <button
+                                            onClick={async () => { const ok = await baixarKitComponentes(it, kit); if (ok) proximo() }}
+                                            disabled={baixandoKit}
+                                            style={{ marginTop: '0.7rem', padding: '0.7rem 1.4rem', background: '#1976D2', color: '#fff', border: 'none', borderRadius: '8px', cursor: baixandoKit ? 'wait' : 'pointer', fontWeight: 700, fontSize: '0.95rem' }}
+                                          >
+                                            {baixandoKit ? 'Baixando componentes…' : 'Baixar componentes na Olist'}
+                                          </button>
+                                        </div>
+                                      )
+                                    }
+                                    return (
+                                      <>
+                                        {podeBalancear && (
+                                          <button onClick={() => abrirBalanceamento(it)} style={{ padding: '0.7rem 1.4rem', background: '#fff', color: '#d32f2f', border: '1px solid #d32f2f', borderRadius: '8px', cursor: 'pointer', fontWeight: 700, fontSize: '0.95rem' }}>Balanço</button>
+                                        )}
+                                        {podeBaixar && (
+                                          <button
+                                            onClick={async () => { const ok = await baixarItem(it); if (ok) proximo() }}
+                                            disabled={baixandoItemId === it.item_id}
+                                            style={{ padding: '0.7rem 1.4rem', background: '#1976D2', color: '#fff', border: 'none', borderRadius: '8px', cursor: baixandoItemId === it.item_id ? 'wait' : 'pointer', fontWeight: 700, fontSize: '0.95rem' }}
+                                          >
+                                            {baixandoItemId === it.item_id ? 'Baixando...' : 'Baixar na Olist'}
+                                          </button>
+                                        )}
+                                      </>
+                                    )
+                                  })()}
                                 </div>
                               </div>
                             </div>
