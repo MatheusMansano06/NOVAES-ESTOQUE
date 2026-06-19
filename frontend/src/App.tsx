@@ -1399,7 +1399,6 @@ function App() {
       navGroups={navGroups}
       statuses={topStatuses}
       syncTimeLabel={fmtHora(ultimaSincronizacao)}
-      primaryAction={{ label: 'Sincronizar agora', onClick: () => loadIntegracoes() }}
     >
       {conteudo}
     </AppShell>
