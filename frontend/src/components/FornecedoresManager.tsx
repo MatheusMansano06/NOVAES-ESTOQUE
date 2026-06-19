@@ -167,6 +167,11 @@ export function FornecedoresManager({ onVoltar }: FornecedoresManagerProps) {
   const [margensML, setMargensML] = useState<Record<string, MargemML>>({})
   const [loadingMargens, setLoadingMargens] = useState(false)
   const [impostoPct, setImpostoPct] = useState<number>(carregarImpostoPct())
+  // Custo oficial por SKU (autoritário na margem) — editável aqui no Catálogo. Chave = SKU UPPERCASE.
+  const [custosOficiais, setCustosOficiais] = useState<Record<string, { custo: number; imposto_pct: number }>>({})
+  const [editandoCustoSku, setEditandoCustoSku] = useState<string | null>(null)
+  const [custoEditValor, setCustoEditValor] = useState('')
+  const [salvandoCusto, setSalvandoCusto] = useState(false)
 
   useEffect(() => { loadTudo() }, [])
 
@@ -204,6 +209,44 @@ export function FornecedoresManager({ onVoltar }: FornecedoresManagerProps) {
       .finally(() => { if (ativo) setLoadingMargens(false) })
     return () => { ativo = false }
   }, [view, notas])
+
+  // Custo oficial por SKU (autoritário na margem). Carrega ao abrir o Catálogo.
+  useEffect(() => {
+    if (view !== 'catalogo') return
+    let ativo = true
+    fetch(API_BASE + '/api/custos', { cache: 'no-store' })
+      .then(r => r.json())
+      .then(d => {
+        if (!ativo || !d || !d.custos) return
+        const mapa: Record<string, { custo: number; imposto_pct: number }> = {}
+        for (const [sku, v] of Object.entries(d.custos as Record<string, { custo: number; imposto_pct: number }>)) {
+          mapa[String(sku).trim().toUpperCase()] = { custo: v.custo, imposto_pct: v.imposto_pct }
+        }
+        setCustosOficiais(mapa)
+      })
+      .catch(() => { /* mantém o que já tem */ })
+    return () => { ativo = false }
+  }, [view])
+
+  // Salva/atualiza o custo oficial de um SKU (upsert no backend + estado local).
+  const salvarCustoOficial = async (skuOriginal: string) => {
+    const skuKey = skuOriginal.trim().toUpperCase()
+    if (!skuKey) return
+    const valor = Math.max(0, Number(String(custoEditValor).replace(',', '.')) || 0)
+    const imposto = custosOficiais[skuKey]?.imposto_pct ?? impostoPct
+    setSalvandoCusto(true)
+    try {
+      await fetch(API_BASE + '/api/custos', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sku: skuOriginal, custo: valor, imposto_pct: imposto }),
+      })
+      setCustosOficiais(prev => ({ ...prev, [skuKey]: { custo: valor, imposto_pct: imposto } }))
+      setEditandoCustoSku(null)
+      setCustoEditValor('')
+    } catch { /* mantém o valor anterior se falhar */ }
+    finally { setSalvandoCusto(false) }
+  }
 
   const loadTudo = async () => {
     setCarregando(true)
@@ -499,8 +542,11 @@ export function FornecedoresManager({ onVoltar }: FornecedoresManagerProps) {
             ) : (
               <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
                 {catalogoFiltrado.map(prod => {
-                  const custo = prod.custoMedioGeral
                   const skuML = (prod.olist_sku || '').trim().toUpperCase()
+                  const custoOficial = skuML ? custosOficiais[skuML] : undefined
+                  // Custo oficial (editado aqui) tem prioridade sobre o custo médio das compras.
+                  const custo = custoOficial?.custo ?? prod.custoMedioGeral
+                  const editandoEsteCusto = editandoCustoSku === skuML && !!skuML
                   const anuncio = skuML ? margensML[skuML] : undefined
                   const precoML = anuncio ? (anuncio.promocional ?? anuncio.preco ?? 0) : 0
                   const freteML = anuncio?.frete ?? 0
@@ -525,8 +571,46 @@ export function FornecedoresManager({ onVoltar }: FornecedoresManagerProps) {
                           </div>
                         </div>
                         <div style={{ textAlign: 'right' }}>
-                          <div style={{ fontSize: '0.75rem', color: '#666' }}>Custo médio (c/ frete)</div>
-                          <div style={{ fontSize: '1.1rem', fontWeight: 700, color: '#1a1a1a' }}>{brl(custo)}</div>
+                          <div style={{ fontSize: '0.75rem', color: '#666' }}>
+                            {custoOficial ? 'Custo oficial' : 'Custo médio (c/ frete)'}
+                          </div>
+                          {editandoEsteCusto ? (
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', justifyContent: 'flex-end', marginTop: '0.2rem' }}>
+                              <span style={{ fontSize: '0.85rem', color: '#666' }}>R$</span>
+                              <input
+                                type="number" min="0" step="0.01" autoFocus
+                                value={custoEditValor}
+                                onChange={(e) => setCustoEditValor(e.target.value)}
+                                onKeyDown={(e) => { if (e.key === 'Enter') salvarCustoOficial(prod.olist_sku || ''); if (e.key === 'Escape') { setEditandoCustoSku(null); setCustoEditValor('') } }}
+                                style={{ width: '90px', padding: '0.35rem', borderRadius: '6px', border: '1px solid #1976D2', textAlign: 'right', fontSize: '1rem', fontWeight: 700 }}
+                              />
+                              <button onClick={() => salvarCustoOficial(prod.olist_sku || '')} disabled={salvandoCusto}
+                                style={{ padding: '0.35rem 0.7rem', background: '#1976D2', color: '#fff', border: 'none', borderRadius: '6px', cursor: salvandoCusto ? 'wait' : 'pointer', fontWeight: 700, fontSize: '0.82rem' }}>
+                                {salvandoCusto ? '...' : 'Salvar'}
+                              </button>
+                              <button onClick={() => { setEditandoCustoSku(null); setCustoEditValor('') }}
+                                style={{ padding: '0.35rem 0.6rem', background: '#fff', color: '#666', border: '1px solid #ddd', borderRadius: '6px', cursor: 'pointer', fontSize: '0.82rem' }}>
+                                Cancelar
+                              </button>
+                            </div>
+                          ) : (
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', justifyContent: 'flex-end', marginTop: '0.2rem' }}>
+                              <span style={{ fontSize: '1.1rem', fontWeight: 700, color: '#1a1a1a' }}>{brl(custo)}</span>
+                              {skuML ? (
+                                <button
+                                  onClick={() => { setEditandoCustoSku(skuML); setCustoEditValor(String((custoOficial?.custo ?? prod.custoMedioGeral ?? 0).toFixed(2))) }}
+                                  title="Editar o custo oficial deste produto"
+                                  style={{ padding: '0.25rem 0.6rem', background: '#fff', color: '#1976D2', border: '1px solid #90caf9', borderRadius: '6px', cursor: 'pointer', fontSize: '0.78rem', fontWeight: 700 }}>
+                                  ✏️ editar
+                                </button>
+                              ) : (
+                                <span title="Vincule o produto a um SKU Olist para definir o custo oficial" style={{ fontSize: '0.72rem', color: '#bbb' }}>sem SKU</span>
+                              )}
+                            </div>
+                          )}
+                          {custoOficial && !editandoEsteCusto && (
+                            <div style={{ fontSize: '0.68rem', color: '#999', marginTop: '0.15rem' }}>média compras: {brl(prod.custoMedioGeral)}</div>
+                          )}
                         </div>
                       </div>
 

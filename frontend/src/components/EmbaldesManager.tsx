@@ -120,6 +120,8 @@ export function EmbaldesManager({ modoSeparacao = false }: { modoSeparacao?: boo
   // Modo "Lista de separação": um produto por vez, em tela cheia
   const [sepIndex, setSepIndex] = useState(0)
   const [skuImg, setSkuImg] = useState<Record<string, string>>({})
+  // Filtro do picker: mostrar só os itens que tiveram a qtd do FULL alterada
+  const [soEditados, setSoEditados] = useState(false)
 
   // Mapa SKU -> imagem do anúncio (ML), usado só no modo separação p/ mostrar a foto.
   useEffect(() => {
@@ -498,15 +500,18 @@ export function EmbaldesManager({ modoSeparacao = false }: { modoSeparacao?: boo
       })
       const snapshot: ItemRevisao | undefined = resposta.data.snapshot
       if (snapshot) {
+        // Só chegamos aqui quando a qtd mudou de fato (gera registro no histórico),
+        // então marca tem_historico_full p/ o filtro "Qtd FULL alterada" refletir na hora.
+        const snapshotMarcado: ItemRevisao = { ...snapshot, tem_historico_full: true }
         setRevisao((anterior) => anterior ? {
           ...anterior,
           resumo: {
             ...anterior.resumo,
             com_falta: anterior.itens
-              .map((itemAtual) => itemAtual.item_id === snapshot.item_id ? snapshot : itemAtual)
+              .map((itemAtual) => itemAtual.item_id === snapshotMarcado.item_id ? snapshotMarcado : itemAtual)
               .filter((itemAtual) => itemAtual.tem_falta).length,
           },
-          itens: anterior.itens.map((itemAtual) => itemAtual.item_id === snapshot.item_id ? snapshot : itemAtual),
+          itens: anterior.itens.map((itemAtual) => itemAtual.item_id === snapshotMarcado.item_id ? snapshotMarcado : itemAtual),
         } : anterior)
         setQuantidadesFull((anterior) => ({ ...anterior, [it.item_id]: String(Math.round(snapshot.quantidade_full || 0)) }))
         if (!snapshot.tem_falta) {
@@ -989,8 +994,18 @@ export function EmbaldesManager({ modoSeparacao = false }: { modoSeparacao?: boo
                   ) : revisao ? (
                     modoSeparacao ? (
                       (() => {
-                        const itens = revisao.itens
+                        const qtdEditados = revisao.itens.filter((x) => x.tem_historico_full).length
+                        // Filtro "só editados": navega direto entre os que tiveram a qtd do FULL alterada.
+                        const itens = soEditados ? revisao.itens.filter((x) => x.tem_historico_full) : revisao.itens
                         const total = itens.length
+                        if (soEditados && total === 0) {
+                          return (
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', alignItems: 'center', padding: '2rem', textAlign: 'center', color: '#777' }}>
+                              <div>Nenhum produto teve a quantidade do FULL alterada ainda.</div>
+                              <button onClick={() => setSoEditados(false)} style={{ padding: '0.55rem 1.1rem', background: '#fff', color: '#1976D2', border: '1px solid #1976D2', borderRadius: '8px', cursor: 'pointer', fontWeight: 700 }}>Ver todos os produtos</button>
+                            </div>
+                          )
+                        }
                         if (total === 0) return <div style={{ padding: '2rem', textAlign: 'center', color: '#999' }}>Este inbound não tem itens.</div>
                         const idx = Math.min(sepIndex, total - 1)
                         const it = itens[idx]
@@ -1013,10 +1028,31 @@ export function EmbaldesManager({ modoSeparacao = false }: { modoSeparacao?: boo
                         const resolvidos = itens.filter((x) => x.baixa_aplicada === 1 || !!itensBaixados[x.item_id] || !!itensEmEspera[x.item_id]).length
                         return (
                           <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                            {/* Filtro: só os que tive a qtd do FULL alterada (retoma direto neles) */}
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
+                              <button
+                                onClick={() => { setSoEditados((v) => !v); setSepIndex(0) }}
+                                disabled={!soEditados && qtdEditados === 0}
+                                title={qtdEditados === 0 ? 'Nenhum produto teve a quantidade do FULL alterada ainda' : 'Mostrar só os produtos com a quantidade do FULL alterada'}
+                                style={{
+                                  padding: '0.5rem 1rem', borderRadius: '999px', fontWeight: 700, fontSize: '0.85rem',
+                                  cursor: (!soEditados && qtdEditados === 0) ? 'not-allowed' : 'pointer',
+                                  border: `1px solid ${soEditados ? '#0d47a1' : '#90caf9'}`,
+                                  background: soEditados ? '#0d47a1' : '#fff',
+                                  color: soEditados ? '#fff' : (qtdEditados === 0 ? '#aaa' : '#0d47a1'),
+                                }}
+                              >
+                                ✏️ Qtd FULL alterada ({qtdEditados})
+                              </button>
+                              {soEditados && (
+                                <span style={{ fontSize: '0.82rem', color: '#666' }}>Mostrando só os editados. <button onClick={() => { setSoEditados(false); setSepIndex(0) }} style={{ background: 'none', border: 'none', color: '#1976D2', cursor: 'pointer', fontWeight: 700, padding: 0 }}>Ver todos</button></span>
+                              )}
+                            </div>
+
                             {/* Barra de progresso */}
                             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '1rem', flexWrap: 'wrap' }}>
                               <div style={{ fontWeight: 700, color: '#0d47a1', fontSize: '1.05rem' }}>
-                                Produto {idx + 1} de {total}
+                                Produto {idx + 1} de {total}{soEditados ? ' (editados)' : ''}
                               </div>
                               <div style={{ fontSize: '0.85rem', color: '#666' }}>
                                 {resolvidos} de {total} resolvidos
