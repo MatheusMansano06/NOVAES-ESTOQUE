@@ -85,6 +85,13 @@ class OlistIntegration:
         self._ultima_req = 0.0
         self._intervalo_min = 60.0 / 100.0  # ~100 req/min (margem sob 120)
 
+        # Lock do refresh de token. O refresh_token da Olist e de USO UNICO (rotativo):
+        # cada renovacao invalida o anterior. Sem este lock, duas threads (ex.: job do
+        # APScheduler + request HTTP) renovam ao mesmo tempo com o MESMO refresh_token,
+        # uma rotaciona e a outra manda o token ja invalidado -> a Olist mata a cadeia
+        # inteira e o usuario precisa reconectar na mao a cada poucas horas.
+        self._token_lock = threading.Lock()
+
     def _throttle(self):
         """Garante o intervalo minimo entre requisicoes (rate limit global)."""
         with self._rate_lock:
@@ -225,42 +232,64 @@ class OlistIntegration:
                     print("[OLIST] Token renovado com sucesso")
                     return dados["access_token"]
 
+        except urllib.error.HTTPError as e:
+            corpo = ""
+            try:
+                corpo = e.read().decode("utf-8")
+            except Exception:
+                pass
+            if e.code in (400, 401) and "invalid_grant" in corpo:
+                print(f"[OLIST] Refresh token invalido/expirado (invalid_grant) — RECONECTAR em /api/olist/conectar. Resposta: {corpo[:300]}")
+            else:
+                print(f"[OLIST] Erro HTTP {e.code} ao renovar token: {corpo[:300]}")
         except Exception as e:
             print(f"[OLIST] Erro ao renovar token: {e}")
 
+        return None
+
+    def _token_valido(self, dados: Optional[Dict]) -> Optional[str]:
+        """Retorna o access_token se ainda valido (com margem de 60s), senao None."""
+        if not dados:
+            return None
+        expires_at = dados.get("expires_at")
+        if expires_at:
+            try:
+                if datetime.utcnow() < (datetime.fromisoformat(expires_at) - timedelta(seconds=60)):
+                    return dados.get("access_token")
+            except (TypeError, ValueError):
+                return None
         return None
 
     def get_access_token(self) -> Optional[str]:
         """
         Obtem um access_token valido.
         - Carrega do arquivo
-        - Renova se expirado
+        - Renova se expirado (com lock: so UMA renovacao por vez, ver _token_lock)
         - Retorna None se nunca foi autorizado
         Nota: Em caso de falha, retorna None para permitir fallback ao token simples
         """
         try:
-            dados = self._carregar_token()
-            if not dados:
-                return None
+            # Caminho rapido (sem lock): token ainda valido.
+            token = self._token_valido(self._carregar_token())
+            if token:
+                return token
 
-            # Verificar validade
-            expires_at = dados.get("expires_at")
-            if expires_at:
-                # Renovar 60s antes de expirar
-                if datetime.utcnow() < (datetime.fromisoformat(expires_at) - timedelta(seconds=60)):
-                    return dados["access_token"]
+            # Token expirado/expirando: serializa a renovacao. O refresh_token e
+            # rotativo (uso unico) — sem lock, renovacoes concorrentes matam a cadeia.
+            with self._token_lock:
+                # Double-check: outra thread pode ter renovado enquanto esperavamos.
+                dados = self._carregar_token()
+                token = self._token_valido(dados)
+                if token:
+                    return token
 
-            # Token expirado: tentar renovar
-            refresh_token = dados.get("refresh_token")
-            if refresh_token:
-                novo_token = self._renovar_token(refresh_token)
-                if novo_token:
-                    return novo_token
-                else:
-                    # Falha ao renovar - vai usar fallback
+                if not dados:
                     return None
 
-            return None
+                refresh_token = dados.get("refresh_token")
+                if refresh_token:
+                    return self._renovar_token(refresh_token)  # salva e retorna o novo, ou None
+                return None
         except Exception as e:
             print(f"[OLIST] Erro ao obter token: {e}")
             return None
