@@ -198,6 +198,7 @@ class EmbaleFU(Base):
     revisao_salva_em = Column(DateTime, nullable=True)  # Primeira revisao congelada
     status = Column(String(50), default="processando")  # processando, encerrado
     observacoes = Column(Text, nullable=True)
+    ultimo_item_separacao = Column(Integer, nullable=True)  # item_id onde a separação parou (retomar de onde parou)
 
     itens = relationship("ItemEmbaleFU", back_populates="embalde", cascade="all, delete-orphan")
     historico_full = relationship("HistoricoFullEmbale", back_populates="embalde", cascade="all, delete-orphan")

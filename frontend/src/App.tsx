@@ -5,6 +5,7 @@ import { ModalDetalhesNota } from './ModalDetalhesNota'
 import { ModalDetalhesNotaFiscal } from './ModalDetalhesNotaFiscal'
 import { FornecedoresManager } from './components/FornecedoresManager'
 import { EmbaldesManager } from './components/EmbaldesManager'
+import { HistoricoFull } from './components/HistoricoFull'
 import { AnunciosML } from './components/AnunciosML'
 import { AppShell, type ShellNavGroup, type ShellStatusItem } from './components/AppShell'
 import { baixarMultiplosOuPdfs } from './services/api'
@@ -68,7 +69,7 @@ interface ProdutoEstoque {
   }>
 }
 
-type Pagina = 'bemvindo' | 'inicial' | 'conferencia' | 'produtos_nota' | 'relacionamento_produto' | 'fornecedores' | 'embaldes' | 'anuncios' | 'notas-fiscais' | 'divergencias' | 'lista-separacao'
+type Pagina = 'bemvindo' | 'inicial' | 'conferencia' | 'produtos_nota' | 'relacionamento_produto' | 'fornecedores' | 'embaldes' | 'anuncios' | 'notas-fiscais' | 'divergencias' | 'lista-separacao' | 'historico-full'
 
 interface Divergencia {
   item_id: number
@@ -1387,6 +1388,7 @@ function App() {
       items: [
         { key: 'anuncios', label: 'Anuncios ML', icon: 'megaphone', active: pagina === 'anuncios', onClick: () => setPagina('anuncios') },
         { key: 'inbound', label: 'Inbound FULL', icon: 'truck', active: pagina === 'embaldes', badge: inboundsAtivos.length, onClick: () => setPagina('embaldes') },
+        { key: 'historico-full', label: 'Histórico FULL', icon: 'sync', active: pagina === 'historico-full', onClick: () => setPagina('historico-full') },
         { key: 'divergencias', label: 'Divergencias', icon: 'warning', badge: divergencias.length, active: pagina === 'divergencias', onClick: () => setPagina('divergencias') },
       ],
     },
@@ -3622,6 +3624,29 @@ function App() {
         </header>
         <main className="container main-content">
           <EmbaldesManager modoSeparacao={true} />
+        </main>
+      </div>
+    )
+  }
+
+  // ===== PÁGINA HISTÓRICO FULL =====
+  if (pagina === 'historico-full') {
+    return renderComShell(
+      'Histórico do FULL',
+      'Itens em espera e alterações de quantidade que vai pro FULL, por inbound',
+      <div className="app">
+        <header className="header">
+          <div className="container">
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div>
+                <h1>HISTÓRICO FULL</h1>
+                <p>Em espera e mudanças de quantidade do que vai ser enviado</p>
+              </div>
+            </div>
+          </div>
+        </header>
+        <main className="container main-content">
+          <HistoricoFull />
         </main>
       </div>
     )

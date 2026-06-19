@@ -74,6 +74,9 @@ def _garantir_colunas_sqlite():
             if "revisao_salva_em" not in colunas_embale_header:
                 conn.exec_driver_sql("ALTER TABLE embaldes_fu ADD COLUMN revisao_salva_em DATETIME")
                 print("[DB] Coluna embaldes_fu.revisao_salva_em criada")
+            if "ultimo_item_separacao" not in colunas_embale_header:
+                conn.exec_driver_sql("ALTER TABLE embaldes_fu ADD COLUMN ultimo_item_separacao INTEGER")
+                print("[DB] Coluna embaldes_fu.ultimo_item_separacao criada")
 
             # Tarifa de venda do ML guardada no cache (margem sem chamada ao vivo)
             colunas_ml = {row[1] for row in conn.exec_driver_sql("PRAGMA table_info(ml_item_cache)").fetchall()}
@@ -2329,6 +2332,7 @@ async def revisar_baixa_embale(request: Request):
                 "numero_inbound": embale.numero_inbound,
                 "status": embale.status,
                 "revisao_salva_em": embale.revisao_salva_em.isoformat(),
+                "ultimo_item_separacao": embale.ultimo_item_separacao,
                 "resumo": resumo,
                 "itens": revisao,
             })
@@ -2481,6 +2485,7 @@ async def revisar_baixa_embale(request: Request):
             "numero_inbound": embale.numero_inbound,
             "status": embale.status,
             "revisao_salva_em": embale.revisao_salva_em.isoformat() if embale.revisao_salva_em else None,
+            "ultimo_item_separacao": embale.ultimo_item_separacao,
             "resumo": resumo,
             "itens": revisao,
         })
@@ -3005,6 +3010,97 @@ async def marcar_em_espera_embale(request: Request):
 
     except Exception as e:
         db.rollback()
+        return JSONResponse({"erro": str(e)}, status_code=500)
+    finally:
+        db.close()
+
+
+async def salvar_posicao_separacao(request: Request):
+    """
+    POST /api/embaldes/{embale_id}/posicao-separacao
+    Salva no inbound o item onde a separação parou, para retomar de onde parou.
+    Body: {"item_id": N}  (item_id pode ser null para limpar)
+    """
+    db = SessionLocal()
+    try:
+        embale_id = int(request.path_params.get("embale_id"))
+        data = await request.json()
+        item_id_raw = data.get("item_id")
+        item_id = int(item_id_raw) if item_id_raw is not None else None
+
+        embale = db.query(EmbaleFU).filter(EmbaleFU.id == embale_id).first()
+        if not embale:
+            return JSONResponse({"erro": "Inbound não encontrado"}, status_code=404)
+
+        # Valida que o item pertence ao inbound (ignora silenciosamente se não)
+        if item_id is not None and not any(i.id == item_id for i in embale.itens):
+            return JSONResponse({"erro": "Item não encontrado neste inbound"}, status_code=404)
+
+        embale.ultimo_item_separacao = item_id
+        db.commit()
+        return JSONResponse({"sucesso": True, "ultimo_item_separacao": item_id})
+    except Exception as e:
+        db.rollback()
+        return JSONResponse({"erro": str(e)}, status_code=500)
+    finally:
+        db.close()
+
+
+async def listar_historico_completo_embale(request: Request):
+    """
+    GET /api/embaldes/{embale_id}/historico-completo
+    Devolve, para um inbound:
+      - em_espera: itens atualmente em espera (bloqueados)
+      - alteracoes: TODA mudança da quantidade que vai pro FULL (aumento/redução)
+    Alimenta a aba "Histórico FULL".
+    """
+    db = SessionLocal()
+    try:
+        embale_id = int(request.path_params.get("embale_id"))
+        embale = db.query(EmbaleFU).filter(EmbaleFU.id == embale_id).first()
+        if not embale:
+            return JSONResponse({"erro": "Inbound não encontrado"}, status_code=404)
+
+        em_espera = [
+            {
+                "item_id": i.id,
+                "titulo_anuncio": i.titulo_anuncio,
+                "sku_inbound": i.sku_inbound,
+                "quantidade_full": _quantidade_planejada_full(i),
+                "data_em_espera": i.data_em_espera.isoformat() if i.data_em_espera else None,
+            }
+            for i in embale.itens if (i.em_espera or 0) == 1
+        ]
+        em_espera.sort(key=lambda x: x["data_em_espera"] or "", reverse=True)
+
+        registros = (db.query(HistoricoFullEmbale)
+                     .filter(HistoricoFullEmbale.embale_id == embale_id)
+                     .order_by(HistoricoFullEmbale.criado_em.desc())
+                     .all())
+        alteracoes = [
+            {
+                "id": h.id,
+                "item_id": h.item_id,
+                "titulo_anuncio": h.titulo_anuncio,
+                "sku_inbound": h.sku_inbound,
+                "quantidade_anterior": h.quantidade_anterior,
+                "quantidade_nova": h.quantidade_nova,
+                "tipo": h.tipo,
+                "criado_em": h.criado_em.isoformat() if h.criado_em else None,
+            }
+            for h in registros
+        ]
+
+        return JSONResponse({
+            "embale_id": embale.id,
+            "nome_embalde": embale.nome_embalde,
+            "numero_inbound": embale.numero_inbound,
+            "em_espera": em_espera,
+            "total_em_espera": len(em_espera),
+            "alteracoes": alteracoes,
+            "total_alteracoes": len(alteracoes),
+        })
+    except Exception as e:
         return JSONResponse({"erro": str(e)}, status_code=500)
     finally:
         db.close()
@@ -3681,6 +3777,8 @@ routes = [
     Route("/api/embaldes/{embale_id}/itens/{item_id}/quantidade-full", ajustar_quantidade_full_embale, methods=["POST"]),
     Route("/api/embaldes/{embale_id}/itens/{item_id}/balancear", balancear_item_embale, methods=["POST"]),
     Route("/api/embaldes/{embale_id}/historico-full", listar_historico_full_embale, methods=["GET"]),
+    Route("/api/embaldes/{embale_id}/historico-completo", listar_historico_completo_embale, methods=["GET"]),
+    Route("/api/embaldes/{embale_id}/posicao-separacao", salvar_posicao_separacao, methods=["POST"]),
     Route("/api/embaldes/{embale_id}/itens/{item_id}/em-espera", marcar_em_espera_embale, methods=["POST"]),
     Route("/api/embaldes/{embale_id}/encerrar", encerrar_embale, methods=["POST"]),
 ]

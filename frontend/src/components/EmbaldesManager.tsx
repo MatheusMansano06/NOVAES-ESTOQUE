@@ -68,6 +68,7 @@ interface Revisao {
   numero_inbound?: string
   status: string
   revisao_salva_em?: string
+  ultimo_item_separacao?: number | null
   resumo: { total: number; encontrados: number; nao_encontrados: number; com_falta: number }
   itens: ItemRevisao[]
 }
@@ -387,7 +388,11 @@ export function EmbaldesManager({ modoSeparacao = false }: { modoSeparacao?: boo
       setFiltroRevisao('todos')
       const resposta = await api.get(`/embaldes/${id}/revisao`)
       setRevisao(resposta.data)
-      setSepIndex(0)
+      // Retoma de onde parou: posiciona no item salvo no banco (se ainda existir).
+      const itensRev: ItemRevisao[] = resposta.data.itens || []
+      const ultimoId = resposta.data.ultimo_item_separacao
+      const idxSalvo = ultimoId != null ? itensRev.findIndex((it) => it.item_id === ultimoId) : -1
+      setSepIndex(idxSalvo >= 0 ? idxSalvo : 0)
       const planejadas: Record<number, string> = {}
       for (const it of resposta.data.itens || []) {
         planejadas[it.item_id] = String(Math.round(it.quantidade_full ?? 0))
@@ -411,6 +416,12 @@ export function EmbaldesManager({ modoSeparacao = false }: { modoSeparacao?: boo
     } finally {
       setCarregandoRevisao(false)
     }
+  }
+
+  // Salva no banco o produto onde a separação parou (retomar de onde parou).
+  // Fire-and-forget: não trava a navegação se a rede falhar.
+  const salvarPosicaoSeparacao = (embaleId: number, itemId: number) => {
+    api.post(`/embaldes/${embaleId}/posicao-separacao`, { item_id: itemId }).catch(() => { /* posição é best-effort */ })
   }
 
   const confirmarBaixa = async () => {
@@ -992,8 +1003,13 @@ export function EmbaldesManager({ modoSeparacao = false }: { modoSeparacao?: boo
                         const vinculado = it.vinculado === 1 || !!it.olist_produto_id
                         const img = skuImg[String(it.sku_inbound || '').trim().toUpperCase()]
                         const quantidadeEditavel = quantidadesFull[it.item_id] ?? String(Math.round(it.quantidade_full || 0))
-                        const proximo = () => setSepIndex((i) => Math.min(i + 1, total - 1))
-                        const anterior = () => setSepIndex((i) => Math.max(i - 1, 0))
+                        const irPara = (novoIdx: number) => {
+                          const alvo = itens[novoIdx]
+                          if (alvo) salvarPosicaoSeparacao(revisao.embale_id, alvo.item_id)
+                          setSepIndex(novoIdx)
+                        }
+                        const proximo = () => irPara(Math.min(idx + 1, total - 1))
+                        const anterior = () => irPara(Math.max(idx - 1, 0))
                         const resolvidos = itens.filter((x) => x.baixa_aplicada === 1 || !!itensBaixados[x.item_id] || !!itensEmEspera[x.item_id]).length
                         return (
                           <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
