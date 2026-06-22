@@ -4529,6 +4529,13 @@ async def ml_categorias_buscar(request: Request):
     return JSONResponse(result, headers={"Cache-Control": "no-store"})
 
 
+async def ml_conta(request: Request):
+    """GET — dados da conta do vendedor no ML (card do dashboard)."""
+    result = ml.conta()
+    code = 200 if not result.get("erro") else 502
+    return JSONResponse(result, status_code=code, headers={"Cache-Control": "no-store"})
+
+
 async def ml_anuncio_imagens_upload(request: Request):
     item_id = request.path_params.get("item_id")
     form = await request.form()
@@ -4828,6 +4835,7 @@ routes = [
     Route("/api/ml/anuncios/{item_id:str}/excluir", ml_anuncio_excluir, methods=["POST"]),
     Route("/api/ml/anuncios/{item_id:str}/duplicar", ml_anuncio_duplicar, methods=["POST"]),
     Route("/api/ml/categorias", ml_categorias_buscar, methods=["GET"]),
+    Route("/api/ml/conta", ml_conta, methods=["GET"]),
     Route("/api/ml/anuncios/{item_id:str}/pictures/upload", ml_anuncio_imagens_upload, methods=["POST"]),
     Route("/api/ml/anuncios/{item_id:str}/pictures", ml_anuncio_imagens_reordenar, methods=["POST"]),
     Route("/api/ml/precificacao", ml_precificacao, methods=["GET"]),

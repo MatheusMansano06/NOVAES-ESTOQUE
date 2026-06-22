@@ -424,6 +424,53 @@ class MLIntegration:
             "url_autorizacao": self.get_authorization_url() if (self.enabled and not autorizado) else None,
         }
 
+    def conta(self) -> Dict:
+        """Dados da conta do vendedor no ML para o card do dashboard:
+        nome, reputação, vendas (total/concluídas/canceladas) e contagem de
+        anúncios (ativos/premium/clássico, do cache local). Cacheado ~5min."""
+        if not self.user_id:
+            return {"erro": "ML_USER_ID não configurado"}
+
+        cache = getattr(self, "_conta_cache", None)
+        if cache and cache.get("exp", 0) > time.time():
+            return cache["data"]
+
+        user = self._get(f"/users/{self.user_id}") or {}
+        if not isinstance(user, dict) or user.get("erro"):
+            return {"erro": "Falha ao obter dados da conta no Mercado Livre"}
+
+        rep = user.get("seller_reputation") or {}
+        tx = rep.get("transactions") or {}
+        nome = (f"{user.get('first_name') or ''} {user.get('last_name') or ''}").strip() or user.get("nickname") or ""
+
+        db = self._db()
+        try:
+            base = db.query(MercadoLivreItemCache).filter(MercadoLivreItemCache.status == "active")
+            ativos = base.count()
+            premium = base.filter(MercadoLivreItemCache.listing_type_id == "gold_pro").count()
+            classico = base.filter(MercadoLivreItemCache.listing_type_id == "gold_special").count()
+        finally:
+            db.close()
+
+        data = {
+            "nome": nome,
+            "nickname": user.get("nickname"),
+            "logo": user.get("logo") or None,
+            "permalink": user.get("permalink"),
+            "reputacao": {
+                "nivel": rep.get("level_id"),  # ex.: "5_green"
+                "power_seller": rep.get("power_seller_status"),
+            },
+            "transacoes": {
+                "total": tx.get("total"),
+                "concluidas": tx.get("completed"),
+                "canceladas": tx.get("canceled"),
+            },
+            "anuncios": {"ativos": ativos, "premium": premium, "classico": classico},
+        }
+        self._conta_cache = {"data": data, "exp": time.time() + 300}
+        return data
+
     def _cache_to_simple_item(self, row: MercadoLivreItemCache) -> Dict[str, Any]:
         dimensions = self._json_load(row.dimensoes_json, None)
         return {

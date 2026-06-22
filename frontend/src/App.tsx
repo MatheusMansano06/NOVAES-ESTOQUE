@@ -116,6 +116,96 @@ interface OperadorOption {
   ativo: number
 }
 
+interface ContaMLData {
+  nome?: string
+  nickname?: string
+  logo?: string | null
+  permalink?: string
+  reputacao?: { nivel?: string | null; power_seller?: string | null }
+  transacoes?: { total?: number | null; concluidas?: number | null; canceladas?: number | null }
+  anuncios?: { ativos?: number; premium?: number; classico?: number }
+}
+
+// Cores da régua de reputação do ML (nível 1 vermelho → 5 verde)
+const CORES_REPUTACAO = ['#f4524d', '#f9a825', '#fdd835', '#c0ca33', '#43a047']
+
+function nivelReputacaoIndex(nivel?: string | null): number {
+  if (!nivel) return -1
+  const n = parseInt(String(nivel).charAt(0), 10)
+  return Number.isNaN(n) ? -1 : Math.min(4, Math.max(0, n - 1))
+}
+
+function numBR(v?: number | null): string {
+  if (v == null || Number.isNaN(Number(v))) return '--'
+  return Number(v).toLocaleString('pt-BR')
+}
+
+function ContaMLCard() {
+  const [conta, setConta] = useState<ContaMLData | null>(null)
+  const [estado, setEstado] = useState<'carregando' | 'ok' | 'erro'>('carregando')
+
+  useEffect(() => {
+    let ativo = true
+    fetch(`${API_BASE}/api/ml/conta`, { cache: 'no-store' })
+      .then(r => r.json())
+      .then(d => { if (!ativo) return; if (d && !d.erro) { setConta(d); setEstado('ok') } else setEstado('erro') })
+      .catch(() => { if (ativo) setEstado('erro') })
+    return () => { ativo = false }
+  }, [])
+
+  const idxRep = nivelReputacaoIndex(conta?.reputacao?.nivel)
+  const linha = (label: string, valor: string, cor = '#1a1a1a') => (
+    <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: '0.5rem' }}>
+      <span style={{ fontSize: '0.82rem', color: '#667085' }}>{label}</span>
+      <strong style={{ fontSize: '0.95rem', color: cor }}>{valor}</strong>
+    </div>
+  )
+
+  return (
+    <div className="card" style={{ border: '2px solid #2d3277', boxShadow: '0 10px 24px rgba(45,50,119,0.08)' }}>
+      <div className="card-body" style={{ padding: '1rem' }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.75rem', marginBottom: '0.75rem' }}>
+          <div style={{ color: '#2d3277', fontWeight: 800, fontSize: '0.78rem', letterSpacing: '0.04em', textTransform: 'uppercase' }}>
+            Minha conta Mercado Livre
+          </div>
+          {conta?.permalink && (
+            <a href={conta.permalink} target="_blank" rel="noreferrer" style={{ fontSize: '0.72rem', fontWeight: 700, color: '#2d3277', border: '1px solid #c5cae9', borderRadius: '6px', padding: '0.2rem 0.6rem', textDecoration: 'none', whiteSpace: 'nowrap' }}>Ver conta</a>
+          )}
+        </div>
+
+        {estado === 'carregando' ? (
+          <div style={{ color: '#999', fontSize: '0.85rem', padding: '0.5rem 0' }}>Carregando conta…</div>
+        ) : estado === 'erro' ? (
+          <div style={{ color: '#999', fontSize: '0.85rem', padding: '0.5rem 0' }}>Não foi possível carregar os dados da conta. <a href={`${API_BASE}/api/ml/conectar`} style={{ color: '#2d3277' }}>Reconectar ML</a></div>
+        ) : conta && (
+          <>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '0.75rem' }}>
+              {conta.logo && <img src={conta.logo} alt="" style={{ width: 40, height: 40, borderRadius: 8, objectFit: 'cover', border: '1px solid #eee' }} />}
+              <div style={{ fontWeight: 800, fontSize: '0.95rem', color: '#1a1a1a', lineHeight: 1.2 }}>{conta.nome || conta.nickname}</div>
+            </div>
+
+            {/* Régua de reputação */}
+            <div style={{ display: 'flex', gap: 4, marginBottom: '0.85rem' }}>
+              {CORES_REPUTACAO.map((cor, i) => (
+                <div key={i} style={{ flex: 1, height: 9, borderRadius: 999, background: i === idxRep ? cor : `${cor}33` }} />
+              ))}
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.35rem 1.25rem' }}>
+              {linha('Ativos', numBR(conta.anuncios?.ativos))}
+              {linha('Vendas', numBR(conta.transacoes?.total))}
+              {linha('Premium', numBR(conta.anuncios?.premium))}
+              {linha('Concluídas', numBR(conta.transacoes?.concluidas), '#2e7d32')}
+              {linha('Clássico', numBR(conta.anuncios?.classico))}
+              {linha('Canceladas', numBR(conta.transacoes?.canceladas), '#c62828')}
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  )
+}
+
 function App() {
   // Estados de navegação
   const [operadorSessao, setOperadorSessaoState] = useState<OperadorSessao | null>(() => getOperadorSessao())
@@ -2065,23 +2155,21 @@ function App() {
               </div>
             )}
 
-            <div className="card" style={{
-              border: '2px solid #ffd54f',
-              boxShadow: '0 10px 24px rgba(255, 152, 0, 0.08)'
-            }}>
-              <div className="card-body" style={{ padding: '1rem' }}>
-                <div style={{ color: '#e65100', fontWeight: 800, fontSize: '0.78rem', letterSpacing: '0.04em', textTransform: 'uppercase', marginBottom: '0.75rem' }}>
-                  Notas sem estar 100% para Olist
-                </div>
-                <div style={{ display: 'grid', gap: '0.75rem' }}>
-                  <div style={{ fontSize: '1.75rem', fontWeight: 800, color: '#e65100' }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+              {/* Card da conta do Mercado Livre */}
+              <ContaMLCard />
+
+              {/* Notas sem estar 100% — compacto */}
+              <div className="card" style={{ border: '2px solid #ffd54f', boxShadow: '0 10px 24px rgba(255, 152, 0, 0.08)' }}>
+                <div className="card-body" style={{ padding: '0.85rem 1rem', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.75rem' }}>
+                  <div style={{ color: '#e65100', fontWeight: 800, fontSize: '0.74rem', letterSpacing: '0.04em', textTransform: 'uppercase' }}>
+                    Notas sem estar 100% para Olist
+                  </div>
+                  <div style={{ fontSize: '1.4rem', fontWeight: 800, color: '#e65100', lineHeight: 1 }}>
                     {notasFiltradas.filter(n => {
                       const p = calcularProgresso(n.itens)
                       return p.total > 0 && p.percentual < 100
                     }).length}
-                  </div>
-                  <div style={{ fontSize: '0.82rem', color: '#666' }}>
-                    Notas em andamento
                   </div>
                 </div>
               </div>
