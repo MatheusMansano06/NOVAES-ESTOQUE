@@ -298,6 +298,14 @@ class ItemEmbaleFU(Base):
     em_espera = Column(Integer, default=0)  # 1 = em espera, 0 = normal
     data_em_espera = Column(DateTime, nullable=True)
 
+    # Excluído da separação ("não vai ser enviado") — fica fora da lista de
+    # separação mas é mantido no Histórico FULL (reversível).
+    nao_enviar = Column(Integer, default=0)  # 1 = não enviar, 0 = normal
+    data_nao_enviar = Column(DateTime, nullable=True)
+
+    # Foto do produto puxada da Olist (anexos), cacheada no item.
+    olist_imagem = Column(Text, nullable=True)
+
     criado_em = Column(DateTime, default=datetime.utcnow)
 
     embalde = relationship("EmbaleFU", back_populates="itens")

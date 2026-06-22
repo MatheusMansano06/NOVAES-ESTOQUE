@@ -60,6 +60,7 @@ interface ItemRevisao {
   saldo_disponivel?: number | null
   em_espera?: number
   tem_historico_full?: boolean
+  imagem?: string | null
 }
 
 interface Revisao {
@@ -1196,7 +1197,8 @@ export function EmbaldesManager({ modoSeparacao = false }: { modoSeparacao?: boo
                         const podeBaixar = it.olist_encontrado && !semEstoque && !jaBaixado
                         const podeBalancear = it.olist_encontrado && !semEstoque && !jaBaixado
                         const vinculado = it.vinculado === 1 || !!it.olist_produto_id
-                        const img = skuImg[String(it.sku_inbound || '').trim().toUpperCase()]
+                        // Foto: Olist (primária, vem no item) com o cache do ML como reserva.
+                        const img = it.imagem || skuImg[String(it.sku_inbound || '').trim().toUpperCase()]
                         const quantidadeEditavel = quantidadesFull[it.item_id] ?? String(Math.round(it.quantidade_full || 0))
                         const irPara = (novoIdx: number) => {
                           const alvo = itens[novoIdx]

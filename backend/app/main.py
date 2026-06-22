@@ -64,9 +64,12 @@ def _garantir_colunas_sqlite():
                 ("revisao_salva_em", "DATETIME"),
                 ("em_espera", "INTEGER DEFAULT 0"),
                 ("data_em_espera", "DATETIME"),
+                ("nao_enviar", "INTEGER DEFAULT 0"),
+                ("data_nao_enviar", "DATETIME"),
+                ("olist_imagem", "TEXT"),
             ]
             for nome, tipo in migracoes_embale:
-                if nome in {"foi_balanceado", "saldo_disponivel", "data_balanceamento", "em_espera", "data_em_espera"} and nome not in colunas_embale:
+                if nome in {"foi_balanceado", "saldo_disponivel", "data_balanceamento", "em_espera", "data_em_espera", "nao_enviar", "data_nao_enviar", "olist_imagem"} and nome not in colunas_embale:
                     conn.exec_driver_sql(f"ALTER TABLE itens_embale_fu ADD COLUMN {nome} {tipo}")
                     print(f"[DB] Coluna itens_embale_fu.{nome} criada")
 
@@ -2275,7 +2278,10 @@ async def obter_embale(request: Request):
                     "olist_sku": i.olist_sku,
                     "olist_nome": i.olist_nome,
                     "validado": i.validado,
-                    "validacao_mensagem": i.validacao_mensagem
+                    "validacao_mensagem": i.validacao_mensagem,
+                    "imagem": i.olist_imagem,
+                    "em_espera": i.em_espera or 0,
+                    "nao_enviar": i.nao_enviar or 0,
                 }
                 for i in embale.itens
             ]
@@ -2394,6 +2400,46 @@ def _quantidade_planejada_full(item) -> float:
     return max(0.0, float(item.quantidade_baixar or 0))
 
 
+def _preencher_imagens_olist(db, itens):
+    """Para itens já vinculados (olist_produto_id) e ainda sem foto cacheada,
+    busca a imagem na Olist (campo 'anexos') e salva em olist_imagem.
+    Roda uma única vez por item (depois fica em cache); falhas são silenciosas
+    porque foto é opcional e nunca pode travar a separação."""
+    import concurrent.futures
+
+    faltando = [i for i in itens if i.olist_produto_id and not i.olist_imagem]
+    if not faltando:
+        return
+    ids = {i.olist_produto_id for i in faltando}
+
+    def _img(pid):
+        try:
+            return pid, olist.obter_imagem_produto(pid)
+        except Exception:
+            return pid, None
+
+    mapa = {}
+    try:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=4) as ex:
+            for pid, img in ex.map(_img, ids):
+                mapa[pid] = img
+    except Exception:
+        return
+
+    mudou = False
+    for i in faltando:
+        img = mapa.get(i.olist_produto_id)
+        if img:
+            i.olist_imagem = img
+            db.add(i)
+            mudou = True
+    if mudou:
+        try:
+            db.commit()
+        except Exception:
+            db.rollback()
+
+
 def _progresso_item_full(item) -> tuple[float, float]:
     """Retorna (planejado, realizado) para progresso persistido do inbound."""
     planejado = _quantidade_planejada_full(item)
@@ -2438,6 +2484,8 @@ def _resumo_revisao_salva_item(item):
             "vinculado": item.validado or 0,
             "foi_balanceado": item.foi_balanceado or 0,
             "saldo_disponivel": item.saldo_disponivel,
+            "em_espera": item.em_espera or 0,
+            "imagem": item.olist_imagem,
         }
 
     saldo = item.olist_estoque_antes
@@ -2461,6 +2509,8 @@ def _resumo_revisao_salva_item(item):
             "vinculado": item.validado or 0,
             "foi_balanceado": item.foi_balanceado or 0,
             "saldo_disponivel": item.saldo_disponivel,
+            "em_espera": item.em_espera or 0,
+            "imagem": item.olist_imagem,
         }
 
     saldo = float(saldo or 0)
@@ -2488,6 +2538,7 @@ def _resumo_revisao_salva_item(item):
         "foi_balanceado": item.foi_balanceado or 0,
         "saldo_disponivel": item.saldo_disponivel,
         "em_espera": item.em_espera or 0,
+        "imagem": item.olist_imagem,
     }
 
 
@@ -2507,8 +2558,13 @@ async def revisar_baixa_embale(request: Request):
         if not embale:
             return JSONResponse({"erro": "Inbound não encontrado"}, status_code=404)
 
-        itens = list(embale.itens)
+        # Itens excluídos da separação ("não vai ser enviado") ficam fora da lista,
+        # mas seguem no banco para o Histórico FULL (reversível).
+        itens = [i for i in embale.itens if (i.nao_enviar or 0) != 1]
         force_refresh = request.query_params.get("refresh", "").strip().lower() in {"1", "true", "yes", "sim"}
+
+        # Foto direto da Olist (primária); preenche o cache uma única vez por item.
+        _preencher_imagens_olist(db, itens)
 
         if embale.revisao_salva_em and not force_refresh:
             revisao = [_resumo_revisao_salva_item(item) for item in itens]
@@ -2598,6 +2654,7 @@ async def revisar_baixa_embale(request: Request):
                     "foi_balanceado": item.foi_balanceado or 0,
                     "saldo_disponivel": item.saldo_disponivel,
                     "em_espera": item.em_espera or 0,
+                    "imagem": item.olist_imagem,
                 })
                 db.add(item)
                 continue
@@ -2628,6 +2685,7 @@ async def revisar_baixa_embale(request: Request):
                     "foi_balanceado": item.foi_balanceado or 0,
                     "saldo_disponivel": item.saldo_disponivel,
                     "em_espera": item.em_espera or 0,
+                    "imagem": item.olist_imagem,
                 })
                 db.add(item)
                 continue
@@ -2662,6 +2720,8 @@ async def revisar_baixa_embale(request: Request):
                 "vinculado": item.validado or 0,
                 "foi_balanceado": item.foi_balanceado or 0,
                 "saldo_disponivel": item.saldo_disponivel,
+                "em_espera": item.em_espera or 0,
+                "imagem": item.olist_imagem,
             })
             db.add(item)
 
@@ -3694,6 +3754,75 @@ async def marcar_em_espera_embale(request: Request):
         db.close()
 
 
+async def marcar_nao_enviar_embale(request: Request):
+    """
+    POST /api/embaldes/{embale_id}/itens/{item_id}/nao-enviar
+    Marca/desmarca um item como "não vai ser enviado".
+    Body: {"nao_enviar": 1 ou 0}
+    Quando excluído (1), o item sai da lista de separação mas continua no banco
+    (aparece no Histórico FULL e pode ser trazido de volta). Sai também de
+    "em espera". Não permite excluir item cuja baixa já foi aplicada.
+    """
+    db = SessionLocal()
+    try:
+        embale_id = int(request.path_params.get("embale_id"))
+        item_id = int(request.path_params.get("item_id"))
+        data = await request.json()
+        nao_enviar = int(data.get("nao_enviar", 0))
+
+        embale = db.query(EmbaleFU).filter(EmbaleFU.id == embale_id).first()
+        if not embale:
+            return JSONResponse({"erro": "Inbound não encontrado"}, status_code=404)
+
+        item = next((i for i in embale.itens if i.id == item_id), None)
+        if not item:
+            return JSONResponse({"erro": "Item não encontrado neste inbound"}, status_code=404)
+
+        if nao_enviar == 1 and item.baixa_aplicada == 1:
+            return JSONResponse(
+                {"erro": "Este item já teve a baixa aplicada — não dá para excluir da separação."},
+                status_code=400,
+            )
+
+        item.nao_enviar = nao_enviar
+        if nao_enviar == 1:
+            item.data_nao_enviar = datetime.utcnow()
+            # Excluir tira de "em espera" (sai da lista de separação de vez)
+            item.em_espera = 0
+            item.data_em_espera = None
+        else:
+            item.data_nao_enviar = None
+
+        db.commit()
+        _registrar_log_operacao(
+            request,
+            "item_inbound_excluido" if nao_enviar == 1 else "item_inbound_reincluido",
+            "item_embale",
+            item.id,
+            f"Item {item.sku_inbound or item.titulo_anuncio} "
+            f"{'excluído da separação (não enviar)' if nao_enviar == 1 else 'reincluído na separação'}",
+            {
+                "embale_id": embale.id,
+                "item_id": item.id,
+                "nao_enviar": item.nao_enviar,
+                "data_nao_enviar": item.data_nao_enviar.isoformat() if item.data_nao_enviar else None,
+            },
+        )
+
+        return JSONResponse({
+            "item_id": item.id,
+            "nao_enviar": item.nao_enviar,
+            "data_nao_enviar": item.data_nao_enviar.isoformat() if item.data_nao_enviar else None,
+            "mensagem": "Excluído da separação" if nao_enviar == 1 else "Reincluído na separação",
+        })
+
+    except Exception as e:
+        db.rollback()
+        return JSONResponse({"erro": str(e)}, status_code=500)
+    finally:
+        db.close()
+
+
 async def salvar_posicao_separacao(request: Request):
     """
     POST /api/embaldes/{embale_id}/posicao-separacao
@@ -3749,10 +3878,26 @@ async def listar_historico_completo_embale(request: Request):
                 "quantidade_full": _quantidade_planejada_full(i),
                 "estoque_atual": resumo_por_item.get(i.id, {}).get("estoque_atual"),
                 "data_em_espera": i.data_em_espera.isoformat() if i.data_em_espera else None,
+                "imagem": i.olist_imagem,
             }
-            for i in embale.itens if (i.em_espera or 0) == 1
+            for i in embale.itens if (i.em_espera or 0) == 1 and (i.nao_enviar or 0) != 1
         ]
         em_espera.sort(key=lambda x: x["data_em_espera"] or "", reverse=True)
+
+        # Itens excluídos da separação ("não vão ser enviados") — reversível.
+        nao_enviar = [
+            {
+                "item_id": i.id,
+                "titulo_anuncio": i.titulo_anuncio,
+                "sku_inbound": i.sku_inbound,
+                "quantidade_full": _quantidade_planejada_full(i),
+                "estoque_atual": resumo_por_item.get(i.id, {}).get("estoque_atual"),
+                "data_nao_enviar": i.data_nao_enviar.isoformat() if i.data_nao_enviar else None,
+                "imagem": i.olist_imagem,
+            }
+            for i in embale.itens if (i.nao_enviar or 0) == 1
+        ]
+        nao_enviar.sort(key=lambda x: x["data_nao_enviar"] or "", reverse=True)
 
         registros = (db.query(HistoricoFullEmbale)
                      .filter(HistoricoFullEmbale.embale_id == embale_id)
@@ -3779,6 +3924,8 @@ async def listar_historico_completo_embale(request: Request):
             "numero_inbound": embale.numero_inbound,
             "em_espera": em_espera,
             "total_em_espera": len(em_espera),
+            "nao_enviar": nao_enviar,
+            "total_nao_enviar": len(nao_enviar),
             "alteracoes": alteracoes,
             "total_alteracoes": len(alteracoes),
         })
@@ -4610,6 +4757,7 @@ routes = [
     Route("/api/embaldes/{embale_id}/historico-completo", listar_historico_completo_embale, methods=["GET"]),
     Route("/api/embaldes/{embale_id}/posicao-separacao", salvar_posicao_separacao, methods=["POST"]),
     Route("/api/embaldes/{embale_id}/itens/{item_id}/em-espera", marcar_em_espera_embale, methods=["POST"]),
+    Route("/api/embaldes/{embale_id}/itens/{item_id}/nao-enviar", marcar_nao_enviar_embale, methods=["POST"]),
     Route("/api/embaldes/{embale_id}/encerrar", encerrar_embale, methods=["POST"]),
 ]
 

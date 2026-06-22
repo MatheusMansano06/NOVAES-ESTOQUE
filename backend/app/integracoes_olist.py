@@ -1007,6 +1007,40 @@ class OlistIntegration:
             )
         }
 
+    def obter_imagem_produto(self, produto_id: str) -> Optional[str]:
+        """Retorna a URL da 1a imagem do produto na Olist (campo 'anexos').
+        Usado para mostrar a foto direto da Olist na Lista de Separação / Histórico.
+        Retorna None se não houver imagem ou der erro (foto é opcional)."""
+        if not produto_id:
+            return None
+        token = self.get_access_token()
+        if not token:
+            return None
+        try:
+            url = f"{self.API_BASE}/produtos/{produto_id}"
+            self._throttle()  # respeita o rate limit (120/min)
+            req = urllib.request.Request(
+                url, headers={"Accept": "application/json", "Authorization": f"Bearer {token}"}, method="GET"
+            )
+            with urllib.request.urlopen(req, timeout=15) as response:
+                data = json.loads(response.read().decode("utf-8"))
+
+            # Tiny/Olist v3: anexos = [{"url": "...", "externo": true}, ...]
+            for campo in ("anexos", "imagens"):
+                lista = data.get(campo)
+                if isinstance(lista, list):
+                    for a in lista:
+                        if isinstance(a, dict):
+                            u = (a.get("url") or a.get("link") or "").strip()
+                        else:
+                            u = str(a or "").strip()
+                        if u:
+                            return u.replace("http://", "https://")
+            return None
+        except Exception as e:
+            print(f"[OLIST] Sem imagem para produto {produto_id}: {e}")
+            return None
+
     def obter_produto_por_id(self, produto_id: str) -> Optional[Dict]:
         """Obtém um produto específico pela ID"""
         token = self.get_access_token()

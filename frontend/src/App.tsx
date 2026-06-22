@@ -2027,6 +2027,40 @@ function App() {
                       )}
                     </div>
                   </div>
+
+                  {/* Quebra por inbound: % de cada um que está rolando */}
+                  {inboundsAtivos.filter((i) => Number(i.total_planejado_full || 0) > 0).length > 0 && (
+                    <div style={{ marginTop: '1rem', borderTop: '1px solid #e3f2fd', paddingTop: '0.85rem', display: 'grid', gap: '0.8rem' }}>
+                      <div style={{ color: '#1565c0', fontWeight: 700, fontSize: '0.72rem', letterSpacing: '0.04em', textTransform: 'uppercase' }}>
+                        Por inbound
+                      </div>
+                      {inboundsAtivos
+                        .filter((i) => Number(i.total_planejado_full || 0) > 0)
+                        .map((inb, idx) => {
+                          const planejado = Number(inb.total_planejado_full || 0)
+                          const baixado = Number(inb.total_baixado_full || 0)
+                          const pct = planejado > 0 ? Math.round((baixado / planejado) * 100) : 0
+                          const espera = Number(inb.qtd_em_espera || 0)
+                          return (
+                            <div key={inb.numero_inbound || idx} style={{ display: 'grid', gap: '0.3rem' }}>
+                              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: '0.5rem', fontSize: '0.82rem' }}>
+                                <span style={{ fontWeight: 700, color: '#0d47a1', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                  {inb.nome_embalde || 'Inbound'}{inb.numero_inbound ? ` · #${inb.numero_inbound}` : ''}
+                                </span>
+                                <span style={{ fontWeight: 800, color: '#1976d2', flexShrink: 0 }}>{pct}%</span>
+                              </div>
+                              <div style={{ height: '7px', background: '#e3f2fd', borderRadius: '999px', overflow: 'hidden' }}>
+                                <div style={{ height: '100%', width: `${pct}%`, background: '#1976d2', transition: 'width 0.3s' }} />
+                              </div>
+                              <div style={{ fontSize: '0.75rem', color: '#666', display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
+                                <span>{baixado} de {planejado} un</span>
+                                {espera > 0 && <span style={{ color: '#8e24aa' }}>Em espera: {espera}</span>}
+                              </div>
+                            </div>
+                          )
+                        })}
+                    </div>
+                  )}
                 </div>
               </div>
             )}
