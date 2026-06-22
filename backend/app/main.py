@@ -8,6 +8,7 @@ from database import engine, Base, SessionLocal
 import os
 import json
 import threading
+import re
 from datetime import datetime, timedelta
 import uuid
 import urllib.request
@@ -4554,18 +4555,54 @@ def _refrescar_estoque_olist():
         skus = sorted({(s[0] or "").strip().upper() for s in ativos if s[0]})
         if not skus:
             return
+        snapshots_existentes = db.query(OlistEstoqueSnapshot).filter(
+            OlistEstoqueSnapshot.sku.is_not(None),
+            OlistEstoqueSnapshot.produto_id.is_not(None),
+        ).all()
+        mapa_fixado = {}
+        mapa_fixado_norm = {}
+        for row in snapshots_existentes:
+            sku_row = (row.sku or "").strip().upper()
+            pid_row = str(row.produto_id or "").strip()
+            sku_row_norm = _normalizar_sku_lista_compra(sku_row)
+            if sku_row and pid_row and sku_row not in mapa_fixado:
+                mapa_fixado[sku_row] = pid_row
+            if sku_row_norm and pid_row and sku_row_norm not in mapa_fixado_norm:
+                mapa_fixado_norm[sku_row_norm] = pid_row
+
         # Mapa SKU -> produto_id da Olist (1 carga em bulk do cache de produtos)
         try:
             produtos = olist.listar_todos_produtos(limite=5000)
         except Exception:
             produtos = []
         mapa = {}
+        mapa_norm = {}
         for p in produtos:
             sk = (p.get("sku") or p.get("codigo_produto") or "").strip().upper()
-            if sk and sk not in mapa:
-                mapa[sk] = str(p.get("id"))
+            pid = str(p.get("id") or "").strip()
+            sk_norm = _normalizar_sku_lista_compra(sk)
+            if sk and pid and sk not in mapa:
+                mapa[sk] = pid
+            if sk_norm and pid and sk_norm not in mapa_norm:
+                mapa_norm[sk_norm] = pid
         for sku in skus:
-            pid = mapa.get(sku)
+            sku_norm = _normalizar_sku_lista_compra(sku)
+            pid = (
+                mapa_fixado.get(sku)
+                or (mapa_fixado_norm.get(sku_norm) if sku_norm else None)
+                or mapa.get(sku)
+                or (mapa_norm.get(sku_norm) if sku_norm else None)
+            )
+            if not pid and sku_norm:
+                try:
+                    candidatos = olist.buscar_produtos(sku, limite_resultados=10)
+                except Exception:
+                    candidatos = []
+                for candidato in candidatos:
+                    cand_sku = (candidato.get("sku") or candidato.get("codigo_produto") or "").strip()
+                    if _normalizar_sku_lista_compra(cand_sku) == sku_norm:
+                        pid = str(candidato.get("id") or "").strip()
+                        break
             if not pid:
                 continue
             try:
@@ -4591,12 +4628,69 @@ def _refrescar_estoque_olist():
         _lock_estoque_olist.release()
 
 
+def _normalizar_sku_lista_compra(valor: str) -> str:
+    return re.sub(r"[^a-z0-9]", "", str(valor or "").lower())
+
+
 async def lista_compra_atualizar_estoque(request: Request):
     """POST — dispara a atualização do snapshot de estoque da Olist (background)."""
     if _lock_estoque_olist.locked():
         return JSONResponse({"status": "ja_rodando"})
     threading.Thread(target=_refrescar_estoque_olist, daemon=True).start()
     return JSONResponse({"status": "iniciado"})
+
+
+async def lista_compra_vincular_estoque_olist(request: Request):
+    """Vínculo manual SKU ML -> produto Olist para a Lista de Compra."""
+    db = SessionLocal()
+    try:
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+
+        sku = str(body.get("sku") or "").strip().upper()
+        produto_id = str(body.get("produto_id") or "").strip()
+        if not sku or not produto_id:
+            return JSONResponse({"erro": "SKU e produto_id são obrigatórios"}, status_code=400)
+
+        produto = None
+        try:
+            produto = olist.obter_produto_por_id(produto_id)
+        except Exception:
+            produto = None
+
+        try:
+            est = olist.obter_estoque(produto_id, usar_cache=False)
+        except Exception:
+            est = None
+        if est is None:
+            return JSONResponse({"erro": "Não consegui ler o estoque deste produto na Olist"}, status_code=502)
+
+        row = db.query(OlistEstoqueSnapshot).filter(OlistEstoqueSnapshot.sku == sku).first()
+        if not row:
+            row = OlistEstoqueSnapshot(sku=sku)
+            db.add(row)
+
+        row.sku = sku
+        row.produto_id = produto_id
+        row.saldo = float((est or {}).get("saldo") or 0)
+        row.atualizado_em = datetime.utcnow()
+        db.commit()
+
+        return JSONResponse({
+            "sucesso": True,
+            "sku": sku,
+            "produto_id": produto_id,
+            "produto_nome": (produto or {}).get("nome"),
+            "produto_sku": (produto or {}).get("sku"),
+            "saldo": row.saldo,
+        })
+    except Exception as e:
+        db.rollback()
+        return JSONResponse({"erro": str(e)}, status_code=500)
+    finally:
+        db.close()
 
 
 async def lista_compra(request: Request):
@@ -4960,6 +5054,7 @@ routes = [
     Route("/api/ml/conta", ml_conta, methods=["GET"]),
     Route("/api/lista-compra", lista_compra, methods=["GET"]),
     Route("/api/lista-compra/atualizar-estoque", lista_compra_atualizar_estoque, methods=["POST"]),
+    Route("/api/lista-compra/vincular-estoque-olist", lista_compra_vincular_estoque_olist, methods=["POST"]),
     Route("/api/ml/anuncios/{item_id:str}/pictures/upload", ml_anuncio_imagens_upload, methods=["POST"]),
     Route("/api/ml/anuncios/{item_id:str}/pictures", ml_anuncio_imagens_reordenar, methods=["POST"]),
     Route("/api/ml/precificacao", ml_precificacao, methods=["GET"]),

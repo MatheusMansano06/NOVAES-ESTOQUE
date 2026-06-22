@@ -37,6 +37,14 @@ interface Resumo {
 
 interface EstoqueOlistInfo { atualizado_em: string | null; atualizando: boolean; skus: number }
 interface Dados { meta_dias: number; resumo: Resumo; itens: ItemCompra[]; estoque_olist?: EstoqueOlistInfo }
+interface ProdutoOlist {
+  id: string
+  sku?: string
+  codigo_produto?: string
+  nome?: string
+  descricao?: string
+  preco?: number
+}
 
 const PRIO = {
   maxima: { label: '🔴 Comprar urgente', cor: '#c62828', bg: '#ffebee', borda: '#ef9a9a' },
@@ -68,6 +76,11 @@ export function ListaCompra() {
   const [filtroCurva, setFiltroCurva] = useState<'todas' | 'A' | 'B' | 'C'>('todas')
   const [filtroPrio, setFiltroPrio] = useState<'todas' | 'maxima' | 'media' | 'ok' | 'sem_giro'>('todas')
   const [busca, setBusca] = useState('')
+  const [itemVinculo, setItemVinculo] = useState<ItemCompra | null>(null)
+  const [buscaOlist, setBuscaOlist] = useState('')
+  const [resultadosOlist, setResultadosOlist] = useState<ProdutoOlist[]>([])
+  const [buscandoOlist, setBuscandoOlist] = useState(false)
+  const [vinculandoOlist, setVinculandoOlist] = useState(false)
 
   const carregar = useCallback(async (meta: number) => {
     setCarregando(true)
@@ -100,6 +113,60 @@ export function ListaCompra() {
       // marca como atualizando localmente e dispara o polling
       setDados(d => d ? { ...d, estoque_olist: { ...(d.estoque_olist || { atualizado_em: null, skus: 0 }), atualizando: true } } : d)
     } catch { /* silencioso */ }
+  }
+
+  const buscarProdutosOlist = useCallback(async (termo: string) => {
+    const q = termo.trim()
+    if (!q) {
+      setResultadosOlist([])
+      return
+    }
+    setBuscandoOlist(true)
+    try {
+      const r = await fetch(`${API_BASE}/api/olist/produtos?q=${encodeURIComponent(q)}`, { cache: 'no-store' })
+      const d = await r.json()
+      setResultadosOlist(d.produtos || [])
+    } catch {
+      setResultadosOlist([])
+    } finally {
+      setBuscandoOlist(false)
+    }
+  }, [])
+
+  const abrirVinculo = async (item: ItemCompra) => {
+    setItemVinculo(item)
+    setBuscaOlist(item.sku)
+    setResultadosOlist([])
+    await buscarProdutosOlist(item.sku)
+  }
+
+  const fecharVinculo = () => {
+    setItemVinculo(null)
+    setBuscaOlist('')
+    setResultadosOlist([])
+    setBuscandoOlist(false)
+    setVinculandoOlist(false)
+  }
+
+  const vincularProdutoOlist = async (produto: ProdutoOlist) => {
+    if (!itemVinculo) return
+    setVinculandoOlist(true)
+    setErro('')
+    try {
+      const r = await fetch(`${API_BASE}/api/lista-compra/vincular-estoque-olist`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sku: itemVinculo.sku, produto_id: produto.id }),
+      })
+      const d = await r.json()
+      if (!r.ok || d.erro) throw new Error(d.erro || 'Falha ao vincular produto da Olist')
+      fecharVinculo()
+      await carregar(metaDias)
+    } catch (e) {
+      setErro(String(e instanceof Error ? e.message : e))
+    } finally {
+      setVinculandoOlist(false)
+    }
   }
 
   const fmtQuando = (iso?: string | null) => {
@@ -224,6 +291,19 @@ export function ListaCompra() {
                     </span>
                     {it.velocidade_mes > 0 && <> · vende <strong>~{it.velocidade_mes}/mês</strong></>}
                   </div>
+                  {!it.tem_estoque_olist && (
+                    <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
+                      <span style={{ fontSize: '0.76rem', color: '#b54708', fontWeight: 700 }}>
+                        Esse SKU ainda não foi ligado a um produto da Olist.
+                      </span>
+                      <button
+                        onClick={() => abrirVinculo(it)}
+                        style={{ padding: '0.34rem 0.7rem', background: '#fff', color: '#1976D2', border: '1px solid #90caf9', borderRadius: '999px', fontWeight: 700, cursor: 'pointer', fontSize: '0.76rem' }}
+                      >
+                        Vincular Olist
+                      </button>
+                    </div>
+                  )}
                   {/* Barra: quão cheio está o estoque vs a meta */}
                   <div style={{ marginTop: '0.15rem' }}>
                     <div style={{ height: 8, background: '#eceff1', borderRadius: 999, overflow: 'hidden' }}>
@@ -247,6 +327,79 @@ export function ListaCompra() {
               </div>
             )
           })}
+        </div>
+      )}
+
+      {itemVinculo && (
+        <div
+          onClick={fecharVinculo}
+          style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: '1rem' }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{ width: '100%', maxWidth: 720, maxHeight: '85vh', overflowY: 'auto', background: '#fff', borderRadius: '12px', padding: '1.25rem', boxShadow: '0 18px 40px rgba(0,0,0,0.25)' }}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '1rem', marginBottom: '1rem' }}>
+              <div>
+                <div style={{ fontWeight: 800, fontSize: '1rem', color: '#1d2939' }}>Vincular SKU à Olist</div>
+                <div style={{ fontSize: '0.82rem', color: '#667085', marginTop: '0.2rem' }}>
+                  SKU ML: <strong>{itemVinculo.sku}</strong><br />
+                  {itemVinculo.titulo}
+                </div>
+              </div>
+              <button onClick={fecharVinculo} style={{ border: '1px solid #e4e7ec', background: '#fff', borderRadius: 8, width: 30, height: 30, cursor: 'pointer', fontSize: '1rem', color: '#667085' }}>×</button>
+            </div>
+
+            <div style={{ display: 'flex', gap: '0.6rem', marginBottom: '1rem', flexWrap: 'wrap' }}>
+              <input
+                value={buscaOlist}
+                onChange={(e) => setBuscaOlist(e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Enter') buscarProdutosOlist(buscaOlist) }}
+                placeholder="Buscar por SKU ou nome na Olist..."
+                style={{ flex: '1 1 320px', padding: '0.7rem 0.85rem', border: '1px solid #cfd8dc', borderRadius: 8, fontSize: '0.9rem' }}
+              />
+              <button
+                onClick={() => buscarProdutosOlist(buscaOlist)}
+                disabled={buscandoOlist}
+                style={{ padding: '0.7rem 1rem', background: '#1976D2', color: '#fff', border: 'none', borderRadius: 8, fontWeight: 700, cursor: buscandoOlist ? 'wait' : 'pointer' }}
+              >
+                {buscandoOlist ? 'Buscando...' : 'Buscar'}
+              </button>
+            </div>
+
+            {buscandoOlist ? (
+              <div style={{ padding: '1.5rem', textAlign: 'center', color: '#667085' }}>Buscando produtos da Olist...</div>
+            ) : resultadosOlist.length === 0 ? (
+              <div style={{ padding: '1rem', background: '#fff8e1', border: '1px solid #ffe082', borderRadius: '8px', color: '#8a6d3b', fontSize: '0.85rem' }}>
+                Nenhum produto encontrado nessa busca. Tente o SKU puro ou parte do nome do produto.
+              </div>
+            ) : (
+              <div style={{ display: 'grid', gap: '0.55rem' }}>
+                {resultadosOlist.map((produto) => (
+                  <div
+                    key={produto.id}
+                    style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '1rem', padding: '0.8rem 0.9rem', border: '1px solid #e6eaee', borderRadius: '8px' }}
+                  >
+                    <div style={{ minWidth: 0, flex: 1 }}>
+                      <div style={{ fontWeight: 700, fontSize: '0.88rem', color: '#1d2939' }}>
+                        {produto.nome || produto.descricao || 'Produto sem nome'}
+                      </div>
+                      <div style={{ fontSize: '0.78rem', color: '#667085', marginTop: '0.15rem' }}>
+                        SKU: {produto.sku || produto.codigo_produto || '—'} · ID: {produto.id}
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => vincularProdutoOlist(produto)}
+                      disabled={vinculandoOlist}
+                      style={{ padding: '0.55rem 0.95rem', background: '#2e7d32', color: '#fff', border: 'none', borderRadius: '8px', fontWeight: 700, cursor: vinculandoOlist ? 'wait' : 'pointer', whiteSpace: 'nowrap' }}
+                    >
+                      {vinculandoOlist ? 'Vinculando...' : 'Vincular'}
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
       )}
     </div>
