@@ -46,6 +46,17 @@ const CURVA_COR: Record<string, string> = { A: '#2e7d32', B: '#ef6c00', C: '#90a
 
 const META_OPCOES = [30, 45, 60, 75, 90]
 
+// Texto grande do "quanto ainda dura" (destaque escolhido pelo usuário).
+function infoDura(it: ItemCompra): { grande: string; sub: string } {
+  if (it.prioridade === 'sem_giro' || it.dias_cobertura == null) {
+    return { grande: 'Sem giro', sub: 'sem venda registrada ainda' }
+  }
+  const d = it.dias_cobertura
+  if (d < 1) return { grande: 'Acaba hoje', sub: 'menos de 1 dia de estoque' }
+  if (d < 2) return { grande: '~1 dia', sub: 'de estoque restante' }
+  return { grande: `${Math.round(d)} dias`, sub: 'de estoque restante' }
+}
+
 export function ListaCompra() {
   const [dados, setDados] = useState<Dados | null>(null)
   const [carregando, setCarregando] = useState(true)
@@ -82,9 +93,6 @@ export function ListaCompra() {
     }
     return true
   })
-
-  const th: React.CSSProperties = { textAlign: 'left', padding: '0.5rem 0.6rem', fontSize: '0.7rem', textTransform: 'uppercase', color: '#666', fontWeight: 700, borderBottom: '2px solid #eee', whiteSpace: 'nowrap' }
-  const td: React.CSSProperties = { padding: '0.5rem 0.6rem', fontSize: '0.85rem', borderBottom: '1px solid #f3f4f6', verticalAlign: 'middle' }
 
   const chip = (label: string, valor: number, cor: string, bg: string) => (
     <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', padding: '0.4rem 0.7rem', borderRadius: '999px', background: bg, color: cor, fontWeight: 700, fontSize: '0.8rem' }}>
@@ -152,55 +160,52 @@ export function ListaCompra() {
       ) : itensFiltrados.length === 0 ? (
         <p style={{ textAlign: 'center', color: '#999', padding: '2rem' }}>Nenhum produto neste filtro.</p>
       ) : (
-        <div style={{ overflowX: 'auto', border: '1px solid #eee', borderRadius: '10px' }}>
-          <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 900 }}>
-            <thead>
-              <tr>
-                <th style={th}>Produto</th>
-                <th style={th}>Curva</th>
-                <th style={{ ...th, textAlign: 'right' }}>Estoque (FULL+org)</th>
-                <th style={{ ...th, textAlign: 'right' }}>Vende/mês</th>
-                <th style={{ ...th, textAlign: 'right' }}>Dura</th>
-                <th style={{ ...th, textAlign: 'right' }}>% segurança</th>
-                <th style={{ ...th, textAlign: 'right' }}>Comprar</th>
-                <th style={th}>Prioridade</th>
-              </tr>
-            </thead>
-            <tbody>
-              {itensFiltrados.map(it => {
-                const prio = PRIO[it.prioridade]
-                return (
-                  <tr key={it.sku} style={{ background: it.prioridade === 'maxima' ? '#fff6f6' : '#fff' }}>
-                    <td style={td}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
-                        <div style={{ width: 40, height: 40, flexShrink: 0, borderRadius: 6, overflow: 'hidden', background: '#f5f5f5', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                          {it.imagem ? <img src={it.imagem} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : <span style={{ color: '#ccc' }}>📦</span>}
-                        </div>
-                        <div style={{ minWidth: 0 }}>
-                          <div style={{ fontWeight: 600, lineHeight: 1.25, fontSize: '0.85rem' }}>{it.titulo}</div>
-                          <div style={{ fontSize: '0.74rem', color: '#888' }}>SKU: {it.sku}</div>
-                        </div>
-                      </div>
-                    </td>
-                    <td style={td}>
-                      <span style={{ display: 'inline-flex', width: 24, height: 24, alignItems: 'center', justifyContent: 'center', borderRadius: 6, fontWeight: 800, color: '#fff', background: CURVA_COR[it.curva] }}>{it.curva}</span>
-                    </td>
-                    <td style={{ ...td, textAlign: 'right' }}>
-                      <div style={{ fontWeight: 700 }}>{it.estoque_total}</div>
-                      <div style={{ fontSize: '0.72rem', color: '#999' }}>FULL {it.estoque_full} · org {it.estoque_organico}</div>
-                    </td>
-                    <td style={{ ...td, textAlign: 'right' }}>{it.velocidade_mes > 0 ? it.velocidade_mes : '—'}</td>
-                    <td style={{ ...td, textAlign: 'right' }}>{it.dias_cobertura != null ? `${it.dias_cobertura}d` : '—'}</td>
-                    <td style={{ ...td, textAlign: 'right', fontWeight: 800, color: prio.cor }}>{it.pct_seguranca != null ? `${it.pct_seguranca}%` : '—'}</td>
-                    <td style={{ ...td, textAlign: 'right', fontWeight: 800 }}>{it.comprar > 0 ? it.comprar : '—'}</td>
-                    <td style={td}>
-                      <span style={{ fontSize: '0.74rem', fontWeight: 700, color: prio.cor, background: prio.bg, border: `1px solid ${prio.borda}`, borderRadius: '999px', padding: '0.2rem 0.6rem', whiteSpace: 'nowrap' }}>{prio.label}</span>
-                    </td>
-                  </tr>
-                )
-              })}
-            </tbody>
-          </table>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+          {itensFiltrados.map(it => {
+            const prio = PRIO[it.prioridade]
+            const dura = infoDura(it)
+            const gauge = Math.max(2, Math.min(100, it.pct_seguranca ?? 0))
+            return (
+              <div key={it.sku} style={{ display: 'flex', gap: '1rem', alignItems: 'stretch', flexWrap: 'wrap', padding: '1rem', borderRadius: '12px', border: `1px solid ${prio.borda}`, borderLeft: `6px solid ${prio.cor}`, background: it.prioridade === 'maxima' ? '#fff8f8' : '#fff' }}>
+                {/* Foto */}
+                <div style={{ width: 56, height: 56, flexShrink: 0, borderRadius: 8, overflow: 'hidden', background: '#f5f5f5', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  {it.imagem ? <img src={it.imagem} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : <span style={{ color: '#ccc', fontSize: '1.5rem' }}>📦</span>}
+                </div>
+
+                {/* Meio: descrição em linguagem simples */}
+                <div style={{ flex: '1 1 320px', minWidth: 240, display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+                    <span style={{ display: 'inline-flex', width: 22, height: 22, alignItems: 'center', justifyContent: 'center', borderRadius: 6, fontWeight: 800, color: '#fff', fontSize: '0.78rem', background: CURVA_COR[it.curva] }} title={`Curva ${it.curva}`}>{it.curva}</span>
+                    <span style={{ fontWeight: 700, lineHeight: 1.25, fontSize: '0.92rem' }}>{it.titulo}</span>
+                  </div>
+                  <div style={{ fontSize: '0.76rem', color: '#888' }}>SKU: {it.sku}</div>
+                  <div style={{ fontSize: '0.86rem', color: '#444' }}>
+                    Tem <strong>{it.estoque_total} un</strong> <span style={{ color: '#888' }}>(FULL {it.estoque_full} + orgânico {it.estoque_organico})</span>
+                    {it.velocidade_mes > 0 && <> · vende <strong>~{it.velocidade_mes}/mês</strong></>}
+                  </div>
+                  {/* Barra: quão cheio está o estoque vs a meta */}
+                  <div style={{ marginTop: '0.15rem' }}>
+                    <div style={{ height: 8, background: '#eceff1', borderRadius: 999, overflow: 'hidden' }}>
+                      <div style={{ height: '100%', width: `${gauge}%`, background: prio.cor, transition: 'width .3s' }} />
+                    </div>
+                    <div style={{ fontSize: '0.72rem', color: '#999', marginTop: '0.2rem' }}>
+                      {it.pct_seguranca != null ? `${it.pct_seguranca}% do estoque ideal` : 'sem meta'} · meta {it.meta_100} un ({dados?.meta_dias ?? 75} dias)
+                    </div>
+                  </div>
+                </div>
+
+                {/* Direita: destaque em "quanto ainda dura" + ação */}
+                <div style={{ flex: '0 0 200px', minWidth: 180, display: 'flex', flexDirection: 'column', alignItems: 'flex-end', justifyContent: 'center', gap: '0.3rem', textAlign: 'right' }}>
+                  <div style={{ fontSize: '1.5rem', fontWeight: 900, color: prio.cor, lineHeight: 1 }}>{dura.grande}</div>
+                  <div style={{ fontSize: '0.74rem', color: '#888' }}>{dura.sub}</div>
+                  <span style={{ fontSize: '0.74rem', fontWeight: 700, color: prio.cor, background: prio.bg, border: `1px solid ${prio.borda}`, borderRadius: '999px', padding: '0.2rem 0.7rem', whiteSpace: 'nowrap' }}>{prio.label}</span>
+                  {it.comprar > 0 && (
+                    <div style={{ marginTop: '0.2rem', fontSize: '0.92rem', color: '#1a1a1a' }}>Comprar <strong style={{ fontSize: '1.05rem' }}>{it.comprar} un</strong></div>
+                  )}
+                </div>
+              </div>
+            )
+          })}
         </div>
       )}
     </div>
