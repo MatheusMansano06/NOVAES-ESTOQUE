@@ -41,6 +41,7 @@ interface Anuncio {
   thumbnail?: string
   permalink?: string
   categoria_id?: string
+  date_created?: string | null
 }
 
 interface Props { onVoltar: () => void }
@@ -53,6 +54,23 @@ const ABAS: { id: string; label: string }[] = [
 ]
 
 const brl = (v?: number | null) => v == null ? '--' : 'R$ ' + v.toFixed(2).replace('.', ',')
+
+// Quantos dias se passaram desde a criação do anúncio no ML.
+const diasDesdeCriacao = (iso?: string | null): number | null => {
+  if (!iso) return null
+  const d = new Date(iso)
+  if (isNaN(d.getTime())) return null
+  const ms = Date.now() - d.getTime()
+  return Math.max(0, Math.floor(ms / 86400000))
+}
+
+const textoCriado = (iso?: string | null): string => {
+  const dias = diasDesdeCriacao(iso)
+  if (dias == null) return 'criado: --'
+  if (dias === 0) return 'criado hoje'
+  if (dias === 1) return 'criado há 1 dia'
+  return `criado há ${dias} dias`
+}
 
 const textoFrete = (a: Anuncio) => {
   if (a.frete_custo != null) return brl(a.frete_custo)
@@ -153,6 +171,13 @@ export function AnunciosML({ onVoltar }: Props) {
   const [editando, setEditando] = useState<{ anuncio: Anuncio; mode: EditorMode } | null>(null)
   const [resumos, setResumos] = useState<Record<string, PricingSnapshot>>({})
   const [custosOficiais, setCustosOficiais] = useState<CustosOficiais>({})
+  const [acaoMsg, setAcaoMsg] = useState<{ tipo: 'ok' | 'erro'; texto: string } | null>(null)
+
+  const avisar = (tipo: 'ok' | 'erro', texto: string) => {
+    setAcaoMsg({ tipo, texto })
+    window.clearTimeout((avisar as any)._t)
+    ;(avisar as any)._t = window.setTimeout(() => setAcaoMsg(null), 6000)
+  }
 
   useEffect(() => {
     setResumos(loadPricingSummaryMap())
@@ -276,6 +301,15 @@ export function AnunciosML({ onVoltar }: Props) {
           </div>
         )}
 
+        {acaoMsg && (
+          <div style={{ padding: '0.85rem 1rem', borderRadius: '8px', marginBottom: '1rem', fontWeight: 600,
+            background: acaoMsg.tipo === 'ok' ? '#e8f5e9' : '#ffebee',
+            border: `1px solid ${acaoMsg.tipo === 'ok' ? '#a5d6a7' : '#ef9a9a'}`,
+            color: acaoMsg.tipo === 'ok' ? '#2e7d32' : '#c62828' }}>
+            {acaoMsg.texto}
+          </div>
+        )}
+
         {loading ? (
           <p style={{ textAlign: 'center', color: '#999', padding: '2rem' }}>Carregando anuncios...</p>
         ) : anuncios.length === 0 ? (
@@ -294,17 +328,15 @@ export function AnunciosML({ onVoltar }: Props) {
                       <div style={{ fontWeight: 600, fontSize: '0.95rem', marginBottom: '0.3rem', lineHeight: 1.3 }}>{a.titulo}</div>
                       <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center', fontSize: '0.78rem' }}>
                         <span style={{ background: '#ede7f6', color: '#4527a0', padding: '2px 8px', borderRadius: '6px', fontWeight: 600 }}>{a.tipo_anuncio}</span>
-                        {a.sku && <span style={{ color: '#555' }}>SKU: {a.sku}</span>}
+                        {a.sku && <SkuChip sku={a.sku} onCopiado={() => avisar('ok', `SKU ${a.sku} copiado`)} />}
                         <a href={a.permalink} target="_blank" rel="noreferrer" style={{ color: '#3483fa', textDecoration: 'none' }}>{a.id}</a>
+                        <span style={{ color: '#8a96a3' }} title={a.date_created ? new Date(a.date_created).toLocaleString('pt-BR') : undefined}>🗓️ {textoCriado(a.date_created)}</span>
                         {a.frete_gratis && <span style={{ color: '#2e7d32' }}>frete gratis</span>}
                         {a.full && <span style={{ background: '#e8f5e9', color: '#2e7d32', padding: '1px 6px', borderRadius: '6px', fontWeight: 600 }}>FULL</span>}
                         {a.flex && <span style={{ background: '#fff3e0', color: '#ef6c00', padding: '1px 6px', borderRadius: '6px', fontWeight: 600 }}>FLEX</span>}
                       </div>
                     </div>
-                    <div style={{ textAlign: 'center', minWidth: '70px' }}>
-                      <div style={{ fontSize: '0.7rem', color: '#999' }}>Estoque</div>
-                      <div style={{ fontWeight: 700, color: a.disponivel > 0 ? '#1a1a1a' : '#c62828' }}>{a.disponivel}</div>
-                    </div>
+                    <StockEditor anuncio={a} onSaved={carregar} onMsg={avisar} />
                     <div style={{ textAlign: 'center', minWidth: '70px' }}>
                       <div style={{ fontSize: '0.7rem', color: '#999' }}>Vendidos</div>
                       <div style={{ fontWeight: 700, color: '#1a1a1a' }}>{a.vendidos}</div>
@@ -348,6 +380,7 @@ export function AnunciosML({ onVoltar }: Props) {
                     <ActionBtn label="Atacado B2B" onClick={() => setEditando({ anuncio: a, mode: 'atacado' })} />
                     <ActionBtn label="Flex" onClick={() => setEditando({ anuncio: a, mode: 'flex' })} />
                     <ActionBtn label="Precificador" strong onClick={() => setPrecificando(a)} />
+                    <MenuAcoes anuncio={a} onChanged={carregar} onMsg={avisar} />
                   </div>
                 </div>
               )
@@ -688,6 +721,189 @@ function ActionBtn({ label, onClick, strong = false }: { label: string; onClick:
     >
       {label}
     </button>
+  )
+}
+
+async function copiarTexto(texto: string): Promise<boolean> {
+  try {
+    await navigator.clipboard.writeText(texto)
+    return true
+  } catch {
+    try {
+      const ta = document.createElement('textarea')
+      ta.value = texto
+      ta.style.position = 'fixed'
+      ta.style.opacity = '0'
+      document.body.appendChild(ta)
+      ta.select()
+      const ok = document.execCommand('copy')
+      document.body.removeChild(ta)
+      return ok
+    } catch {
+      return false
+    }
+  }
+}
+
+function SkuChip({ sku, onCopiado }: { sku: string; onCopiado: () => void }) {
+  return (
+    <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', color: '#555' }}>
+      SKU: {sku}
+      <button
+        onClick={async (e) => { e.stopPropagation(); if (await copiarTexto(sku)) onCopiado() }}
+        title="Copiar SKU"
+        style={{ border: '1px solid #d4dbe6', background: '#fff', borderRadius: '5px', cursor: 'pointer', padding: '1px 5px', fontSize: '0.72rem', lineHeight: 1.2, color: '#475467' }}
+      >
+        📋
+      </button>
+    </span>
+  )
+}
+
+function StockEditor({ anuncio, onSaved, onMsg }: { anuncio: Anuncio; onSaved: () => void; onMsg: (t: 'ok' | 'erro', s: string) => void }) {
+  const [editando, setEditando] = useState(false)
+  const [valor, setValor] = useState(String(anuncio.disponivel ?? 0))
+  const [salvando, setSalvando] = useState(false)
+  const travadoFull = !!anuncio.full
+  const finalizado = anuncio.status === 'closed'
+
+  const salvar = async () => {
+    const q = parseInt(valor, 10)
+    if (isNaN(q) || q < 0) { onMsg('erro', 'Informe uma quantidade válida'); return }
+    setSalvando(true)
+    try {
+      const r = await fetch(`${API_BASE}/api/ml/anuncios/${anuncio.id}/estoque`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ quantidade: q }),
+      })
+      const d = await r.json()
+      if (!r.ok || d.erro) throw new Error(d.erro || 'Falha ao atualizar o estoque')
+      onMsg('ok', `Estoque atualizado para ${d.quantidade_nova ?? q}`)
+      setEditando(false)
+      onSaved()
+    } catch (e) {
+      onMsg('erro', String(e instanceof Error ? e.message : e))
+    } finally {
+      setSalvando(false)
+    }
+  }
+
+  if (editando) {
+    return (
+      <div style={{ textAlign: 'center', minWidth: '110px' }}>
+        <div style={{ fontSize: '0.7rem', color: '#999', marginBottom: 2 }}>Estoque</div>
+        <div style={{ display: 'flex', gap: 4, alignItems: 'center', justifyContent: 'center' }}>
+          <input
+            type="number" min="0" step="1" autoFocus
+            value={valor}
+            onChange={e => setValor(e.target.value)}
+            onKeyDown={e => { if (e.key === 'Enter') salvar(); if (e.key === 'Escape') setEditando(false) }}
+            style={{ width: '58px', padding: '0.3rem', border: '1px solid #bbb', borderRadius: 6, textAlign: 'center', fontWeight: 700 }}
+          />
+          <button onClick={salvar} disabled={salvando} title="Salvar" style={{ border: 'none', background: '#3483fa', color: '#fff', borderRadius: 6, padding: '0.3rem 0.45rem', cursor: salvando ? 'wait' : 'pointer', fontWeight: 800 }}>✓</button>
+          <button onClick={() => { setEditando(false); setValor(String(anuncio.disponivel ?? 0)) }} title="Cancelar" style={{ border: '1px solid #ddd', background: '#fff', color: '#888', borderRadius: 6, padding: '0.3rem 0.45rem', cursor: 'pointer' }}>×</button>
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <div style={{ textAlign: 'center', minWidth: '70px' }}>
+      <div style={{ fontSize: '0.7rem', color: '#999' }}>Estoque</div>
+      <div style={{ display: 'flex', gap: 4, alignItems: 'center', justifyContent: 'center' }}>
+        <span style={{ fontWeight: 700, color: (anuncio.disponivel ?? 0) > 0 ? '#1a1a1a' : '#c62828' }}>{anuncio.disponivel}</span>
+        {!travadoFull && !finalizado && (
+          <button
+            onClick={() => { setValor(String(anuncio.disponivel ?? 0)); setEditando(true) }}
+            title="Editar estoque"
+            style={{ border: '1px solid #d4dbe6', background: '#fff', borderRadius: 5, cursor: 'pointer', padding: '0 5px', fontSize: '0.72rem', color: '#475467' }}
+          >✏️</button>
+        )}
+      </div>
+      {travadoFull && <div style={{ fontSize: '0.6rem', color: '#9aa6b2', marginTop: 1 }}>FULL (ML gere)</div>}
+    </div>
+  )
+}
+
+function MenuItem({ label, sub, onClick, disabled, danger }: { label: string; sub?: string; onClick?: () => void; disabled?: boolean; danger?: boolean }) {
+  return (
+    <button
+      onClick={onClick}
+      disabled={disabled}
+      style={{
+        display: 'block', width: '100%', textAlign: 'left', padding: '0.55rem 0.85rem',
+        background: '#fff', border: 'none', borderBottom: '1px solid #f2f4f7',
+        cursor: disabled ? 'not-allowed' : 'pointer',
+        color: disabled ? '#bcc4cf' : danger ? '#c62828' : '#344054',
+        fontWeight: 600, fontSize: '0.85rem',
+      }}
+    >
+      {label}
+      {sub && <div style={{ fontSize: '0.7rem', color: disabled ? '#cbd2da' : '#98a2b3', fontWeight: 500 }}>{sub}</div>}
+    </button>
+  )
+}
+
+function MenuAcoes({ anuncio, onChanged, onMsg }: { anuncio: Anuncio; onChanged: () => void; onMsg: (t: 'ok' | 'erro', s: string) => void }) {
+  const [aberto, setAberto] = useState(false)
+  const [ocupado, setOcupado] = useState(false)
+  const finalizado = anuncio.status === 'closed'
+
+  const acao = async (url: string, body: object | null, confirmMsg: string, okMsg: string) => {
+    if (!window.confirm(confirmMsg)) return
+    setAberto(false)
+    setOcupado(true)
+    try {
+      const r = await fetch(`${API_BASE}${url}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: body ? JSON.stringify(body) : undefined,
+      })
+      const d = await r.json()
+      if (!r.ok || d.erro) throw new Error(d.erro || 'Falha na operação')
+      onMsg('ok', okMsg)
+      onChanged()
+    } catch (e) {
+      onMsg('erro', String(e instanceof Error ? e.message : e))
+    } finally {
+      setOcupado(false)
+    }
+  }
+
+  const id = anuncio.id
+  const pausar = () => acao(`/api/ml/anuncios/${id}/status`, { status: 'paused' }, 'Pausar este anúncio no Mercado Livre?', 'Anúncio pausado')
+  const reativar = () => acao(`/api/ml/anuncios/${id}/status`, { status: 'active' }, 'Reativar este anúncio no Mercado Livre?', 'Anúncio reativado')
+  const finalizar = () => acao(`/api/ml/anuncios/${id}/status`, { status: 'closed' }, 'Finalizar este anúncio? Isso é IRREVERSÍVEL no Mercado Livre.', 'Anúncio finalizado')
+  const excluir = () => acao(`/api/ml/anuncios/${id}/excluir`, null, 'Excluir este anúncio? Ele será finalizado e removido (o ML guarda o histórico).', 'Anúncio excluído')
+  const emBreve = () => onMsg('erro', 'Duplicação chega na próxima atualização 😉')
+
+  return (
+    <div style={{ position: 'relative', display: 'inline-block' }}>
+      <button
+        onClick={() => setAberto(v => !v)}
+        disabled={ocupado}
+        title="Mais ações"
+        style={{ padding: '.55rem .8rem', borderRadius: 999, border: '1px solid #d4dbe6', background: aberto ? '#eef2f7' : '#fff', color: '#344054', cursor: ocupado ? 'wait' : 'pointer', fontWeight: 800, fontSize: '.95rem', lineHeight: 1 }}
+      >
+        ⋮
+      </button>
+      {aberto && (
+        <>
+          <div onClick={() => setAberto(false)} style={{ position: 'fixed', inset: 0, zIndex: 40 }} />
+          <div style={{ position: 'absolute', right: 0, top: 'calc(100% + 6px)', zIndex: 41, width: 230, background: '#fff', border: '1px solid #e4e7ec', borderRadius: 10, boxShadow: '0 14px 30px rgba(16,24,40,.16)', overflow: 'hidden' }}>
+            {!finalizado && anuncio.status === 'active' && <MenuItem label="⏸️ Pausar anúncio" onClick={pausar} />}
+            {!finalizado && anuncio.status === 'paused' && <MenuItem label="▶️ Reativar anúncio" onClick={reativar} />}
+            {!finalizado && <MenuItem label="⛔ Finalizar anúncio" sub="irreversível no ML" onClick={finalizar} />}
+            <MenuItem label="🗑️ Excluir anúncio" sub="finaliza e remove dos ativos" danger onClick={excluir} />
+            <div style={{ padding: '0.35rem 0.85rem', fontSize: '0.66rem', color: '#98a2b3', textTransform: 'uppercase', letterSpacing: '.03em', background: '#fafbfc', borderTop: '1px solid #f2f4f7' }}>Duplicar (em breve)</div>
+            <MenuItem label="📄 Duplicar igual" disabled onClick={emBreve} />
+            <MenuItem label="✏️ Duplicar editando" disabled onClick={emBreve} />
+            <MenuItem label="🗂️ Duplicar em outra categoria" disabled onClick={emBreve} />
+          </div>
+        </>
+      )}
+    </div>
   )
 }
 

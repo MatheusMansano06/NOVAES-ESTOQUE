@@ -406,6 +406,7 @@ class MercadoLivreItemCache(Base):
     raw_item_json = Column(Text, nullable=True)
     ml_last_updated = Column(DateTime, nullable=True)
     ml_last_changed_at = Column(DateTime, nullable=True)
+    date_created = Column(DateTime, nullable=True)  # quando o anúncio foi criado no ML
     cache_version = Column(Integer, default=1)
     synced_at = Column(DateTime, default=datetime.utcnow, index=True)
     cache_expires_at = Column(DateTime, nullable=True, index=True)

@@ -451,6 +451,7 @@ class MLIntegration:
             "thumbnail": row.thumbnail,
             "permalink": row.permalink,
             "categoria_id": row.categoria_id,
+            "date_created": row.date_created.isoformat() if row.date_created else None,
         }
 
     def _build_detalhe_from_cache(self, row: MercadoLivreItemCache) -> Dict[str, Any]:
@@ -570,6 +571,8 @@ class MLIntegration:
         row.pictures_json = self._json_dump(body.get("pictures") or [])
         row.raw_item_json = self._json_dump(body)
         row.ml_last_updated = self._parse_dt_iso(body.get("last_updated"))
+        if body.get("date_created"):
+            row.date_created = self._parse_dt_iso(body.get("date_created"))
         row.synced_at = now
         row.cache_expires_at = now + timedelta(seconds=cache_ttl_seconds or self.DETAIL_CACHE_TTL_SECONDS)
         row.last_error = None
@@ -653,6 +656,7 @@ class MLIntegration:
             "thumbnail": (body.get("thumbnail") or "").replace("http://", "https://"),
             "permalink": body.get("permalink"),
             "categoria_id": body.get("category_id"),
+            "date_created": body.get("date_created"),
         }
 
     def _custos_frete_gratis(self, item_ids: List[str]) -> Dict[str, Dict[str, Any]]:
@@ -738,6 +742,24 @@ class MLIntegration:
             # contagem LOCAL — o catálogo inteiro fica espelhado no cache.
             total = query.count()
             rows = query.order_by(MercadoLivreItemCache.item_id.asc()).offset(offset).limit(limit).all()
+
+            # Backfill leve do date_created só para os itens da página que ainda não
+            # têm (campo novo): 1 chamada batch ao ML, não trava se falhar.
+            faltando = [r for r in rows if r.date_created is None and r.item_id]
+            if faltando:
+                try:
+                    mapa = self._date_created_map([r.item_id for r in faltando])
+                    mudou = False
+                    for r in faltando:
+                        dc = mapa.get(str(r.item_id))
+                        if dc:
+                            r.date_created = dc
+                            mudou = True
+                    if mudou:
+                        db.commit()
+                except Exception:
+                    db.rollback()
+
             anuncios = [self._cache_to_simple_item(row) for row in rows]
             return {
                 "total": total,
@@ -827,7 +849,7 @@ class MLIntegration:
         total = (busca.get("paging") or {}).get("total", len(ids))
         anuncios: List[Dict[str, Any]] = []
         body_by_id: Dict[str, Dict[str, Any]] = {}
-        atributos = "id,title,price,original_price,currency_id,available_quantity,sold_quantity,status,listing_type_id,seller_custom_field,attributes,shipping,thumbnail,permalink,category_id,pictures,sale_terms,tags,last_updated"
+        atributos = "id,title,price,original_price,currency_id,available_quantity,sold_quantity,status,listing_type_id,seller_custom_field,attributes,shipping,thumbnail,permalink,category_id,pictures,sale_terms,tags,last_updated,date_created"
         for i in range(0, len(ids), 20):
             lote = ids[i:i + 20]
             res = self._get("/items", {"ids": ",".join(lote), "attributes": atributos})
@@ -918,12 +940,27 @@ class MLIntegration:
                     out[str(body.get("id"))] = self._parse_dt_iso(body.get("last_updated"))
         return out
 
+    def _date_created_map(self, ids: List[str]) -> Dict[str, Optional[datetime]]:
+        """Mapa item_id -> date_created (multiget leve, só 2 campos)."""
+        out: Dict[str, Optional[datetime]] = {}
+        ids = [str(i) for i in ids if i]
+        for i in range(0, len(ids), 20):
+            lote = ids[i:i + 20]
+            res = self._get("/items", {"ids": ",".join(lote), "attributes": "id,date_created"})
+            if not res:
+                continue
+            for entry in res:
+                if entry.get("code") == 200 and entry.get("body"):
+                    body = entry["body"]
+                    out[str(body.get("id"))] = self._parse_dt_iso(body.get("date_created"))
+        return out
+
     def _sync_itens(self, db: Session, ids: List[str]) -> int:
         """Busca o detalhe de lista (multiget) e faz upsert no cache p/ os ids dados."""
         ids = [str(i) for i in ids if i]
         if not ids:
             return 0
-        atributos = "id,title,price,original_price,currency_id,available_quantity,sold_quantity,status,listing_type_id,seller_custom_field,attributes,shipping,thumbnail,permalink,category_id,pictures,sale_terms,tags,last_updated"
+        atributos = "id,title,price,original_price,currency_id,available_quantity,sold_quantity,status,listing_type_id,seller_custom_field,attributes,shipping,thumbnail,permalink,category_id,pictures,sale_terms,tags,last_updated,date_created"
         body_by_id: Dict[str, Dict[str, Any]] = {}
         simples: List[Dict[str, Any]] = []
         for i in range(0, len(ids), 20):
@@ -1521,7 +1558,7 @@ class MLIntegration:
 
         anuncios: List[Dict] = []
         # multiget em lotes de 20
-        atributos = "id,title,price,original_price,currency_id,available_quantity,sold_quantity,status,listing_type_id,seller_custom_field,attributes,shipping,thumbnail,permalink,category_id,pictures,sale_terms,tags"
+        atributos = "id,title,price,original_price,currency_id,available_quantity,sold_quantity,status,listing_type_id,seller_custom_field,attributes,shipping,thumbnail,permalink,category_id,pictures,sale_terms,tags,date_created"
         for i in range(0, len(ids), 20):
             lote = ids[i:i + 20]
             res = self._get("/items", {"ids": ",".join(lote), "attributes": atributos})
@@ -1694,6 +1731,74 @@ class MLIntegration:
             return {"erro": "O Mercado Livre nao aplicou o novo preco.", "aplicado": False, "preco_anterior": preco_anterior}
         self.sync_item(item_id, force=True)
         return {"ok": True, "aplicado": True, "preco_anterior": preco_anterior, "preco_novo": preco}
+
+    def atualizar_quantidade(self, item_id: str, quantidade: int) -> Dict:
+        """Altera o estoque (available_quantity) do anúncio no ML (PUT /items)."""
+        try:
+            quantidade = int(quantidade)
+        except (TypeError, ValueError):
+            return {"erro": "Quantidade inválida"}
+        if quantidade < 0:
+            return {"erro": "Quantidade não pode ser negativa"}
+
+        body = self._get(f"/items/{item_id}", {"attributes": "id,available_quantity,status,catalog_listing,logistic_type,shipping"})
+        if not body:
+            return {"erro": "Anúncio não encontrado"}
+        if body.get("status") == "closed":
+            return {"erro": "Anúncio finalizado: não é possível alterar o estoque.", "bloqueado": True}
+        # Anúncio FULL: o estoque é controlado pelo fulfillment do ML, não por aqui.
+        if (body.get("shipping") or {}).get("logistic_type") == "fulfillment":
+            return {"erro": "Anúncio FULL: o estoque é gerido pelo fulfillment do Mercado Livre e não pode ser alterado por aqui.", "bloqueado": True}
+        anterior = body.get("available_quantity")
+
+        resp = self._request_json("PUT", f"/items/{item_id}", {"available_quantity": quantidade})
+        if not resp or (isinstance(resp, dict) and resp.get("erro")):
+            cause = resp.get("erro") if isinstance(resp, dict) else None
+            return {"erro": cause or "Falha ao atualizar o estoque no Mercado Livre", "quantidade_anterior": anterior}
+        self.sync_item(item_id, force=True)
+        return {"ok": True, "quantidade_anterior": anterior, "quantidade_nova": quantidade}
+
+    def mudar_status(self, item_id: str, status: str) -> Dict:
+        """Muda o status do anúncio: 'active' (reativar), 'paused' (pausar) ou
+        'closed' (finalizar). Finalizar é irreversível no ML."""
+        status = (status or "").strip().lower()
+        if status not in {"active", "paused", "closed"}:
+            return {"erro": "Status inválido (use active, paused ou closed)"}
+
+        atual = self._get(f"/items/{item_id}", {"attributes": "id,status"})
+        if not atual:
+            return {"erro": "Anúncio não encontrado"}
+        if atual.get("status") == "closed":
+            return {"erro": "Anúncio já está finalizado: não é possível mudar o status.", "bloqueado": True}
+
+        resp = self._request_json("PUT", f"/items/{item_id}", {"status": status})
+        if not resp or (isinstance(resp, dict) and resp.get("erro")):
+            cause = resp.get("erro") if isinstance(resp, dict) else None
+            return {"erro": cause or "Falha ao mudar o status no Mercado Livre"}
+        self.sync_item(item_id, force=True)
+        return {"ok": True, "status": status}
+
+    def excluir_anuncio(self, item_id: str) -> Dict:
+        """Exclui o anúncio. O ML não apaga de verdade: fecha (closed) e depois
+        marca como deleted. Some dos ativos/pausados; o ML mantém o histórico."""
+        atual = self._get(f"/items/{item_id}", {"attributes": "id,status"})
+        if not atual:
+            return {"erro": "Anúncio não encontrado"}
+
+        # 1) Para excluir, o anúncio precisa estar fechado antes.
+        if atual.get("status") != "closed":
+            fechar = self._request_json("PUT", f"/items/{item_id}", {"status": "closed"})
+            if not fechar or (isinstance(fechar, dict) and fechar.get("erro")):
+                cause = fechar.get("erro") if isinstance(fechar, dict) else None
+                return {"erro": cause or "Falha ao finalizar o anúncio antes de excluir"}
+
+        # 2) Marca como deleted.
+        resp = self._request_json("PUT", f"/items/{item_id}", {"deleted": True})
+        if not resp or (isinstance(resp, dict) and resp.get("erro")):
+            cause = resp.get("erro") if isinstance(resp, dict) else None
+            return {"erro": cause or "Falha ao excluir o anúncio no Mercado Livre"}
+        self.sync_item(item_id, force=True)
+        return {"ok": True, "excluido": True}
 
     def listar_anuncios(self, status: str = "active", offset: int = 0, limit: int = 50, force_refresh: bool = False, q: str = "") -> Dict:
         """Lista anúncios servindo do cache local (SQLite). Abrir a página NÃO bate

@@ -83,7 +83,7 @@ def _garantir_colunas_sqlite():
 
             # Tarifa de venda do ML guardada no cache (margem sem chamada ao vivo)
             colunas_ml = {row[1] for row in conn.exec_driver_sql("PRAGMA table_info(ml_item_cache)").fetchall()}
-            for nome, tipo in [("tarifa_valor", "FLOAT"), ("tarifa_pct", "FLOAT"), ("tarifa_fixo", "FLOAT")]:
+            for nome, tipo in [("tarifa_valor", "FLOAT"), ("tarifa_pct", "FLOAT"), ("tarifa_fixo", "FLOAT"), ("date_created", "DATETIME")]:
                 if colunas_ml and nome not in colunas_ml:
                     conn.exec_driver_sql(f"ALTER TABLE ml_item_cache ADD COLUMN {nome} {tipo}")
                     print(f"[DB] Coluna ml_item_cache.{nome} criada")
@@ -4411,6 +4411,44 @@ async def ml_anuncio_aplicar_preco(request: Request):
     return JSONResponse(result, status_code=code)
 
 
+async def ml_anuncio_estoque(request: Request):
+    """POST — altera o estoque (available_quantity) do anúncio no ML."""
+    item_id = request.path_params.get("item_id")
+    if not item_id:
+        return JSONResponse({"erro": "item_id obrigatório"}, status_code=400)
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"erro": "JSON inválido"}, status_code=400)
+    result = ml.atualizar_quantidade(item_id, body.get("quantidade"))
+    code = 200 if not result.get("erro") else int(result.get("status_code") or 502)
+    return JSONResponse(result, status_code=code)
+
+
+async def ml_anuncio_status(request: Request):
+    """POST — muda o status do anúncio: active (reativar), paused (pausar) ou closed (finalizar)."""
+    item_id = request.path_params.get("item_id")
+    if not item_id:
+        return JSONResponse({"erro": "item_id obrigatório"}, status_code=400)
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"erro": "JSON inválido"}, status_code=400)
+    result = ml.mudar_status(item_id, body.get("status"))
+    code = 200 if not result.get("erro") else int(result.get("status_code") or 502)
+    return JSONResponse(result, status_code=code)
+
+
+async def ml_anuncio_excluir(request: Request):
+    """POST — exclui o anúncio (fecha e marca como deleted) no ML."""
+    item_id = request.path_params.get("item_id")
+    if not item_id:
+        return JSONResponse({"erro": "item_id obrigatório"}, status_code=400)
+    result = ml.excluir_anuncio(item_id)
+    code = 200 if not result.get("erro") else int(result.get("status_code") or 502)
+    return JSONResponse(result, status_code=code)
+
+
 async def ml_anuncio_imagens_upload(request: Request):
     item_id = request.path_params.get("item_id")
     form = await request.form()
@@ -4705,6 +4743,9 @@ routes = [
     Route("/api/ml/anuncios/{item_id:str}/precos-quantidade", ml_anuncio_precos_quantidade, methods=["GET", "POST"]),
     Route("/api/ml/anuncios/{item_id:str}/preco-resumo", ml_anuncio_preco_resumo, methods=["GET"]),
     Route("/api/ml/anuncios/{item_id:str}/preco", ml_anuncio_aplicar_preco, methods=["POST"]),
+    Route("/api/ml/anuncios/{item_id:str}/estoque", ml_anuncio_estoque, methods=["POST"]),
+    Route("/api/ml/anuncios/{item_id:str}/status", ml_anuncio_status, methods=["POST"]),
+    Route("/api/ml/anuncios/{item_id:str}/excluir", ml_anuncio_excluir, methods=["POST"]),
     Route("/api/ml/anuncios/{item_id:str}/pictures/upload", ml_anuncio_imagens_upload, methods=["POST"]),
     Route("/api/ml/anuncios/{item_id:str}/pictures", ml_anuncio_imagens_reordenar, methods=["POST"]),
     Route("/api/ml/precificacao", ml_precificacao, methods=["GET"]),
