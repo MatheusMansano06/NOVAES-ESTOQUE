@@ -2965,6 +2965,50 @@ async def vincular_item_embale(request: Request):
         if not item:
             return JSONResponse({"erro": "Item não encontrado neste inbound"}, status_code=404)
 
+        # Transferência de baixa: se o item JÁ FOI baixado e o vínculo está mudando
+        # para outro produto, estorna a quantidade que subiu pro FULL no produto
+        # ANTIGO (entrada) e baixa a mesma no NOVO (saída), mantendo o item baixado.
+        old_produto_id = item.olist_produto_id
+        qtd_baixada = float(item.quantidade_baixada or 0)
+        precisa_transferir = (
+            (item.baixa_aplicada or 0) == 1
+            and old_produto_id
+            and str(old_produto_id) != str(olist_produto_id)
+            and qtd_baixada > 0
+        )
+        transferencia = None
+        if precisa_transferir:
+            obs = f"Troca de vínculo do inbound #{embale.numero_inbound or embale.id} (item {item.sku_inbound or item.titulo_anuncio})"
+            # 1) Estorna (devolve) no produto antigo
+            ok_estorno = olist.atualizar_estoque(
+                produto_id=str(old_produto_id), quantidade=qtd_baixada, tipo="E",
+                observacao=f"Estorno por {obs}",
+            )
+            if not ok_estorno:
+                return JSONResponse({
+                    "erro": f"Falha ao estornar {qtd_baixada:g} un no produto antigo da Olist. Vínculo NÃO foi trocado.",
+                    "detalhe": olist._ultimo_erro_estoque,
+                }, status_code=502)
+            # 2) Aplica a baixa no produto novo
+            ok_baixa = olist.atualizar_estoque(
+                produto_id=str(olist_produto_id), quantidade=qtd_baixada, tipo="S",
+                observacao=f"Baixa transferida por {obs}",
+            )
+            if not ok_baixa:
+                # O estorno já voltou pro antigo; o item deixa de estar baixado
+                # (o estoque não está mais "no FULL" em lugar nenhum). Troca o
+                # vínculo mesmo assim e avisa para refazer a baixa no novo.
+                item.baixa_aplicada = 0
+                item.quantidade_baixada = None
+                item.data_baixa = None
+                transferencia = {
+                    "estornado": qtd_baixada, "baixado_novo": 0,
+                    "aviso": "Estorno feito no produto antigo, mas a baixa no novo falhou. O item ficou SEM baixa — refaça a baixa no produto novo.",
+                    "detalhe": olist._ultimo_erro_estoque,
+                }
+            else:
+                transferencia = {"estornado": qtd_baixada, "baixado_novo": qtd_baixada}
+
         # Salva o vínculo no item
         item.olist_produto_id = str(olist_produto_id)
         item.olist_sku = olist_sku
@@ -3020,16 +3064,25 @@ async def vincular_item_embale(request: Request):
                 "item_id": item.id,
                 "sku_inbound": item.sku_inbound,
                 "olist_produto_id": str(olist_produto_id),
+                "olist_produto_id_antigo": str(old_produto_id) if old_produto_id else None,
                 "olist_sku": olist_sku,
                 "olist_nome": olist_nome,
+                "transferencia_baixa": transferencia,
             },
         )
+        if transferencia and transferencia.get("aviso"):
+            mensagem = f"Vínculo trocado para {olist_nome}. {transferencia['aviso']}"
+        elif transferencia:
+            mensagem = f"Vínculo trocado para {olist_nome}. Estornei {transferencia['estornado']:g} un no produto antigo e baixei no novo."
+        else:
+            mensagem = f"Vinculado a: {olist_nome}"
         return JSONResponse({
             "sucesso": True,
             "item_id": item_id,
             "olist_produto_id": str(olist_produto_id),
             "olist_nome": olist_nome,
-            "mensagem": f"Vinculado a: {olist_nome}"
+            "transferencia": transferencia,
+            "mensagem": mensagem,
         })
 
     except Exception as e:

@@ -745,15 +745,26 @@ export function EmbaldesManager({ modoSeparacao = false }: { modoSeparacao?: boo
 
   const vincularAnuncio = async (produto: any) => {
     if (!vinculandoItem || !revisao) return
+    // Se o item já foi baixado, trocar o vínculo transfere a baixa: estorna no
+    // produto antigo e baixa no novo. Confirma antes (mexe no estoque da Olist).
+    const jaBaixado = vinculandoItem.baixa_aplicada === 1
+    const qtd = Math.round(Number(vinculandoItem.quantidade_full || 0))
+    if (jaBaixado) {
+      const ok = window.confirm(
+        `Este item já foi baixado.\n\nTrocar o vínculo vai DEVOLVER ${qtd} un ao produto atual ` +
+        `(${vinculandoItem.olist_nome || 'produto antigo'}) e BAIXAR ${qtd} un em "${produto.nome || produto.descricao}".\n\nConfirmar?`
+      )
+      if (!ok) return
+    }
     try {
       setVinculandoProduto(true)
-      await api.post(`/embaldes/${revisao.embale_id}/itens/${vinculandoItem.item_id}/vincular`, {
+      const resp = await api.post(`/embaldes/${revisao.embale_id}/itens/${vinculandoItem.item_id}/vincular`, {
         olist_produto_id: produto.id,
         olist_sku: produto.sku || produto.codigo_produto || '',
         olist_nome: produto.nome || produto.descricao || '',
         olist_preco: produto.preco || 0,
       })
-      setMessage(`Vinculado: ${produto.nome || produto.descricao}`)
+      setMessage(resp.data?.mensagem || `Vinculado: ${produto.nome || produto.descricao}`)
       setVinculandoItem(null)
       setBuscaResultados([])
       // Recarrega a revisão (agora o item será achado e terá estoque)
@@ -1288,19 +1299,17 @@ export function EmbaldesManager({ modoSeparacao = false }: { modoSeparacao?: boo
                                     </span>
                                     {jaBaixado && <span style={{ padding: '0.15rem 0.6rem', borderRadius: '999px', fontSize: '0.75rem', fontWeight: 700, background: '#e3f2fd', color: '#1565c0', border: '1px solid #90caf9' }}>↓ estoque retirado</span>}
                                   </div>
-                                  {vinculado && it.olist_nome && (
+                                  {vinculado && (
                                     <div style={{ marginTop: '0.4rem', display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
                                       <span style={{ fontSize: '0.82rem', color: '#555' }}>
-                                        🔗 Vinculado a: <strong style={{ color: '#2e7d32' }}>{it.olist_nome}</strong>
+                                        🔗 Vinculado a: <strong style={{ color: '#2e7d32' }}>{it.olist_nome || it.olist_produto_id || '—'}</strong>
                                       </span>
-                                      {!jaBaixado && (
-                                        <button
-                                          onClick={() => abrirVinculo(it)}
-                                          style={{ padding: '0.2rem 0.6rem', fontSize: '0.78rem', fontWeight: 700, color: '#ef6c00', background: '#fff', border: '1px solid #ffcc80', borderRadius: '999px', cursor: 'pointer' }}
-                                        >
-                                          Trocar vínculo
-                                        </button>
-                                      )}
+                                      <button
+                                        onClick={() => abrirVinculo(it)}
+                                        style={{ padding: '0.2rem 0.6rem', fontSize: '0.78rem', fontWeight: 700, color: '#ef6c00', background: '#fff', border: '1px solid #ffcc80', borderRadius: '999px', cursor: 'pointer' }}
+                                      >
+                                        Trocar vínculo
+                                      </button>
                                     </div>
                                   )}
                                 </div>
@@ -1607,6 +1616,19 @@ export function EmbaldesManager({ modoSeparacao = false }: { modoSeparacao?: boo
                                     </span>
                                   )}
                                 </div>
+                                {vinculado && (
+                                  <div style={{ marginTop: '0.3rem', display: 'flex', gap: '0.4rem', alignItems: 'center', flexWrap: 'wrap' }}>
+                                    <span style={{ fontSize: '0.76rem', color: '#555' }}>
+                                      🔗 <strong style={{ color: '#2e7d32' }}>{it.olist_nome || it.olist_produto_id || '—'}</strong>
+                                    </span>
+                                    <button
+                                      onClick={() => abrirVinculo(it)}
+                                      style={{ padding: '0.1rem 0.5rem', fontSize: '0.72rem', fontWeight: 700, color: '#ef6c00', background: '#fff', border: '1px solid #ffcc80', borderRadius: '999px', cursor: 'pointer' }}
+                                    >
+                                      Trocar vínculo
+                                    </button>
+                                  </div>
+                                )}
                               </div>
                               <div style={{ textAlign: 'center', fontWeight: 'bold' }}>
                                 {naoAchado ? '—' : semEstoque ? '?' : it.estoque_atual}
