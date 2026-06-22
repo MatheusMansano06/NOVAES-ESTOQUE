@@ -1261,6 +1261,21 @@ export function EmbaldesManager({ modoSeparacao = false }: { modoSeparacao?: boo
                                     </span>
                                     {jaBaixado && <span style={{ padding: '0.15rem 0.6rem', borderRadius: '999px', fontSize: '0.75rem', fontWeight: 700, background: '#e3f2fd', color: '#1565c0', border: '1px solid #90caf9' }}>↓ estoque retirado</span>}
                                   </div>
+                                  {vinculado && it.olist_nome && (
+                                    <div style={{ marginTop: '0.4rem', display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
+                                      <span style={{ fontSize: '0.82rem', color: '#555' }}>
+                                        🔗 Vinculado a: <strong style={{ color: '#2e7d32' }}>{it.olist_nome}</strong>
+                                      </span>
+                                      {!jaBaixado && (
+                                        <button
+                                          onClick={() => abrirVinculo(it)}
+                                          style={{ padding: '0.2rem 0.6rem', fontSize: '0.78rem', fontWeight: 700, color: '#ef6c00', background: '#fff', border: '1px solid #ffcc80', borderRadius: '999px', cursor: 'pointer' }}
+                                        >
+                                          Trocar vínculo
+                                        </button>
+                                      )}
+                                    </div>
+                                  )}
                                 </div>
 
                                 {/* Números */}

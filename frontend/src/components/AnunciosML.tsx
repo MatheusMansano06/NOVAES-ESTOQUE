@@ -172,6 +172,7 @@ export function AnunciosML({ onVoltar }: Props) {
   const [resumos, setResumos] = useState<Record<string, PricingSnapshot>>({})
   const [custosOficiais, setCustosOficiais] = useState<CustosOficiais>({})
   const [acaoMsg, setAcaoMsg] = useState<{ tipo: 'ok' | 'erro'; texto: string } | null>(null)
+  const [dupCategoria, setDupCategoria] = useState<Anuncio | null>(null)
 
   const avisar = (tipo: 'ok' | 'erro', texto: string) => {
     setAcaoMsg({ tipo, texto })
@@ -380,7 +381,13 @@ export function AnunciosML({ onVoltar }: Props) {
                     <ActionBtn label="Atacado B2B" onClick={() => setEditando({ anuncio: a, mode: 'atacado' })} />
                     <ActionBtn label="Flex" onClick={() => setEditando({ anuncio: a, mode: 'flex' })} />
                     <ActionBtn label="Precificador" strong onClick={() => setPrecificando(a)} />
-                    <MenuAcoes anuncio={a} onChanged={carregar} onMsg={avisar} />
+                    <MenuAcoes
+                      anuncio={a}
+                      onChanged={carregar}
+                      onMsg={avisar}
+                      onAbrirEditor={(novo) => setEditando({ anuncio: novo, mode: 'ficha' })}
+                      onPedirCategoria={(alvo) => setDupCategoria(alvo)}
+                    />
                   </div>
                 </div>
               )
@@ -436,6 +443,15 @@ export function AnunciosML({ onVoltar }: Props) {
             setEditando(null)
             carregar()
           }}
+        />
+      )}
+
+      {dupCategoria && (
+        <CategoriaPickerModal
+          anuncio={dupCategoria}
+          onClose={() => setDupCategoria(null)}
+          onMsg={avisar}
+          onDone={() => { setDupCategoria(null); carregar() }}
         />
       )}
     </div>
@@ -845,7 +861,7 @@ function MenuItem({ label, sub, onClick, disabled, danger }: { label: string; su
   )
 }
 
-function MenuAcoes({ anuncio, onChanged, onMsg }: { anuncio: Anuncio; onChanged: () => void; onMsg: (t: 'ok' | 'erro', s: string) => void }) {
+function MenuAcoes({ anuncio, onChanged, onMsg, onAbrirEditor, onPedirCategoria }: { anuncio: Anuncio; onChanged: () => void; onMsg: (t: 'ok' | 'erro', s: string) => void; onAbrirEditor: (a: Anuncio) => void; onPedirCategoria: (a: Anuncio) => void }) {
   const [aberto, setAberto] = useState(false)
   const [ocupado, setOcupado] = useState(false)
   const finalizado = anuncio.status === 'closed'
@@ -876,7 +892,32 @@ function MenuAcoes({ anuncio, onChanged, onMsg }: { anuncio: Anuncio; onChanged:
   const reativar = () => acao(`/api/ml/anuncios/${id}/status`, { status: 'active' }, 'Reativar este anúncio no Mercado Livre?', 'Anúncio reativado')
   const finalizar = () => acao(`/api/ml/anuncios/${id}/status`, { status: 'closed' }, 'Finalizar este anúncio? Isso é IRREVERSÍVEL no Mercado Livre.', 'Anúncio finalizado')
   const excluir = () => acao(`/api/ml/anuncios/${id}/excluir`, null, 'Excluir este anúncio? Ele será finalizado e removido (o ML guarda o histórico).', 'Anúncio excluído')
-  const emBreve = () => onMsg('erro', 'Duplicação chega na próxima atualização 😉')
+
+  // Duplicação: cria um anúncio NOVO pausado. abrirEditor=true abre a edição no item novo.
+  const duplicar = async (abrirEditor: boolean) => {
+    setAberto(false)
+    setOcupado(true)
+    try {
+      const r = await fetch(`${API_BASE}/api/ml/anuncios/${id}/duplicar`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({}),
+      })
+      const d = await r.json()
+      if (!r.ok || d.erro) throw new Error(d.erro || 'Falha ao duplicar o anúncio')
+      onMsg('ok', `Anúncio duplicado e pausado (${d.novo_id}). Está na aba Pausados.`)
+      if (abrirEditor && d.novo_id) {
+        onAbrirEditor({ ...anuncio, id: d.novo_id, status: 'paused', permalink: d.permalink, vendidos: 0 })
+      } else {
+        onChanged()
+      }
+    } catch (e) {
+      onMsg('erro', String(e instanceof Error ? e.message : e))
+    } finally {
+      setOcupado(false)
+    }
+  }
+  const duplicarIgual = () => { if (window.confirm('Duplicar este anúncio igual? Será criado um novo anúncio PAUSADO.')) duplicar(false) }
+  const duplicarEditando = () => duplicar(true)
+  const duplicarOutraCategoria = () => { setAberto(false); onPedirCategoria(anuncio) }
 
   return (
     <div style={{ position: 'relative', display: 'inline-block' }}>
@@ -896,13 +937,105 @@ function MenuAcoes({ anuncio, onChanged, onMsg }: { anuncio: Anuncio; onChanged:
             {!finalizado && anuncio.status === 'paused' && <MenuItem label="▶️ Reativar anúncio" onClick={reativar} />}
             {!finalizado && <MenuItem label="⛔ Finalizar anúncio" sub="irreversível no ML" onClick={finalizar} />}
             <MenuItem label="🗑️ Excluir anúncio" sub="finaliza e remove dos ativos" danger onClick={excluir} />
-            <div style={{ padding: '0.35rem 0.85rem', fontSize: '0.66rem', color: '#98a2b3', textTransform: 'uppercase', letterSpacing: '.03em', background: '#fafbfc', borderTop: '1px solid #f2f4f7' }}>Duplicar (em breve)</div>
-            <MenuItem label="📄 Duplicar igual" disabled onClick={emBreve} />
-            <MenuItem label="✏️ Duplicar editando" disabled onClick={emBreve} />
-            <MenuItem label="🗂️ Duplicar em outra categoria" disabled onClick={emBreve} />
+            <div style={{ padding: '0.35rem 0.85rem', fontSize: '0.66rem', color: '#98a2b3', textTransform: 'uppercase', letterSpacing: '.03em', background: '#fafbfc', borderTop: '1px solid #f2f4f7' }}>Duplicar (cria cópia pausada)</div>
+            <MenuItem label="📄 Duplicar igual" onClick={duplicarIgual} />
+            <MenuItem label="✏️ Duplicar editando" sub="abre a edição no anúncio novo" onClick={duplicarEditando} />
+            <MenuItem label="🗂️ Duplicar em outra categoria" onClick={duplicarOutraCategoria} />
           </div>
         </>
       )}
+    </div>
+  )
+}
+
+interface CategoriaML { category_id: string; category_name?: string; domain_name?: string }
+
+function CategoriaPickerModal({ anuncio, onClose, onMsg, onDone }: { anuncio: Anuncio; onClose: () => void; onMsg: (t: 'ok' | 'erro', s: string) => void; onDone: () => void }) {
+  const [q, setQ] = useState(anuncio.titulo || '')
+  const [cats, setCats] = useState<CategoriaML[]>([])
+  const [buscando, setBuscando] = useState(false)
+  const [duplicando, setDuplicando] = useState(false)
+
+  const buscar = useCallback(async (termo: string) => {
+    if (!termo.trim()) { setCats([]); return }
+    setBuscando(true)
+    try {
+      const r = await fetch(`${API_BASE}/api/ml/categorias?q=${encodeURIComponent(termo.trim())}`, { cache: 'no-store' })
+      const d = await r.json()
+      setCats(d.categorias || [])
+    } catch {
+      setCats([])
+    } finally {
+      setBuscando(false)
+    }
+  }, [])
+
+  useEffect(() => { buscar(anuncio.titulo || '') }, [buscar, anuncio.titulo])
+
+  const escolher = async (cat: CategoriaML) => {
+    if (duplicando) return
+    if (!window.confirm(`Duplicar este anúncio na categoria:\n\n${cat.category_name || cat.category_id}\n\nSerá criado um novo anúncio PAUSADO.`)) return
+    setDuplicando(true)
+    try {
+      const r = await fetch(`${API_BASE}/api/ml/anuncios/${anuncio.id}/duplicar`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ category_id: cat.category_id }),
+      })
+      const d = await r.json()
+      if (!r.ok || d.erro) throw new Error(d.erro || 'Falha ao duplicar nesta categoria')
+      onMsg('ok', `Anúncio duplicado na categoria ${cat.category_name || cat.category_id} (pausado, ${d.novo_id}).`)
+      onDone()
+    } catch (e) {
+      onMsg('erro', String(e instanceof Error ? e.message : e))
+    } finally {
+      setDuplicando(false)
+    }
+  }
+
+  return (
+    <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(16,24,40,.45)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '1rem' }}>
+      <div onClick={e => e.stopPropagation()} style={{ width: '100%', maxWidth: 520, background: '#fff', borderRadius: 14, padding: '1.25rem', boxShadow: '0 24px 60px rgba(16,24,40,.28)' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '.75rem', marginBottom: '.75rem' }}>
+          <div>
+            <div style={{ fontWeight: 800, fontSize: '1rem', color: '#1d2939' }}>Duplicar em outra categoria</div>
+            <div style={{ fontSize: '.8rem', color: '#667085', marginTop: 2, maxWidth: 380, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{anuncio.titulo}</div>
+          </div>
+          <button onClick={onClose} style={{ width: 28, height: 28, borderRadius: 8, border: '1px solid #e4e7ec', background: '#fff', color: '#667085', fontSize: '1.1rem', cursor: 'pointer' }}>×</button>
+        </div>
+
+        <div style={{ display: 'flex', gap: '.5rem', marginBottom: '.85rem' }}>
+          <input
+            value={q}
+            onChange={e => setQ(e.target.value)}
+            onKeyDown={e => { if (e.key === 'Enter') buscar(q) }}
+            placeholder="Buscar categoria por palavra-chave..."
+            style={{ flex: 1, padding: '.6rem .8rem', border: '1px solid #cfd8dc', borderRadius: 8, fontSize: '.9rem' }}
+          />
+          <button onClick={() => buscar(q)} disabled={buscando} style={{ padding: '.6rem 1rem', background: '#3483fa', color: '#fff', border: 'none', borderRadius: 8, fontWeight: 700, cursor: buscando ? 'wait' : 'pointer' }}>Buscar</button>
+        </div>
+
+        <div style={{ maxHeight: 320, overflowY: 'auto', border: '1px solid #eef1f5', borderRadius: 10 }}>
+          {buscando ? (
+            <div style={{ padding: '1.5rem', textAlign: 'center', color: '#98a2b3' }}>Buscando categorias…</div>
+          ) : cats.length === 0 ? (
+            <div style={{ padding: '1.5rem', textAlign: 'center', color: '#98a2b3' }}>Nenhuma categoria encontrada. Tente outra palavra-chave.</div>
+          ) : cats.map(cat => (
+            <button
+              key={cat.category_id}
+              onClick={() => escolher(cat)}
+              disabled={duplicando}
+              style={{ display: 'block', width: '100%', textAlign: 'left', padding: '.7rem .85rem', background: '#fff', border: 'none', borderBottom: '1px solid #f2f4f7', cursor: duplicando ? 'wait' : 'pointer' }}
+            >
+              <div style={{ fontWeight: 700, color: '#1d2939', fontSize: '.88rem' }}>{cat.category_name || cat.category_id}</div>
+              <div style={{ fontSize: '.72rem', color: '#98a2b3' }}>{cat.category_id}{cat.domain_name ? ` · ${cat.domain_name}` : ''}</div>
+            </button>
+          ))}
+        </div>
+        {duplicando && <div style={{ marginTop: '.75rem', fontSize: '.82rem', color: '#3483fa', fontWeight: 700 }}>Duplicando no Mercado Livre…</div>}
+        <div style={{ marginTop: '.75rem', fontSize: '.72rem', color: '#b54708', background: '#fffaeb', border: '1px solid #fedf89', borderRadius: 8, padding: '.5rem .6rem' }}>
+          ⚠️ Categorias diferentes pedem fichas técnicas diferentes. Se o ML recusar atributos obrigatórios, o erro aparece e você ajusta a ficha no anúncio novo.
+        </div>
+      </div>
     </div>
   )
 }

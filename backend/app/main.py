@@ -2974,6 +2974,9 @@ async def vincular_item_embale(request: Request):
         item.data_validacao = datetime.utcnow()
         item.olist_estoque_antes = None
         item.falta = None
+        # Limpa a foto cacheada: o produto mudou, a imagem é refeita na próxima
+        # revisão a partir do novo produto Olist (evita foto do vínculo antigo).
+        item.olist_imagem = None
         db.add(item)
         embale.revisao_salva_em = None
         db.add(embale)
@@ -4449,6 +4452,30 @@ async def ml_anuncio_excluir(request: Request):
     return JSONResponse(result, status_code=code)
 
 
+async def ml_anuncio_duplicar(request: Request):
+    """POST — duplica o anúncio no ML (novo item pausado).
+    Body opcional: {"category_id": "MLB...", "titulo": "..."}."""
+    item_id = request.path_params.get("item_id")
+    if not item_id:
+        return JSONResponse({"erro": "item_id obrigatório"}, status_code=400)
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    category_id = (body or {}).get("category_id") or None
+    novo_titulo = (body or {}).get("titulo") or None
+    result = ml.duplicar_anuncio(item_id, category_id=category_id, novo_titulo=novo_titulo)
+    code = 200 if not result.get("erro") else int(result.get("status_code") or 502)
+    return JSONResponse(result, status_code=code)
+
+
+async def ml_categorias_buscar(request: Request):
+    """GET — busca categorias do ML por palavra-chave (p/ duplicar em outra categoria)."""
+    q = request.query_params.get("q", "")
+    result = ml.buscar_categorias(q)
+    return JSONResponse(result, headers={"Cache-Control": "no-store"})
+
+
 async def ml_anuncio_imagens_upload(request: Request):
     item_id = request.path_params.get("item_id")
     form = await request.form()
@@ -4746,6 +4773,8 @@ routes = [
     Route("/api/ml/anuncios/{item_id:str}/estoque", ml_anuncio_estoque, methods=["POST"]),
     Route("/api/ml/anuncios/{item_id:str}/status", ml_anuncio_status, methods=["POST"]),
     Route("/api/ml/anuncios/{item_id:str}/excluir", ml_anuncio_excluir, methods=["POST"]),
+    Route("/api/ml/anuncios/{item_id:str}/duplicar", ml_anuncio_duplicar, methods=["POST"]),
+    Route("/api/ml/categorias", ml_categorias_buscar, methods=["GET"]),
     Route("/api/ml/anuncios/{item_id:str}/pictures/upload", ml_anuncio_imagens_upload, methods=["POST"]),
     Route("/api/ml/anuncios/{item_id:str}/pictures", ml_anuncio_imagens_reordenar, methods=["POST"]),
     Route("/api/ml/precificacao", ml_precificacao, methods=["GET"]),

@@ -1800,6 +1800,145 @@ class MLIntegration:
         self.sync_item(item_id, force=True)
         return {"ok": True, "excluido": True}
 
+    # Atributos que NÃO devem ser copiados ao duplicar (códigos universais geram
+    # conflito "já existe" e campos read-only são rejeitados pelo POST /items).
+    _ATTRS_NAO_DUPLICAR = {"GTIN", "EAN", "UPC", "ISBN", "SELLER_SKU"}
+
+    def _attrs_para_duplicar(self, attributes):
+        out = []
+        for a in (attributes or []):
+            aid = a.get("id")
+            if not aid or aid in self._ATTRS_NAO_DUPLICAR:
+                continue
+            if a.get("value_id"):
+                out.append({"id": aid, "value_id": a.get("value_id")})
+            elif a.get("value_name") is not None:
+                out.append({"id": aid, "value_name": a.get("value_name")})
+        return out
+
+    def buscar_categorias(self, q: str, limite: int = 8):
+        """Busca categorias do ML por palavra-chave (domain_discovery).
+        Usado no 'duplicar em outra categoria'."""
+        termo = (q or "").strip()
+        if not termo:
+            return {"categorias": []}
+        res = self._get("/sites/MLB/domain_discovery/search", {"q": termo, "limit": limite})
+        cats = []
+        for c in (res or []):
+            if isinstance(c, dict) and c.get("category_id"):
+                cats.append({
+                    "category_id": c.get("category_id"),
+                    "category_name": c.get("category_name"),
+                    "domain_name": c.get("domain_name"),
+                })
+        return {"categorias": cats}
+
+    def duplicar_anuncio(self, item_id: str, category_id: str = None, novo_titulo: str = None) -> Dict:
+        """Duplica um anúncio criando um NOVO item no ML, já PAUSADO.
+        - category_id: se informado, cria na categoria nova (duplicar em outra categoria).
+        - Copia título, preço, atributos (menos códigos universais), fotos (por URL),
+          frete, garantia, variações (best-effort) e descrição.
+        Recriar anúncio é validado por categoria pelo ML; erros são repassados."""
+        src = self._get(f"/items/{item_id}")
+        if not src or (isinstance(src, dict) and src.get("erro")):
+            return {"erro": "Anúncio de origem não encontrado"}
+
+        # Fotos: re-referencia pela URL (o ML baixa de novo)
+        pictures = []
+        for p in (src.get("pictures") or []):
+            url = (p.get("secure_url") or p.get("url") or "").strip()
+            if url:
+                pictures.append({"source": url.replace("http://", "https://")})
+
+        body = {
+            "title": (novo_titulo or src.get("title") or "").strip(),
+            "category_id": category_id or src.get("category_id"),
+            "currency_id": src.get("currency_id") or "BRL",
+            "buying_mode": src.get("buying_mode") or "buy_it_now",
+            "listing_type_id": src.get("listing_type_id") or "gold_special",
+            "condition": src.get("condition") or "new",
+            "pictures": pictures,
+            "attributes": self._attrs_para_duplicar(src.get("attributes")),
+        }
+        if src.get("price") is not None:
+            body["price"] = src.get("price")
+
+        # Frete: copia modo/free_shipping, mas NUNCA logistic_type fulfillment
+        # (um anúncio novo não nasce no FULL — daria erro).
+        sh = src.get("shipping") or {}
+        if sh:
+            shipping = {}
+            if sh.get("mode"):
+                shipping["mode"] = sh.get("mode")
+            if sh.get("local_pick_up") is not None:
+                shipping["local_pick_up"] = sh.get("local_pick_up")
+            if sh.get("free_shipping") is not None:
+                shipping["free_shipping"] = sh.get("free_shipping")
+            lt = sh.get("logistic_type")
+            if lt and lt != "fulfillment":
+                shipping["logistic_type"] = lt
+            if shipping:
+                body["shipping"] = shipping
+
+        # Garantia / sale_terms
+        terms = []
+        for t in (src.get("sale_terms") or []):
+            if t.get("id") and t.get("value_name") is not None:
+                terms.append({"id": t.get("id"), "value_name": t.get("value_name")})
+        if terms:
+            body["sale_terms"] = terms
+
+        # Variações (best-effort): mantém combinações e qtd, descarta ids/picture_ids
+        variations = src.get("variations") or []
+        if variations:
+            novas = []
+            for v in variations:
+                nv = {
+                    "attribute_combinations": v.get("attribute_combinations") or [],
+                    "available_quantity": max(0, int(v.get("available_quantity") or 0)),
+                }
+                if v.get("price") is not None:
+                    nv["price"] = v.get("price")
+                attrs_v = self._attrs_para_duplicar(v.get("attributes"))
+                if attrs_v:
+                    nv["attributes"] = attrs_v
+                novas.append(nv)
+            body["variations"] = novas
+            body.pop("price", None)  # com variação o preço vai na variação
+        else:
+            body["available_quantity"] = max(1, int(src.get("available_quantity") or 1))
+
+        novo = self._request_json("POST", "/items", body)
+        if not novo or (isinstance(novo, dict) and novo.get("erro")):
+            cause = novo.get("erro") if isinstance(novo, dict) else None
+            return {"erro": cause or "Falha ao criar o anúncio duplicado no Mercado Livre"}
+        novo_id = novo.get("id")
+        if not novo_id:
+            return {"erro": "O Mercado Livre não retornou o ID do novo anúncio"}
+
+        # Nasce pausado para revisão antes de ativar
+        self._request_json("PUT", f"/items/{novo_id}", {"status": "paused"})
+
+        # Copia a descrição
+        try:
+            desc = self._get(f"/items/{item_id}/description") or {}
+            if desc.get("plain_text"):
+                self._request_json("POST", f"/items/{novo_id}/description", {"plain_text": desc.get("plain_text")})
+        except Exception:
+            pass
+
+        try:
+            self.sync_item(novo_id, force=True)
+        except Exception:
+            pass
+        return {
+            "ok": True,
+            "novo_id": novo_id,
+            "permalink": novo.get("permalink"),
+            "status": "paused",
+            "category_id": body["category_id"],
+        }
+
     def listar_anuncios(self, status: str = "active", offset: int = 0, limit: int = 50, force_refresh: bool = False, q: str = "") -> Dict:
         """Lista anúncios servindo do cache local (SQLite). Abrir a página NÃO bate
         na API — a atualização vem do polling incremental em segundo plano.
