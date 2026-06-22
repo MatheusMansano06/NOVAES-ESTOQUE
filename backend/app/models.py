@@ -445,3 +445,18 @@ class SkuVendasSnapshot(Base):
     sku = Column(String(120), index=True)
     vendidos = Column(Integer, default=0)
     criado_em = Column(DateTime, default=datetime.utcnow, index=True)
+
+
+class OlistEstoqueSnapshot(Base):
+    """
+    Saldo atual de cada SKU na Olist (o estoque "orgânico" real do vendedor).
+    Atualizado em segundo plano (1 chamada por SKU). A Lista de Compra soma este
+    saldo ao estoque FULL do ML para o total real do produto.
+    """
+    __tablename__ = "olist_estoque_snapshot"
+
+    id = Column(Integer, primary_key=True)
+    sku = Column(String(120), unique=True, index=True)
+    produto_id = Column(String(100), nullable=True)
+    saldo = Column(Float, default=0)
+    atualizado_em = Column(DateTime, default=datetime.utcnow, index=True)

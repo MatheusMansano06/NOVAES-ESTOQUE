@@ -96,8 +96,12 @@ def _prioridade(pct: float, velocidade: float) -> str:
     return "ok"
 
 
-def calcular_lista_compra(db, meta_dias: int = 75) -> Dict:
-    """Monta a lista de compra priorizada a partir do cache do ML."""
+def calcular_lista_compra(db, meta_dias: int = 75, estoque_olist: Dict = None) -> Dict:
+    """Monta a lista de compra priorizada.
+    FULL vem do cache do ML; o ORGÂNICO vem do snapshot da Olist (estoque_olist:
+    mapa {SKU_UPPER: saldo}). Sem snapshot da Olist p/ um SKU, o orgânico fica
+    desconhecido (não some como 0)."""
+    estoque_olist = estoque_olist or {}
     agora = datetime.utcnow()
     snaps = _snapshots_por_item(db)
 
@@ -128,10 +132,10 @@ def calcular_lista_compra(db, meta_dias: int = 75) -> Dict:
         eh_full = bool(r.full)
         g["vendidos"] += vendidos
         g["velocidade"] += _velocidade_anuncio(r.item_id, vendidos, r.date_created, snaps, agora)
+        # FULL vem do ML; o orgânico do ML é ignorado (vem da Olist depois) porque
+        # quem roda FULL costuma ter o orgânico do ML zerado, mas estoque na Olist.
         if eh_full:
             g["estoque_full"] += disponivel
-        else:
-            g["estoque_organico"] += disponivel
         g["anuncios"].append(r.item_id)
         # mantém o título/preço de quem mais vendeu como representativo
         if vendidos > g.get("_v_rep", -1):
@@ -153,6 +157,11 @@ def calcular_lista_compra(db, meta_dias: int = 75) -> Dict:
     # Métricas de compra
     for g in lista:
         vel = round(g["velocidade"], 3)
+        # Orgânico = saldo da Olist (estoque real do vendedor). Sem snapshot ainda
+        # = desconhecido (não conta como 0 p/ não enganar a prioridade).
+        org = estoque_olist.get(g["sku"])
+        g["tem_estoque_olist"] = org is not None
+        g["estoque_organico"] = int(round(org)) if org is not None else 0
         estoque_total = g["estoque_full"] + g["estoque_organico"]
         meta = vel * meta_dias
         pct = (estoque_total / meta) if meta > 0 else None
@@ -183,6 +192,7 @@ def calcular_lista_compra(db, meta_dias: int = 75) -> Dict:
         "curva_b": sum(1 for g in lista if g["curva"] == "B"),
         "curva_c": sum(1 for g in lista if g["curva"] == "C"),
         "snapshots_dias": _dias_de_snapshot(db),
+        "com_estoque_olist": sum(1 for g in lista if g.get("tem_estoque_olist")),
     }
     return {"meta_dias": meta_dias, "resumo": resumo, "itens": lista}
 

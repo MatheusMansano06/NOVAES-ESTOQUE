@@ -19,6 +19,7 @@ interface ItemCompra {
   dias_cobertura: number | null
   prioridade: 'maxima' | 'media' | 'ok' | 'sem_giro'
   curva: 'A' | 'B' | 'C'
+  tem_estoque_olist?: boolean
 }
 
 interface Resumo {
@@ -31,9 +32,11 @@ interface Resumo {
   curva_b: number
   curva_c: number
   snapshots_dias: number
+  com_estoque_olist?: number
 }
 
-interface Dados { meta_dias: number; resumo: Resumo; itens: ItemCompra[] }
+interface EstoqueOlistInfo { atualizado_em: string | null; atualizando: boolean; skus: number }
+interface Dados { meta_dias: number; resumo: Resumo; itens: ItemCompra[]; estoque_olist?: EstoqueOlistInfo }
 
 const PRIO = {
   maxima: { label: '🔴 Comprar urgente', cor: '#c62828', bg: '#ffebee', borda: '#ef9a9a' },
@@ -84,6 +87,28 @@ export function ListaCompra() {
 
   useEffect(() => { carregar(metaDias) }, [carregar, metaDias])
 
+  // Enquanto a Olist está atualizando em segundo plano, recarrega sozinho.
+  useEffect(() => {
+    if (!dados?.estoque_olist?.atualizando) return
+    const t = setTimeout(() => carregar(metaDias), 12000)
+    return () => clearTimeout(t)
+  }, [dados?.estoque_olist?.atualizando, carregar, metaDias])
+
+  const atualizarEstoqueOlist = async () => {
+    try {
+      await fetch(`${API_BASE}/api/lista-compra/atualizar-estoque`, { method: 'POST' })
+      // marca como atualizando localmente e dispara o polling
+      setDados(d => d ? { ...d, estoque_olist: { ...(d.estoque_olist || { atualizado_em: null, skus: 0 }), atualizando: true } } : d)
+    } catch { /* silencioso */ }
+  }
+
+  const fmtQuando = (iso?: string | null) => {
+    if (!iso) return 'nunca'
+    const d = new Date(iso)
+    if (isNaN(d.getTime())) return '—'
+    return d.toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })
+  }
+
   const itensFiltrados = (dados?.itens || []).filter(it => {
     if (filtroCurva !== 'todas' && it.curva !== filtroCurva) return false
     if (filtroPrio !== 'todas' && it.prioridade !== filtroPrio) return false
@@ -117,6 +142,19 @@ export function ListaCompra() {
           style={{ flex: '1 1 280px', minWidth: 220, padding: '0.6rem 0.85rem', border: '1px solid #cfd8dc', borderRadius: '6px', fontSize: '0.9rem' }}
         />
         <button onClick={() => carregar(metaDias)} style={{ padding: '0.6rem 1rem', background: '#1976D2', color: '#fff', border: 'none', borderRadius: '6px', fontWeight: 700, cursor: 'pointer' }}>Atualizar</button>
+      </div>
+
+      {/* Estoque da Olist (orgânico) */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap', padding: '0.6rem 0.85rem', background: '#f7f9fa', border: '1px solid #e6eaee', borderRadius: '8px', fontSize: '0.83rem', color: '#455a64' }}>
+        <span>📦 Estoque orgânico = saldo da <strong>Olist</strong>.</span>
+        {dados?.estoque_olist?.atualizando ? (
+          <span style={{ color: '#1976D2', fontWeight: 700 }}>⏳ Atualizando da Olist… (roda em segundo plano, ~poucos minutos)</span>
+        ) : (
+          <>
+            <span>Atualizado: <strong>{fmtQuando(dados?.estoque_olist?.atualizado_em)}</strong> · {dados?.resumo?.com_estoque_olist ?? 0} de {dados?.resumo?.total_skus ?? 0} SKUs com saldo Olist</span>
+            <button onClick={atualizarEstoqueOlist} style={{ padding: '0.35rem 0.8rem', background: '#fff', color: '#1976D2', border: '1px solid #90caf9', borderRadius: '6px', fontWeight: 700, cursor: 'pointer', fontSize: '0.8rem' }}>Atualizar estoque da Olist agora</button>
+          </>
+        )}
       </div>
 
       {dados?.resumo && (
@@ -180,7 +218,10 @@ export function ListaCompra() {
                   </div>
                   <div style={{ fontSize: '0.76rem', color: '#888' }}>SKU: {it.sku}</div>
                   <div style={{ fontSize: '0.86rem', color: '#444' }}>
-                    Tem <strong>{it.estoque_total} un</strong> <span style={{ color: '#888' }}>(FULL {it.estoque_full} + orgânico {it.estoque_organico})</span>
+                    Tem <strong>{it.estoque_total} un</strong>{' '}
+                    <span style={{ color: '#888' }}>
+                      (FULL {it.estoque_full} + orgânico {it.tem_estoque_olist ? it.estoque_organico : <span style={{ color: '#ef6c00' }}>aguardando Olist</span>})
+                    </span>
                     {it.velocidade_mes > 0 && <> · vende <strong>~{it.velocidade_mes}/mês</strong></>}
                   </div>
                   {/* Barra: quão cheio está o estoque vs a meta */}

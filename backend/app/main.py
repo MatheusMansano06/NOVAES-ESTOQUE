@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 from database import engine, Base, SessionLocal
 import os
 import json
+import threading
 from datetime import datetime, timedelta
 import uuid
 import urllib.request
@@ -21,7 +22,7 @@ from app.models import (
     Fornecedor, HistoricoCompra, ConfiguracaoEstoqueMinimo, NotificacaoFornecedor,
     EmbaleFU, ItemEmbaleFU, ApelidoFornecedor, PrecoVendaProduto,
     MercadoLivreItemCache, MercadoLivreSyncState, HistoricoFullEmbale,
-    CustoProduto, Operador, LogOperacao
+    CustoProduto, Operador, LogOperacao, OlistEstoqueSnapshot
 )
 from app.utils.nfe_parser import NFeParsing
 from app.utils.nfe_pdf_generator import NFePDFGenerator
@@ -4537,9 +4538,70 @@ async def ml_conta(request: Request):
     return JSONResponse(result, status_code=code, headers={"Cache-Control": "no-store"})
 
 
+_lock_estoque_olist = threading.Lock()
+
+
+def _refrescar_estoque_olist():
+    """Atualiza o snapshot do saldo da Olist (estoque orgânico) p/ todos os SKUs
+    ativos do ML. Roda em segundo plano: 1 chamada por SKU (throttled pela Olist)."""
+    if not _lock_estoque_olist.acquire(blocking=False):
+        return
+    db = SessionLocal()
+    try:
+        ativos = db.query(MercadoLivreItemCache.sku).filter(
+            MercadoLivreItemCache.status == "active"
+        ).all()
+        skus = sorted({(s[0] or "").strip().upper() for s in ativos if s[0]})
+        if not skus:
+            return
+        # Mapa SKU -> produto_id da Olist (1 carga em bulk do cache de produtos)
+        try:
+            produtos = olist.listar_todos_produtos(limite=5000)
+        except Exception:
+            produtos = []
+        mapa = {}
+        for p in produtos:
+            sk = (p.get("sku") or p.get("codigo_produto") or "").strip().upper()
+            if sk and sk not in mapa:
+                mapa[sk] = str(p.get("id"))
+        for sku in skus:
+            pid = mapa.get(sku)
+            if not pid:
+                continue
+            try:
+                est = olist.obter_estoque(pid)
+            except Exception:
+                est = None
+            saldo = (est or {}).get("saldo")
+            if saldo is None:
+                continue
+            row = db.query(OlistEstoqueSnapshot).filter(OlistEstoqueSnapshot.sku == sku).first()
+            if not row:
+                row = OlistEstoqueSnapshot(sku=sku)
+                db.add(row)
+            row.produto_id = pid
+            row.saldo = float(saldo)
+            row.atualizado_em = datetime.utcnow()
+            db.commit()
+    except Exception as e:
+        print(f"[LISTA-COMPRA] Erro ao refrescar estoque Olist: {e}")
+        db.rollback()
+    finally:
+        db.close()
+        _lock_estoque_olist.release()
+
+
+async def lista_compra_atualizar_estoque(request: Request):
+    """POST — dispara a atualização do snapshot de estoque da Olist (background)."""
+    if _lock_estoque_olist.locked():
+        return JSONResponse({"status": "ja_rodando"})
+    threading.Thread(target=_refrescar_estoque_olist, daemon=True).start()
+    return JSONResponse({"status": "iniciado"})
+
+
 async def lista_compra(request: Request):
     """GET /api/lista-compra?meta_dias=75 — lista de compra priorizada:
-    curva ABC (unidades vendidas) + estoque FULL/orgânico + velocidade de venda."""
+    curva ABC (unidades vendidas) + estoque FULL (ML) / orgânico (Olist) + velocidade."""
     db = SessionLocal()
     try:
         try:
@@ -4571,7 +4633,24 @@ async def lista_compra(request: Request):
             registrar_snapshot_vendas(db)
         except Exception:
             db.rollback()
-        dados = calcular_lista_compra(db, meta_dias=meta_dias)
+
+        # Snapshot do estoque da Olist (orgânico). Auto-atualiza em background se
+        # estiver vazio ou velho (>12h); a resposta usa o que já existe.
+        snaps_olist = db.query(OlistEstoqueSnapshot).all()
+        estoque_olist = {s.sku: s.saldo for s in snaps_olist if s.sku is not None}
+        ultima = max((s.atualizado_em for s in snaps_olist if s.atualizado_em), default=None)
+        atualizando = _lock_estoque_olist.locked()
+        precisa = (not snaps_olist) or (ultima is None) or ((datetime.utcnow() - ultima) > timedelta(hours=12))
+        if precisa and not atualizando:
+            threading.Thread(target=_refrescar_estoque_olist, daemon=True).start()
+            atualizando = True
+
+        dados = calcular_lista_compra(db, meta_dias=meta_dias, estoque_olist=estoque_olist)
+        dados["estoque_olist"] = {
+            "atualizado_em": ultima.isoformat() if ultima else None,
+            "atualizando": atualizando,
+            "skus": len(estoque_olist),
+        }
         return JSONResponse(dados, headers={"Cache-Control": "no-store"})
     except Exception as e:
         return JSONResponse({"erro": str(e)}, status_code=500)
@@ -4880,6 +4959,7 @@ routes = [
     Route("/api/ml/categorias", ml_categorias_buscar, methods=["GET"]),
     Route("/api/ml/conta", ml_conta, methods=["GET"]),
     Route("/api/lista-compra", lista_compra, methods=["GET"]),
+    Route("/api/lista-compra/atualizar-estoque", lista_compra_atualizar_estoque, methods=["POST"]),
     Route("/api/ml/anuncios/{item_id:str}/pictures/upload", ml_anuncio_imagens_upload, methods=["POST"]),
     Route("/api/ml/anuncios/{item_id:str}/pictures", ml_anuncio_imagens_reordenar, methods=["POST"]),
     Route("/api/ml/precificacao", ml_precificacao, methods=["GET"]),
