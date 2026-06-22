@@ -3192,6 +3192,11 @@ async def balancear_item_embale(request: Request):
             item.saldo_disponivel = 0
             item.foi_balanceado = 1
             item.data_balanceamento = datetime.utcnow()
+            # Divergência: além de corrigir a Olist, deixa o item EM ESPERA
+            # automaticamente — sai da separação até ser ajustado no Histórico
+            # FULL (declarar nova qtd e voltar, ou excluir).
+            item.em_espera = 1
+            item.data_em_espera = datetime.utcnow()
             db.add(item)
             db.commit()
             _registrar_log_operacao(
@@ -3222,8 +3227,9 @@ async def balancear_item_embale(request: Request):
                 "falta": item.falta,
                 "saldo_disponivel": 0,
                 "tem_divergencia": True,
+                "em_espera": 1,
                 "baixa_status": "nao_baixado_divergencia",
-                "mensagem": f"Olist corrigida para {quantidade_real:g} un. Faltam {item.falta:g} un para o FULL ({qtd_full:g}). Item segue divergente — notifique no WhatsApp."
+                "mensagem": f"Olist corrigida para {quantidade_real:g} un. Faltam {item.falta:g} un para o FULL ({qtd_full:g}). Item ficou EM ESPERA — ajuste no Histórico FULL (declare a nova qtd e volte, ou exclua)."
             })
 
         # Sem divergência (conferido >= FULL): aplica a baixa normalmente.
@@ -3530,6 +3536,11 @@ async def balancear_kit_componentes_embale(request: Request):
                 item.quantidade_baixada = qtd_full
                 item.baixa_aplicada = 1
                 item.data_baixa = datetime.utcnow()
+            elif tem_divergencia:
+                # Divergência no kit: deixa o item EM ESPERA automaticamente até
+                # ser ajustado no Histórico FULL (declarar nova qtd ou excluir).
+                item.em_espera = 1
+                item.data_em_espera = datetime.utcnow()
             db.add(item)
             db.commit()
             _registrar_log_operacao(
