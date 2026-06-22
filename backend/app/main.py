@@ -2025,8 +2025,6 @@ async def upload_embale(request: Request):
 
         # Parsear data limite (formato YYYY-MM-DD do input HTML)
         data_limite = None
-        data_limite_anterior = embale.data_limite.isoformat() if embale.data_limite else None
-
         if data_limite_str:
             try:
                 data_limite = datetime.strptime(data_limite_str[:10], "%Y-%m-%d")
@@ -2304,6 +2302,8 @@ async def atualizar_data_limite_embale(request: Request):
         embale = db.query(EmbaleFU).filter(EmbaleFU.id == embale_id).first()
         if not embale:
             return JSONResponse({"erro": "Inbound não encontrado"}, status_code=404)
+
+        data_limite_anterior = embale.data_limite.isoformat() if embale.data_limite else None
 
         if data_limite_str:
             try:
