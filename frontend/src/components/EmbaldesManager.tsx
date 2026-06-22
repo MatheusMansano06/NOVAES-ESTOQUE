@@ -144,6 +144,7 @@ export function EmbaldesManager({ modoSeparacao = false }: { modoSeparacao?: boo
   const [skuImg, setSkuImg] = useState<Record<string, string>>({})
   // Filtro do picker: mostrar só os itens que tiveram a qtd do FULL alterada
   const [soEditados, setSoEditados] = useState(false)
+  const [soEmEspera, setSoEmEspera] = useState(false)
   // Kit por item (cache da detecção), quantidade por componente e estado da baixa
   const [kitPorItem, setKitPorItem] = useState<Record<number, KitEstado>>({})
   const [kitQtds, setKitQtds] = useState<Record<string, string>>({})
@@ -196,7 +197,11 @@ export function EmbaldesManager({ modoSeparacao = false }: { modoSeparacao?: boo
   // (cacheado por item). Se for, o picker mostra os componentes p/ baixar cada um.
   useEffect(() => {
     if (!modoSeparacao || !revisao) return
-    const lista = soEditados ? revisao.itens.filter((x) => x.tem_historico_full) : revisao.itens
+    const lista = soEditados
+      ? revisao.itens.filter((x) => x.tem_historico_full)
+      : soEmEspera
+        ? revisao.itens.filter((x) => itensEmEspera[x.item_id])
+        : revisao.itens
     if (lista.length === 0) return
     const it = lista[Math.min(sepIndex, lista.length - 1)]
     if (!it) return
@@ -223,7 +228,7 @@ export function EmbaldesManager({ modoSeparacao = false }: { modoSeparacao?: boo
       })
       .catch(() => setKitPorItem((prev) => ({ ...prev, [it.item_id]: 'nao' })))
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [modoSeparacao, revisao?.embale_id, sepIndex, soEditados])
+  }, [modoSeparacao, revisao?.embale_id, sepIndex, soEditados, soEmEspera])
 
   // Baixa os componentes do kit na Olist (cada um vira uma saída). Retorna true se todos OK.
   const baixarKitComponentes = async (it: ItemRevisao, kit: KitInfo): Promise<boolean> => {
@@ -1176,14 +1181,19 @@ export function EmbaldesManager({ modoSeparacao = false }: { modoSeparacao?: boo
                     modoSeparacao ? (
                       (() => {
                         const qtdEditados = revisao.itens.filter((x) => x.tem_historico_full).length
-                        // Filtro "só editados": navega direto entre os que tiveram a qtd do FULL alterada.
-                        const itens = soEditados ? revisao.itens.filter((x) => x.tem_historico_full) : revisao.itens
+                        const qtdEmEspera = revisao.itens.filter((x) => itensEmEspera[x.item_id]).length
+                        // Filtros: "só editados" (qtd FULL alterada) ou "só em espera".
+                        const itens = soEditados
+                          ? revisao.itens.filter((x) => x.tem_historico_full)
+                          : soEmEspera
+                            ? revisao.itens.filter((x) => itensEmEspera[x.item_id])
+                            : revisao.itens
                         const total = itens.length
-                        if (soEditados && total === 0) {
+                        if ((soEditados || soEmEspera) && total === 0) {
                           return (
                             <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', alignItems: 'center', padding: '2rem', textAlign: 'center', color: '#777' }}>
-                              <div>Nenhum produto teve a quantidade do FULL alterada ainda.</div>
-                              <button onClick={() => setSoEditados(false)} style={{ padding: '0.55rem 1.1rem', background: '#fff', color: '#1976D2', border: '1px solid #1976D2', borderRadius: '8px', cursor: 'pointer', fontWeight: 700 }}>Ver todos os produtos</button>
+                              <div>{soEmEspera ? 'Nenhum produto está em espera neste inbound.' : 'Nenhum produto teve a quantidade do FULL alterada ainda.'}</div>
+                              <button onClick={() => { setSoEditados(false); setSoEmEspera(false) }} style={{ padding: '0.55rem 1.1rem', background: '#fff', color: '#1976D2', border: '1px solid #1976D2', borderRadius: '8px', cursor: 'pointer', fontWeight: 700 }}>Ver todos os produtos</button>
                             </div>
                           )
                         }
@@ -1213,7 +1223,7 @@ export function EmbaldesManager({ modoSeparacao = false }: { modoSeparacao?: boo
                             {/* Filtro: só os que tive a qtd do FULL alterada (retoma direto neles) */}
                             <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
                               <button
-                                onClick={() => { setSoEditados((v) => !v); setSepIndex(0) }}
+                                onClick={() => { setSoEditados((v) => !v); setSoEmEspera(false); setSepIndex(0) }}
                                 disabled={!soEditados && qtdEditados === 0}
                                 title={qtdEditados === 0 ? 'Nenhum produto teve a quantidade do FULL alterada ainda' : 'Mostrar só os produtos com a quantidade do FULL alterada'}
                                 style={{
@@ -1226,15 +1236,32 @@ export function EmbaldesManager({ modoSeparacao = false }: { modoSeparacao?: boo
                               >
                                 ✏️ Qtd FULL alterada ({qtdEditados})
                               </button>
+                              <button
+                                onClick={() => { setSoEmEspera((v) => !v); setSoEditados(false); setSepIndex(0) }}
+                                disabled={!soEmEspera && qtdEmEspera === 0}
+                                title={qtdEmEspera === 0 ? 'Nenhum produto está em espera' : 'Mostrar só os produtos em espera'}
+                                style={{
+                                  padding: '0.5rem 1rem', borderRadius: '999px', fontWeight: 700, fontSize: '0.85rem',
+                                  cursor: (!soEmEspera && qtdEmEspera === 0) ? 'not-allowed' : 'pointer',
+                                  border: `1px solid ${soEmEspera ? '#6a1b9a' : '#ce93d8'}`,
+                                  background: soEmEspera ? '#6a1b9a' : '#fff',
+                                  color: soEmEspera ? '#fff' : (qtdEmEspera === 0 ? '#aaa' : '#6a1b9a'),
+                                }}
+                              >
+                                ⏸️ Em espera ({qtdEmEspera})
+                              </button>
                               {soEditados && (
                                 <span style={{ fontSize: '0.82rem', color: '#666' }}>Mostrando só os editados. <button onClick={() => { setSoEditados(false); setSepIndex(0) }} style={{ background: 'none', border: 'none', color: '#1976D2', cursor: 'pointer', fontWeight: 700, padding: 0 }}>Ver todos</button></span>
+                              )}
+                              {soEmEspera && (
+                                <span style={{ fontSize: '0.82rem', color: '#666' }}>Mostrando só os em espera. <button onClick={() => { setSoEmEspera(false); setSepIndex(0) }} style={{ background: 'none', border: 'none', color: '#1976D2', cursor: 'pointer', fontWeight: 700, padding: 0 }}>Ver todos</button></span>
                               )}
                             </div>
 
                             {/* Barra de progresso */}
                             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '1rem', flexWrap: 'wrap' }}>
                               <div style={{ fontWeight: 700, color: '#0d47a1', fontSize: '1.05rem' }}>
-                                Produto {idx + 1} de {total}{soEditados ? ' (editados)' : ''}
+                                Produto {idx + 1} de {total}{soEditados ? ' (editados)' : soEmEspera ? ' (em espera)' : ''}
                               </div>
                               <div style={{ fontSize: '0.85rem', color: '#666' }}>
                                 {resolvidos} de {total} resolvidos
