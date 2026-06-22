@@ -26,6 +26,7 @@ from app.models import (
 from app.utils.nfe_parser import NFeParsing
 from app.utils.nfe_pdf_generator import NFePDFGenerator
 from app.utils.embale_parser import extrair_items_embale_pdf
+from app.utils.lista_compra import calcular_lista_compra, registrar_snapshot_vendas
 from app.integracoes_olist import olist
 from app.integracoes_ml import ml
 from app.jobs import iniciar_scheduler
@@ -4536,6 +4537,48 @@ async def ml_conta(request: Request):
     return JSONResponse(result, status_code=code, headers={"Cache-Control": "no-store"})
 
 
+async def lista_compra(request: Request):
+    """GET /api/lista-compra?meta_dias=75 — lista de compra priorizada:
+    curva ABC (unidades vendidas) + estoque FULL/orgânico + velocidade de venda."""
+    db = SessionLocal()
+    try:
+        try:
+            meta_dias = int(request.query_params.get("meta_dias") or 75)
+        except (TypeError, ValueError):
+            meta_dias = 75
+        meta_dias = max(1, min(365, meta_dias))
+        # Garante date_created dos ativos (base da velocidade no bootstrap).
+        try:
+            faltando = db.query(MercadoLivreItemCache).filter(
+                MercadoLivreItemCache.status == "active",
+                MercadoLivreItemCache.date_created.is_(None),
+            ).all()
+            ids = [r.item_id for r in faltando if r.item_id]
+            if ids:
+                mapa = ml._date_created_map(ids)
+                mudou = False
+                for r in faltando:
+                    dc = mapa.get(str(r.item_id))
+                    if dc:
+                        r.date_created = dc
+                        mudou = True
+                if mudou:
+                    db.commit()
+        except Exception:
+            db.rollback()
+        # Acumula a foto de vendas do dia (no máx 1x/dia) p/ refinar a velocidade
+        try:
+            registrar_snapshot_vendas(db)
+        except Exception:
+            db.rollback()
+        dados = calcular_lista_compra(db, meta_dias=meta_dias)
+        return JSONResponse(dados, headers={"Cache-Control": "no-store"})
+    except Exception as e:
+        return JSONResponse({"erro": str(e)}, status_code=500)
+    finally:
+        db.close()
+
+
 async def ml_anuncio_imagens_upload(request: Request):
     item_id = request.path_params.get("item_id")
     form = await request.form()
@@ -4836,6 +4879,7 @@ routes = [
     Route("/api/ml/anuncios/{item_id:str}/duplicar", ml_anuncio_duplicar, methods=["POST"]),
     Route("/api/ml/categorias", ml_categorias_buscar, methods=["GET"]),
     Route("/api/ml/conta", ml_conta, methods=["GET"]),
+    Route("/api/lista-compra", lista_compra, methods=["GET"]),
     Route("/api/ml/anuncios/{item_id:str}/pictures/upload", ml_anuncio_imagens_upload, methods=["POST"]),
     Route("/api/ml/anuncios/{item_id:str}/pictures", ml_anuncio_imagens_reordenar, methods=["POST"]),
     Route("/api/ml/precificacao", ml_precificacao, methods=["GET"]),

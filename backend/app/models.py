@@ -430,3 +430,18 @@ class MercadoLivreSyncState(Base):
     synced_at = Column(DateTime, default=datetime.utcnow)
     cache_expires_at = Column(DateTime, nullable=True)
     last_error = Column(Text, nullable=True)
+
+
+class SkuVendasSnapshot(Base):
+    """
+    Foto diária do total de vendas (sold_quantity) de cada anúncio do ML.
+    Serve para calcular a VELOCIDADE de venda recente (diff entre snapshots),
+    que alimenta a Lista de Compra. Um registro por anúncio por dia.
+    """
+    __tablename__ = "sku_vendas_snapshot"
+
+    id = Column(Integer, primary_key=True)
+    item_id = Column(String(50), index=True)
+    sku = Column(String(120), index=True)
+    vendidos = Column(Integer, default=0)
+    criado_em = Column(DateTime, default=datetime.utcnow, index=True)

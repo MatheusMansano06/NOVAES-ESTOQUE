@@ -7,6 +7,7 @@ import { FornecedoresManager } from './components/FornecedoresManager'
 import { EmbaldesManager } from './components/EmbaldesManager'
 import { HistoricoFull } from './components/HistoricoFull'
 import { AnunciosML } from './components/AnunciosML'
+import { ListaCompra } from './components/ListaCompra'
 import { OperadoresManager } from './components/OperadoresManager'
 import { AppShell, type ShellNavGroup, type ShellStatusItem } from './components/AppShell'
 import {
@@ -1614,6 +1615,7 @@ function App() {
       label: 'Marketplace',
       items: [
         { key: 'anuncios', label: 'Anuncios ML', icon: 'megaphone', active: pagina === 'anuncios', onClick: () => setPagina('anuncios') },
+        { key: 'lista-compra', label: 'Lista de Compra', icon: 'receipt', active: pagina === 'lista-compra', onClick: () => setPagina('lista-compra') },
         { key: 'inbound', label: 'Inbound FULL', icon: 'truck', active: pagina === 'embaldes', badge: inboundsAtivos.length, onClick: () => setPagina('embaldes') },
         { key: 'historico-full', label: 'Histórico FULL', icon: 'sync', active: pagina === 'historico-full', onClick: () => setPagina('historico-full') },
         { key: 'divergencias', label: 'Divergencias', icon: 'warning', badge: divergencias.length, active: pagina === 'divergencias', onClick: () => setPagina('divergencias') },
@@ -3200,6 +3202,15 @@ function App() {
       'Painel Mercado Livre',
       'Acompanhe anuncios, estoque, imagens, precificacao e dimensoes.',
       <AnunciosML onVoltar={voltarParaInicial} />
+    )
+  }
+
+  // ===== PÁGINA DE LISTA DE COMPRA =====
+  if (pagina === 'lista-compra') {
+    return renderComShell(
+      'Lista de Compra',
+      'Prioridade de compra pela curva ABC do ML cruzada com estoque e velocidade de venda.',
+      <ListaCompra />
     )
   }
 
