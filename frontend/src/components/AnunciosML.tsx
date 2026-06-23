@@ -173,6 +173,7 @@ export function AnunciosML({ onVoltar }: Props) {
   const [custosOficiais, setCustosOficiais] = useState<CustosOficiais>({})
   const [acaoMsg, setAcaoMsg] = useState<{ tipo: 'ok' | 'erro'; texto: string } | null>(null)
   const [dupCategoria, setDupCategoria] = useState<Anuncio | null>(null)
+  const [centralPromo, setCentralPromo] = useState(false)
 
   const avisar = (tipo: 'ok' | 'erro', texto: string) => {
     setAcaoMsg({ tipo, texto })
@@ -268,6 +269,16 @@ export function AnunciosML({ onVoltar }: Props) {
               {t.label}{aba === t.id && total > 0 ? ` (${total})` : ''}
             </button>
           ))}
+        </div>
+
+        <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '1rem' }}>
+          <button
+            onClick={() => setCentralPromo(true)}
+            style={{ display: 'inline-flex', alignItems: 'center', gap: '0.45rem', padding: '0.7rem 1.2rem', background: '#fff7e6', color: '#b54708', border: '1px solid #fcd9a8', borderRadius: '999px', cursor: 'pointer', fontWeight: 700, fontSize: '0.9rem' }}
+          >
+            🏷️ Central de Promoção
+            <span style={{ fontWeight: 500, fontSize: '0.78rem', color: '#9a6a18' }}>— anúncios fora de promoção</span>
+          </button>
         </div>
 
         <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center', flexWrap: 'wrap', marginBottom: '1.5rem' }}>
@@ -454,6 +465,273 @@ export function AnunciosML({ onVoltar }: Props) {
           onDone={() => { setDupCategoria(null); carregar() }}
         />
       )}
+
+      {centralPromo && (
+        <CentralPromocaoPanel
+          onClose={() => setCentralPromo(false)}
+          onMsg={avisar}
+        />
+      )}
+    </div>
+  )
+}
+
+interface Promocao {
+  id: string
+  type: string
+  name: string
+  status: string
+  start_date?: string | null
+  finish_date?: string | null
+}
+
+interface CandidatoPromo {
+  id: string
+  titulo: string
+  sku: string
+  thumbnail?: string | null
+  original_price?: number | null
+  price?: number | null
+  currency_id?: string | null
+  suggested_discounted_price?: number | null
+  min_discounted_price?: number | null
+  max_discounted_price?: number | null
+}
+
+// Tipos de promoção em que o vendedor define o preço de oferta (deal_price).
+const PROMO_TIPOS_COM_PRECO = new Set(['DEAL', 'PRICE_DISCOUNT', 'DOD', 'LIGHTNING', 'PRE_NEGOTIATED'])
+
+const rotuloTipoPromo = (t: string): string => {
+  switch (t) {
+    case 'DEAL': return 'Campanha tradicional'
+    case 'PRICE_DISCOUNT': return 'Desconto no preço'
+    case 'DOD': return 'Oferta do dia'
+    case 'LIGHTNING': return 'Oferta relâmpago'
+    case 'MARKETPLACE_CAMPAIGN': return 'Campanha co-financiada'
+    case 'SELLER_CAMPAIGN': return 'Campanha do vendedor'
+    case 'PRE_NEGOTIATED': return 'Desconto pré-negociado'
+    case 'VOLUME': return 'Desconto por volume'
+    default: return t
+  }
+}
+
+const janelaPromo = (p: Promocao): string => {
+  const fmt = (iso?: string | null) => iso ? new Date(iso).toLocaleDateString('pt-BR') : '--'
+  if (!p.start_date && !p.finish_date) return ''
+  return `${fmt(p.start_date)} → ${fmt(p.finish_date)}`
+}
+
+function CentralPromocaoPanel({ onClose, onMsg }: { onClose: () => void; onMsg: (t: 'ok' | 'erro', s: string) => void }) {
+  const [promocoes, setPromocoes] = useState<Promocao[]>([])
+  const [carregandoPromos, setCarregandoPromos] = useState(true)
+  const [erroPromos, setErroPromos] = useState('')
+  const [selecionada, setSelecionada] = useState<Promocao | null>(null)
+  const [candidatos, setCandidatos] = useState<CandidatoPromo[]>([])
+  const [carregandoCand, setCarregandoCand] = useState(false)
+  const [erroCand, setErroCand] = useState('')
+
+  useEffect(() => {
+    let ativo = true
+    setCarregandoPromos(true)
+    setErroPromos('')
+    fetch(`${API_BASE}/api/ml/promocoes`, { cache: 'no-store' })
+      .then(r => r.json())
+      .then(d => {
+        if (!ativo) return
+        if (d.erro) { setErroPromos(d.erro); setPromocoes([]) }
+        else setPromocoes(d.promocoes || [])
+      })
+      .catch(e => { if (ativo) setErroPromos('Erro de conexão: ' + String(e)) })
+      .finally(() => { if (ativo) setCarregandoPromos(false) })
+    return () => { ativo = false }
+  }, [])
+
+  const abrirPromocao = useCallback(async (p: Promocao) => {
+    setSelecionada(p)
+    setCandidatos([])
+    setErroCand('')
+    setCarregandoCand(true)
+    try {
+      const r = await fetch(`${API_BASE}/api/ml/promocoes/${encodeURIComponent(p.id)}/candidatos?promotion_type=${encodeURIComponent(p.type)}`, { cache: 'no-store' })
+      const d = await r.json()
+      if (d.erro) { setErroCand(d.erro); setCandidatos([]) }
+      else setCandidatos(d.candidatos || [])
+    } catch (e) {
+      setErroCand('Erro de conexão: ' + String(e))
+    } finally {
+      setCarregandoCand(false)
+    }
+  }, [])
+
+  const removerCandidato = (itemId: string) => setCandidatos(prev => prev.filter(c => c.id !== itemId))
+
+  return (
+    <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(16,24,40,.45)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '1rem' }}>
+      <div onClick={e => e.stopPropagation()} style={{ width: '100%', maxWidth: 760, maxHeight: '90vh', overflowY: 'auto', background: '#fff', borderRadius: 14, padding: '1.25rem', boxShadow: '0 24px 60px rgba(16,24,40,.28)' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '.75rem', marginBottom: '.85rem' }}>
+          <div>
+            <div style={{ fontWeight: 800, fontSize: '1.05rem', color: '#1d2939' }}>🏷️ Central de Promoção</div>
+            <div style={{ fontSize: '.82rem', color: '#667085', marginTop: 2 }}>
+              {selecionada ? 'Anúncios elegíveis e ainda fora desta promoção.' : 'Escolha uma campanha para ver os anúncios que ainda não estão nela.'}
+            </div>
+          </div>
+          <button onClick={onClose} aria-label="Fechar" style={{ flexShrink: 0, width: 28, height: 28, borderRadius: 8, border: '1px solid #e4e7ec', background: '#fff', color: '#667085', fontSize: '1.1rem', cursor: 'pointer' }}>×</button>
+        </div>
+
+        {!selecionada ? (
+          <PromoLista
+            promocoes={promocoes}
+            carregando={carregandoPromos}
+            erro={erroPromos}
+            onEscolher={abrirPromocao}
+          />
+        ) : (
+          <CandidatosLista
+            promocao={selecionada}
+            candidatos={candidatos}
+            carregando={carregandoCand}
+            erro={erroCand}
+            onVoltar={() => { setSelecionada(null); setCandidatos([]); setErroCand('') }}
+            onMsg={onMsg}
+            onInscrito={removerCandidato}
+          />
+        )}
+      </div>
+    </div>
+  )
+}
+
+function PromoLista({ promocoes, carregando, erro, onEscolher }: { promocoes: Promocao[]; carregando: boolean; erro: string; onEscolher: (p: Promocao) => void }) {
+  if (carregando) return <div style={{ padding: '2rem', textAlign: 'center', color: '#98a2b3' }}>Carregando promoções…</div>
+  if (erro) return (
+    <div style={{ padding: '1rem', background: '#ffebee', border: '1px solid #ef5350', borderRadius: 8, color: '#c62828' }}>
+      {erro}
+      <div style={{ marginTop: '.5rem', fontSize: '.85rem' }}>
+        Se for autorização, <a href={`${API_BASE}/api/ml/conectar`} style={{ color: '#1976d2' }}>reconecte o Mercado Livre</a>.
+      </div>
+    </div>
+  )
+  if (promocoes.length === 0) return <div style={{ padding: '2rem', textAlign: 'center', color: '#98a2b3' }}>Nenhuma promoção ativa na sua conta no momento.</div>
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '.5rem' }}>
+      {promocoes.map(p => (
+        <button
+          key={p.id}
+          onClick={() => onEscolher(p)}
+          style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '.75rem', textAlign: 'left', padding: '.85rem 1rem', background: '#fff', border: '1px solid #e4e7ec', borderRadius: 10, cursor: 'pointer' }}
+        >
+          <div>
+            <div style={{ fontWeight: 700, color: '#1d2939', fontSize: '.92rem' }}>{p.name}</div>
+            <div style={{ fontSize: '.74rem', color: '#98a2b3', marginTop: 2 }}>
+              {rotuloTipoPromo(p.type)}{janelaPromo(p) ? ` · ${janelaPromo(p)}` : ''}
+            </div>
+          </div>
+          <span style={{ color: '#3483fa', fontWeight: 700, fontSize: '.85rem' }}>Ver anúncios →</span>
+        </button>
+      ))}
+    </div>
+  )
+}
+
+function CandidatosLista({ promocao, candidatos, carregando, erro, onVoltar, onMsg, onInscrito }: { promocao: Promocao; candidatos: CandidatoPromo[]; carregando: boolean; erro: string; onVoltar: () => void; onMsg: (t: 'ok' | 'erro', s: string) => void; onInscrito: (itemId: string) => void }) {
+  return (
+    <div>
+      <button onClick={onVoltar} style={{ padding: '.4rem .9rem', background: '#f0f0f0', border: '1px solid #ddd', borderRadius: 6, cursor: 'pointer', fontWeight: 600, fontSize: '.82rem', marginBottom: '.85rem' }}>← Promoções</button>
+      <div style={{ fontWeight: 700, color: '#1d2939', fontSize: '.95rem', marginBottom: '.2rem' }}>{promocao.name}</div>
+      <div style={{ fontSize: '.74rem', color: '#98a2b3', marginBottom: '.85rem' }}>{rotuloTipoPromo(promocao.type)}</div>
+      {carregando ? (
+        <div style={{ padding: '2rem', textAlign: 'center', color: '#98a2b3' }}>Carregando anúncios elegíveis…</div>
+      ) : erro ? (
+        <div style={{ padding: '1rem', background: '#ffebee', border: '1px solid #ef5350', borderRadius: 8, color: '#c62828' }}>{erro}</div>
+      ) : candidatos.length === 0 ? (
+        <div style={{ padding: '2rem', textAlign: 'center', color: '#98a2b3' }}>Nenhum anúncio elegível e fora desta promoção. 🎉</div>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '.6rem' }}>
+          {candidatos.map(c => (
+            <CandidatoCard key={c.id} candidato={c} promocao={promocao} onMsg={onMsg} onInscrito={onInscrito} />
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function CandidatoCard({ candidato, promocao, onMsg, onInscrito }: { candidato: CandidatoPromo; promocao: Promocao; onMsg: (t: 'ok' | 'erro', s: string) => void; onInscrito: (itemId: string) => void }) {
+  const exigePreco = PROMO_TIPOS_COM_PRECO.has(promocao.type)
+  const sugerido = candidato.suggested_discounted_price ?? candidato.price ?? candidato.original_price ?? 0
+  const [preco, setPreco] = useState(exigePreco ? String((sugerido || 0).toFixed(2)) : '')
+  const [salvando, setSalvando] = useState(false)
+
+  const inscrever = async () => {
+    let deal_price: number | undefined
+    if (exigePreco) {
+      const v = Number(String(preco).replace(',', '.'))
+      if (!v || v <= 0) { onMsg('erro', 'Informe um preço de oferta válido'); return }
+      const min = candidato.min_discounted_price
+      const max = candidato.max_discounted_price
+      if (min != null && v < min) { onMsg('erro', `Preço abaixo do mínimo permitido (${brl(min)})`); return }
+      if (max != null && v > max) { onMsg('erro', `Preço acima do máximo permitido (${brl(max)})`); return }
+      deal_price = v
+    }
+    const txtPreco = exigePreco && deal_price != null ? ` por ${brl(deal_price)}` : ''
+    if (!window.confirm(`Adicionar "${candidato.titulo}" à promoção "${promocao.name}"${txtPreco}?\n\nIsso altera o anúncio no Mercado Livre.`)) return
+    setSalvando(true)
+    try {
+      const r = await fetch(`${API_BASE}/api/ml/promocoes/itens/${encodeURIComponent(candidato.id)}/inscrever`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ promotion_id: promocao.id, promotion_type: promocao.type, ...(deal_price != null ? { deal_price } : {}) }),
+      })
+      const d = await r.json()
+      if (!r.ok || d.erro) throw new Error(d.erro || 'Falha ao inscrever na promoção')
+      onMsg('ok', `"${candidato.titulo}" adicionado à promoção`)
+      onInscrito(candidato.id)
+    } catch (e) {
+      onMsg('erro', String(e instanceof Error ? e.message : e))
+    } finally {
+      setSalvando(false)
+    }
+  }
+
+  const min = candidato.min_discounted_price
+  const max = candidato.max_discounted_price
+
+  return (
+    <div style={{ display: 'flex', gap: '.75rem', alignItems: 'center', flexWrap: 'wrap', padding: '.7rem .85rem', border: '1px solid #e4e7ec', borderRadius: 10, background: '#fff' }}>
+      <div style={{ width: 48, height: 48, flexShrink: 0, borderRadius: 8, overflow: 'hidden', background: '#f5f5f5', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        {candidato.thumbnail ? <img src={candidato.thumbnail} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : <span style={{ color: '#ccc' }}>--</span>}
+      </div>
+      <div style={{ flex: 1, minWidth: 180 }}>
+        <div style={{ fontWeight: 600, fontSize: '.86rem', color: '#1d2939', lineHeight: 1.3 }}>{candidato.titulo}</div>
+        <div style={{ fontSize: '.74rem', color: '#98a2b3', marginTop: 2 }}>
+          {candidato.sku ? `SKU: ${candidato.sku} · ` : ''}{candidato.id}
+          {candidato.original_price != null ? ` · de ${brl(candidato.original_price)}` : ''}
+        </div>
+      </div>
+      {exigePreco && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+          <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+            <span style={{ fontSize: '.8rem', color: '#475467', fontWeight: 700 }}>R$</span>
+            <input
+              type="text" inputMode="decimal" value={preco}
+              onChange={e => setPreco(e.target.value)}
+              style={{ width: 78, padding: '.35rem .5rem', border: '1px solid #cfd8dc', borderRadius: 6, fontSize: '.85rem', fontWeight: 700, textAlign: 'right' }}
+            />
+          </div>
+          {(min != null || max != null) && (
+            <span style={{ fontSize: '.66rem', color: '#98a2b3' }}>
+              {min != null ? `mín ${brl(min)}` : ''}{min != null && max != null ? ' · ' : ''}{max != null ? `máx ${brl(max)}` : ''}
+            </span>
+          )}
+        </div>
+      )}
+      <button
+        onClick={inscrever}
+        disabled={salvando}
+        style={{ padding: '.5rem 1rem', background: '#067647', color: '#fff', border: 'none', borderRadius: 8, fontWeight: 700, fontSize: '.84rem', cursor: salvando ? 'wait' : 'pointer', whiteSpace: 'nowrap' }}
+      >
+        {salvando ? '...' : 'Adicionar'}
+      </button>
     </div>
   )
 }

@@ -4297,6 +4297,52 @@ async def ml_anuncios(request: Request):
     return JSONResponse(resultado, status_code=code, headers={"Cache-Control": "no-store"})
 
 
+async def ml_promocoes(request: Request):
+    """GET /api/ml/promocoes — promoções/campanhas ativas da Central de Promoções do ML."""
+    resultado = ml.listar_promocoes()
+    code = 200 if not resultado.get("erro") else 502
+    return JSONResponse(resultado, status_code=code, headers={"Cache-Control": "no-store"})
+
+
+async def ml_promocao_candidatos(request: Request):
+    """GET /api/ml/promocoes/{promotion_id}/candidatos?promotion_type= — anúncios elegíveis
+    e ainda não inscritos (status=candidate) na promoção indicada."""
+    promotion_id = request.path_params.get("promotion_id")
+    promotion_type = (request.query_params.get("promotion_type", "") or "").strip()
+    if not promotion_id or not promotion_type:
+        return JSONResponse({"erro": "promotion_id e promotion_type são obrigatórios", "candidatos": []}, status_code=400)
+    resultado = ml.listar_candidatos_promocao(promotion_id, promotion_type)
+    code = 200 if not resultado.get("erro") else 502
+    return JSONResponse(resultado, status_code=code, headers={"Cache-Control": "no-store"})
+
+
+async def ml_promocao_inscrever(request: Request):
+    """POST /api/ml/promocoes/itens/{item_id}/inscrever {promotion_id, promotion_type, deal_price?}
+    — inscreve o anúncio na promoção (ESCREVE no Mercado Livre)."""
+    item_id = request.path_params.get("item_id")
+    if not item_id:
+        return JSONResponse({"erro": "item_id obrigatório"}, status_code=400)
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    if not isinstance(body, dict):
+        body = {}
+    promotion_id = (body.get("promotion_id") or "").strip() if isinstance(body.get("promotion_id"), str) else body.get("promotion_id")
+    promotion_type = (body.get("promotion_type") or "").strip() if isinstance(body.get("promotion_type"), str) else body.get("promotion_type")
+    deal_price = body.get("deal_price")
+    if deal_price is not None:
+        try:
+            deal_price = float(deal_price)
+        except (TypeError, ValueError):
+            return JSONResponse({"erro": "deal_price inválido"}, status_code=400)
+    if not promotion_id or not promotion_type:
+        return JSONResponse({"erro": "promotion_id e promotion_type são obrigatórios"}, status_code=400)
+    resultado = ml.inscrever_em_promocao(item_id, promotion_id, promotion_type, deal_price)
+    code = 200 if not resultado.get("erro") else 502
+    return JSONResponse(resultado, status_code=code, headers={"Cache-Control": "no-store"})
+
+
 async def ml_precificacao(request: Request):
     """GET /api/ml/precificacao?price=X&category_id=Y — tarifa de venda real (Clássico/Premium)."""
     try:
@@ -5039,6 +5085,9 @@ routes = [
     Route("/api/ml/status", ml_status, methods=["GET"]),
     Route("/api/ml/sync", ml_sync_cache, methods=["POST"]),
     Route("/api/ml/anuncios", ml_anuncios, methods=["GET"]),
+    Route("/api/ml/promocoes", ml_promocoes, methods=["GET"]),
+    Route("/api/ml/promocoes/itens/{item_id:str}/inscrever", ml_promocao_inscrever, methods=["POST"]),
+    Route("/api/ml/promocoes/{promotion_id:str}/candidatos", ml_promocao_candidatos, methods=["GET"]),
     Route("/api/ml/anuncios/{item_id:str}", ml_anuncio_detalhes, methods=["GET"]),
     Route("/api/ml/anuncios/{item_id:str}/description", ml_anuncio_descricao, methods=["POST"]),
     Route("/api/ml/anuncios/{item_id:str}/attributes", ml_anuncio_atributos, methods=["POST"]),

@@ -2008,5 +2008,110 @@ class MLIntegration:
                 self._sync_catalogo_async(status)
         return self._listar_anuncios_cache(status=status, offset=offset, limit=limit, q=termo_busca)
 
+    # ---------- Central de Promoções (seller-promotions) ----------
+    # Tipos que exigem o vendedor definir um preço de oferta (deal_price).
+    PROMO_TIPOS_COM_PRECO = {"DEAL", "PRICE_DISCOUNT", "DOD", "LIGHTNING", "PRE_NEGOTIATED"}
+
+    def listar_promocoes(self) -> Dict:
+        """Lista as promoções/campanhas ativas da conta na Central de Promoções do ML.
+        GET /seller-promotions/users/{user_id}?app_version=v2
+        """
+        if not self.user_id:
+            return {"erro": "ML_USER_ID não configurado", "promocoes": []}
+        resp = self._get_json(f"/seller-promotions/users/{self.user_id}", {"app_version": "v2"})
+        if not isinstance(resp, dict):
+            return {"erro": "Falha ao consultar promoções no Mercado Livre", "promocoes": []}
+        if resp.get("erro"):
+            return {"erro": resp.get("erro"), "promocoes": []}
+        promocoes = []
+        for p in (resp.get("results") or []):
+            if not isinstance(p, dict):
+                continue
+            status = (p.get("status") or "").lower()
+            # Só interessam as que ainda aceitam inscrição (em andamento ou agendadas).
+            if status and status not in {"started", "pending"}:
+                continue
+            promocoes.append({
+                "id": p.get("id"),
+                "type": p.get("type"),
+                "name": p.get("name") or p.get("id"),
+                "status": status,
+                "start_date": p.get("start_date"),
+                "finish_date": p.get("finish_date"),
+            })
+        return {"promocoes": promocoes, "total": len(promocoes)}
+
+    def listar_candidatos_promocao(self, promotion_id: str, promotion_type: str) -> Dict:
+        """Itens elegíveis mas ainda NÃO inscritos numa promoção (status=candidate).
+        GET /seller-promotions/promotions/{id}/items?promotion_type=&app_version=v2&status=candidate
+        Enriquece título/foto/SKU pelo cache local (sem 1 request por item).
+        """
+        if not promotion_id or not promotion_type:
+            return {"erro": "promotion_id e promotion_type são obrigatórios", "candidatos": []}
+        resp = self._get_json(
+            f"/seller-promotions/promotions/{promotion_id}/items",
+            {"promotion_type": promotion_type, "app_version": "v2", "status": "candidate"},
+        )
+        if not isinstance(resp, dict):
+            return {"erro": "Falha ao consultar candidatos no Mercado Livre", "candidatos": []}
+        if resp.get("erro"):
+            return {"erro": resp.get("erro"), "candidatos": []}
+        results = resp.get("results") or []
+        ids = [str(r.get("id")) for r in results if isinstance(r, dict) and r.get("id")]
+        # Busca título/foto/SKU de todos os ids de uma vez no cache local.
+        info_por_id: Dict[str, Dict[str, Any]] = {}
+        if ids:
+            db = self._db()
+            try:
+                rows = db.query(MercadoLivreItemCache).filter(MercadoLivreItemCache.item_id.in_(ids)).all()
+                for row in rows:
+                    info_por_id[str(row.item_id)] = {
+                        "titulo": row.titulo,
+                        "sku": row.sku or "",
+                        "thumbnail": row.thumbnail or row.imagem_principal,
+                    }
+            finally:
+                db.close()
+        candidatos = []
+        for r in results:
+            if not isinstance(r, dict) or not r.get("id"):
+                continue
+            item_id = str(r.get("id"))
+            info = info_por_id.get(item_id, {})
+            candidatos.append({
+                "id": item_id,
+                "titulo": info.get("titulo") or item_id,
+                "sku": info.get("sku") or "",
+                "thumbnail": info.get("thumbnail"),
+                "original_price": r.get("original_price"),
+                "price": r.get("price"),
+                "currency_id": r.get("currency_id"),
+                "suggested_discounted_price": r.get("suggested_discounted_price"),
+                "min_discounted_price": r.get("min_discounted_price"),
+                "max_discounted_price": r.get("max_discounted_price"),
+                "start_date": r.get("start_date"),
+                "end_date": r.get("end_date"),
+            })
+        return {"candidatos": candidatos, "total": len(candidatos)}
+
+    def inscrever_em_promocao(self, item_id: str, promotion_id: str, promotion_type: str, deal_price: Optional[float] = None) -> Dict:
+        """Inscreve um anúncio numa promoção da Central.
+        POST /seller-promotions/items/{item_id}?app_version=v2
+        Tipos com preço enviam deal_price; campanhas opt-in não.
+        """
+        if not item_id or not promotion_id or not promotion_type:
+            return {"erro": "item_id, promotion_id e promotion_type são obrigatórios"}
+        body: Dict[str, Any] = {"promotion_id": promotion_id, "promotion_type": promotion_type}
+        if promotion_type in self.PROMO_TIPOS_COM_PRECO:
+            if deal_price is None or deal_price <= 0:
+                return {"erro": "Esta promoção exige um preço de oferta (deal_price) válido."}
+            body["deal_price"] = float(deal_price)
+        resp = self._request_json("POST", f"/seller-promotions/items/{item_id}", body=body, params={"app_version": "v2"})
+        if not isinstance(resp, dict):
+            return {"erro": "Falha ao inscrever o anúncio na promoção"}
+        if resp.get("erro"):
+            return {"erro": resp.get("erro"), "status_code": resp.get("status_code")}
+        return {"ok": True, "item_id": item_id, "offer_id": resp.get("offer_id"), "price": resp.get("price"), "original_price": resp.get("original_price")}
+
 
 ml = MLIntegration()
