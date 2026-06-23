@@ -585,19 +585,21 @@ class OlistIntegration:
                 item['_score'] = score
                 matches.append(item)
 
-        # 2) Busca na API por codigo (1 req) SOMENTE quando parece um SKU
-        #    especifico que o cache nao cobriu bem:
-        #    - sem match exato no cache, E
-        #    - cache trouxe poucos resultados (nao e um nome amplo tipo "viseira"), E
-        #    - termo sem espaco com >=3 chars (formato de SKU).
-        #    Isso acha VARIACOES sem penalizar buscas por nome.
-        if (not achou_sku_exato and len(matches) < 5
-                and ' ' not in termo and len(termo_lower) >= 3):
+        # 2) Busca na API por codigo (1 req) SEMPRE que o termo parece um SKU e o
+        #    cache nao trouxe o match EXATO. O cache cobre so os ~2000 primeiros
+        #    produtos (MAX_PAGES) e nao traz variacoes; um SKU fora do cache caia
+        #    em matches PARCIAIS ("520" dentro de "5200"/"11520") e o usuario
+        #    acabava vinculando o produto errado. ?codigo= e autoritativo (e o que
+        #    o ERP da Olist faz), entao consultamos sempre — sem depender de quantos
+        #    matches parciais o cache trouxe.
+        if sku_like and not achou_sku_exato:
             via_api = self._buscar_por_codigo_api(termo.strip())
             for p in via_api:
                 item = dict(p)
                 item['_score'] = max(1100, self._score_busca_produto(item, termo, sku_like))
                 matches.append(item)
+                if self._normalizar_sku_busca(item.get('sku') or item.get('codigo_produto') or '') == termo_norm:
+                    achou_sku_exato = True
 
         matches.sort(
             key=lambda p: (
