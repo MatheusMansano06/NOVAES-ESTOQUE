@@ -47,7 +47,10 @@ interface Compra {
   data_entrada?: string
   quantidade: number
   preco_unitario: number
+  valor_item: number          // qtd × preço (sem frete)
+  nota_total_valor: number    // soma do valor de todos os itens da nota
   valor_frete_nota: number
+  frete_share: number         // parcela do frete da nota atribuída a este item
   frete_unit: number
   custo_efetivo_unit: number
 }
@@ -172,6 +175,13 @@ export function FornecedoresManager({ onVoltar }: FornecedoresManagerProps) {
   const [editandoCustoSku, setEditandoCustoSku] = useState<string | null>(null)
   const [custoEditValor, setCustoEditValor] = useState('')
   const [salvandoCusto, setSalvandoCusto] = useState(false)
+  // Quais "produto|fornecedor" estão com a conta detalhada (média ponderada) aberta.
+  const [contaAberta, setContaAberta] = useState<Set<string>>(new Set())
+  const toggleConta = (k: string) => setContaAberta(prev => {
+    const novo = new Set(prev)
+    if (novo.has(k)) novo.delete(k); else novo.add(k)
+    return novo
+  })
 
   useEffect(() => { loadTudo() }, [])
 
@@ -382,7 +392,10 @@ export function FornecedoresManager({ onVoltar }: FornecedoresManagerProps) {
           data_entrada: item.data_criacao,
           quantidade: qtd,
           preco_unitario: item.preco_unitario || 0,
+          valor_item: valorItem,
+          nota_total_valor: notaTotalValor,
           valor_frete_nota: frete,
+          frete_share: freteShare,
           frete_unit: freteUnit,
           custo_efetivo_unit: custoEfetivoUnit,
         }
@@ -671,6 +684,11 @@ export function FornecedoresManager({ onVoltar }: FornecedoresManagerProps) {
                                 <div style={{ textAlign: 'right' }}>
                                   <div style={{ fontSize: '0.95rem', fontWeight: 700, color: ehMaisBarato ? '#0f6e56' : '#1a1a1a' }}>{brl(forn.custoMedio)}</div>
                                   <div style={{ fontSize: '0.72rem', color: '#999' }}>custo médio · {Math.round(forn.qtdTotal)} un</div>
+                                  <button
+                                    onClick={() => toggleConta(`${prod.chave}|${forn.nome}`)}
+                                    style={{ marginTop: '0.25rem', padding: '0.2rem 0.55rem', background: '#fff', color: '#007acc', border: '1px solid #b3d8f5', borderRadius: '6px', cursor: 'pointer', fontSize: '0.72rem', fontWeight: 700 }}>
+                                    {contaAberta.has(`${prod.chave}|${forn.nome}`) ? '▲ ocultar conta' : '🧮 ver conta'}
+                                  </button>
                                 </div>
                               </div>
                               {/* Compras (NFs) */}
@@ -687,6 +705,65 @@ export function FornecedoresManager({ onVoltar }: FornecedoresManagerProps) {
                                   </div>
                                 ))}
                               </div>
+
+                              {/* Conta detalhada: média ponderada + frete diluído por produto */}
+                              {contaAberta.has(`${prod.chave}|${forn.nome}`) && (() => {
+                                const somaCustoQtd = forn.compras.reduce((s, c) => s + c.custo_efetivo_unit * c.quantidade, 0)
+                                const somaQtd = forn.compras.reduce((s, c) => s + c.quantidade, 0)
+                                return (
+                                  <div style={{ marginTop: '0.75rem', marginLeft: '42px', background: '#f7fbff', border: '1px solid #d6e8fa', borderRadius: '10px', padding: '1rem 1.1rem' }}>
+                                    <div style={{ fontWeight: 700, fontSize: '0.85rem', color: '#0c447c', marginBottom: '0.6rem' }}>🧮 Conta do custo médio ponderado (com frete diluído)</div>
+                                    <div style={{ overflowX: 'auto' }}>
+                                      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.74rem', color: '#37474f', minWidth: 620 }}>
+                                        <thead>
+                                          <tr style={{ textAlign: 'right', color: '#78909c', borderBottom: '1px solid #d6e8fa' }}>
+                                            <th style={{ textAlign: 'left', padding: '0.3rem 0.4rem' }}>NF</th>
+                                            <th style={{ padding: '0.3rem 0.4rem' }}>Qtd</th>
+                                            <th style={{ padding: '0.3rem 0.4rem' }}>Preço un</th>
+                                            <th style={{ padding: '0.3rem 0.4rem' }}>Valor item</th>
+                                            <th style={{ padding: '0.3rem 0.4rem' }}>% da nota</th>
+                                            <th style={{ padding: '0.3rem 0.4rem' }}>Frete nota</th>
+                                            <th style={{ padding: '0.3rem 0.4rem' }}>Frete rateado</th>
+                                            <th style={{ padding: '0.3rem 0.4rem' }}>Frete / un</th>
+                                            <th style={{ padding: '0.3rem 0.4rem', color: '#0c447c' }}>Custo efetivo un</th>
+                                          </tr>
+                                        </thead>
+                                        <tbody>
+                                          {forn.compras.map((c, ci) => {
+                                            const pct = c.nota_total_valor > 0 ? (c.valor_item / c.nota_total_valor) * 100 : 0
+                                            return (
+                                              <tr key={ci} style={{ textAlign: 'right', borderBottom: '1px solid #eef5fc' }}>
+                                                <td style={{ textAlign: 'left', padding: '0.3rem 0.4rem' }}>#{c.numero_nf}</td>
+                                                <td style={{ padding: '0.3rem 0.4rem' }}>{Math.round(c.quantidade)}</td>
+                                                <td style={{ padding: '0.3rem 0.4rem' }}>{brl(c.preco_unitario)}</td>
+                                                <td style={{ padding: '0.3rem 0.4rem' }}>{brl(c.valor_item)}</td>
+                                                <td style={{ padding: '0.3rem 0.4rem' }}>{pct.toFixed(1)}%</td>
+                                                <td style={{ padding: '0.3rem 0.4rem' }}>{brl(c.valor_frete_nota)}</td>
+                                                <td style={{ padding: '0.3rem 0.4rem', color: '#007acc' }}>{brl(c.frete_share)}</td>
+                                                <td style={{ padding: '0.3rem 0.4rem', color: '#007acc' }}>+{brl(c.frete_unit)}</td>
+                                                <td style={{ padding: '0.3rem 0.4rem', fontWeight: 700, color: '#0c447c' }}>{brl(c.custo_efetivo_unit)}</td>
+                                              </tr>
+                                            )
+                                          })}
+                                        </tbody>
+                                      </table>
+                                    </div>
+                                    <div style={{ marginTop: '0.7rem', paddingTop: '0.6rem', borderTop: '1px dashed #c4ddf5', fontSize: '0.78rem', color: '#37474f' }}>
+                                      <div style={{ marginBottom: '0.25rem' }}>
+                                        <strong>Média ponderada</strong> = Σ(custo efetivo × qtd) ÷ Σ(qtd)
+                                      </div>
+                                      <div style={{ fontFamily: 'monospace', color: '#0c447c', fontSize: '0.8rem' }}>
+                                        {brl(somaCustoQtd)} ÷ {Math.round(somaQtd)} un = <strong>{brl(forn.custoMedio)}</strong> por unidade
+                                      </div>
+                                      <div style={{ marginTop: '0.5rem', fontSize: '0.72rem', color: '#607d8b' }}>
+                                        O frete da nota é diluído entre os produtos na proporção do valor de cada item.
+                                        Este custo médio entra na margem — a menos que exista um <strong>custo oficial</strong> definido,
+                                        que tem prioridade.
+                                      </div>
+                                    </div>
+                                  </div>
+                                )
+                              })()}
                             </div>
                           )
                         })}
