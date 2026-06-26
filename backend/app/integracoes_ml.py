@@ -117,10 +117,13 @@ def _parse_dimensions_from_attributes(attributes: List[Dict[str, Any]]) -> Optio
                     pass
         return None
 
-    altura = pick("PACKAGE_HEIGHT", "HEIGHT")
-    largura = pick("PACKAGE_WIDTH", "WIDTH")
-    comprimento = pick("PACKAGE_LENGTH", "LENGTH")
-    peso = pick("PACKAGE_WEIGHT", "WEIGHT")
+    # SELLER_PACKAGE_* (declarado pelo vendedor) tem prioridade: é o que o ML usa
+    # para cobrar o frete e o que aparece na nota "dimensões do anúncio". Só cai
+    # nos PACKAGE_*/genéricos (medidos pelo ML) quando o vendedor não declarou.
+    altura = pick("SELLER_PACKAGE_HEIGHT", "PACKAGE_HEIGHT", "HEIGHT")
+    largura = pick("SELLER_PACKAGE_WIDTH", "PACKAGE_WIDTH", "WIDTH")
+    comprimento = pick("SELLER_PACKAGE_LENGTH", "PACKAGE_LENGTH", "LENGTH")
+    peso = pick("SELLER_PACKAGE_WEIGHT", "PACKAGE_WEIGHT", "WEIGHT")
 
     if altura is None and largura is None and comprimento is None and peso is None:
         return None
@@ -157,6 +160,7 @@ class MLIntegration:
 
         self._lock = threading.Lock()
         self._catalog_sync_lock = threading.Lock()
+        self._token_lock = threading.Lock()
         self._ultima_req = 0.0
         self._intervalo_min = 60.0 / 240.0  # margem sob o limite do ML
 
@@ -289,19 +293,34 @@ class MLIntegration:
             return dados["access_token"]
         return None
 
-    def get_access_token(self) -> Optional[str]:
-        dados = self._carregar_token()
+    @staticmethod
+    def _token_valido(dados: Optional[Dict]) -> Optional[str]:
+        """Devolve o access_token se ainda válido (>2min de folga), senão None."""
         if not dados:
             return None
         expires_at = dados.get("expires_at")
         if expires_at:
             try:
                 if datetime.utcnow() < (datetime.fromisoformat(expires_at) - timedelta(seconds=120)):
-                    return dados["access_token"]
+                    return dados.get("access_token")
             except ValueError:
                 pass
-        rt = dados.get("refresh_token")
-        return self._renovar_token(rt) if rt else None
+        return None
+
+    def get_access_token(self) -> Optional[str]:
+        token = self._token_valido(self._carregar_token())
+        if token:
+            return token
+        # Precisa renovar. O refresh_token do ML é uso único: se duas threads
+        # renovarem ao mesmo tempo, uma invalida a outra e a cadeia morre. Por
+        # isso serializamos o refresh e re-checamos dentro do lock (double-check).
+        with self._token_lock:
+            dados = self._carregar_token()
+            token = self._token_valido(dados)
+            if token:
+                return token
+            rt = dados.get("refresh_token") if dados else None
+            return self._renovar_token(rt) if rt else None
 
     def _get(self, path: str, params: Optional[Dict] = None) -> Optional[Dict]:
         token = self.get_access_token()
@@ -424,6 +443,53 @@ class MLIntegration:
             "url_autorizacao": self.get_authorization_url() if (self.enabled and not autorizado) else None,
         }
 
+    def conta(self) -> Dict:
+        """Dados da conta do vendedor no ML para o card do dashboard:
+        nome, reputação, vendas (total/concluídas/canceladas) e contagem de
+        anúncios (ativos/premium/clássico, do cache local). Cacheado ~5min."""
+        if not self.user_id:
+            return {"erro": "ML_USER_ID não configurado"}
+
+        cache = getattr(self, "_conta_cache", None)
+        if cache and cache.get("exp", 0) > time.time():
+            return cache["data"]
+
+        user = self._get(f"/users/{self.user_id}") or {}
+        if not isinstance(user, dict) or user.get("erro"):
+            return {"erro": "Falha ao obter dados da conta no Mercado Livre"}
+
+        rep = user.get("seller_reputation") or {}
+        tx = rep.get("transactions") or {}
+        nome = (f"{user.get('first_name') or ''} {user.get('last_name') or ''}").strip() or user.get("nickname") or ""
+
+        db = self._db()
+        try:
+            base = db.query(MercadoLivreItemCache).filter(MercadoLivreItemCache.status == "active")
+            ativos = base.count()
+            premium = base.filter(MercadoLivreItemCache.listing_type_id == "gold_pro").count()
+            classico = base.filter(MercadoLivreItemCache.listing_type_id == "gold_special").count()
+        finally:
+            db.close()
+
+        data = {
+            "nome": nome,
+            "nickname": user.get("nickname"),
+            "logo": user.get("logo") or None,
+            "permalink": user.get("permalink"),
+            "reputacao": {
+                "nivel": rep.get("level_id"),  # ex.: "5_green"
+                "power_seller": rep.get("power_seller_status"),
+            },
+            "transacoes": {
+                "total": tx.get("total"),
+                "concluidas": tx.get("completed"),
+                "canceladas": tx.get("canceled"),
+            },
+            "anuncios": {"ativos": ativos, "premium": premium, "classico": classico},
+        }
+        self._conta_cache = {"data": data, "exp": time.time() + 300}
+        return data
+
     def _cache_to_simple_item(self, row: MercadoLivreItemCache) -> Dict[str, Any]:
         dimensions = self._json_load(row.dimensoes_json, None)
         return {
@@ -432,6 +498,7 @@ class MLIntegration:
             "sku": row.sku or "",
             "preco": row.preco,
             "preco_original": row.preco_original,
+            "preco_promocional": row.preco_promocional,
             "moeda": row.moeda,
             "disponivel": row.estoque_disponivel,
             "vendidos": row.vendidos,
@@ -441,6 +508,8 @@ class MLIntegration:
             "frete_gratis": bool(row.frete_gratis),
             "frete_custo": row.frete_custo,
             "frete_moeda": row.frete_moeda,
+            "tarifa": row.tarifa_valor,
+            "tarifa_pct": row.tarifa_pct,
             "logistica": row.logistic_type,
             "flex": bool(row.flex),
             "full": bool(row.full),
@@ -451,6 +520,7 @@ class MLIntegration:
             "thumbnail": row.thumbnail,
             "permalink": row.permalink,
             "categoria_id": row.categoria_id,
+            "date_created": row.date_created.isoformat() if row.date_created else None,
         }
 
     def _build_detalhe_from_cache(self, row: MercadoLivreItemCache) -> Dict[str, Any]:
@@ -570,6 +640,8 @@ class MLIntegration:
         row.pictures_json = self._json_dump(body.get("pictures") or [])
         row.raw_item_json = self._json_dump(body)
         row.ml_last_updated = self._parse_dt_iso(body.get("last_updated"))
+        if body.get("date_created"):
+            row.date_created = self._parse_dt_iso(body.get("date_created"))
         row.synced_at = now
         row.cache_expires_at = now + timedelta(seconds=cache_ttl_seconds or self.DETAIL_CACHE_TTL_SECONDS)
         row.last_error = None
@@ -653,6 +725,7 @@ class MLIntegration:
             "thumbnail": (body.get("thumbnail") or "").replace("http://", "https://"),
             "permalink": body.get("permalink"),
             "categoria_id": body.get("category_id"),
+            "date_created": body.get("date_created"),
         }
 
     def _custos_frete_gratis(self, item_ids: List[str]) -> Dict[str, Dict[str, Any]]:
@@ -738,6 +811,24 @@ class MLIntegration:
             # contagem LOCAL — o catálogo inteiro fica espelhado no cache.
             total = query.count()
             rows = query.order_by(MercadoLivreItemCache.item_id.asc()).offset(offset).limit(limit).all()
+
+            # Backfill leve do date_created só para os itens da página que ainda não
+            # têm (campo novo): 1 chamada batch ao ML, não trava se falhar.
+            faltando = [r for r in rows if r.date_created is None and r.item_id]
+            if faltando:
+                try:
+                    mapa = self._date_created_map([r.item_id for r in faltando])
+                    mudou = False
+                    for r in faltando:
+                        dc = mapa.get(str(r.item_id))
+                        if dc:
+                            r.date_created = dc
+                            mudou = True
+                    if mudou:
+                        db.commit()
+                except Exception:
+                    db.rollback()
+
             anuncios = [self._cache_to_simple_item(row) for row in rows]
             return {
                 "total": total,
@@ -827,7 +918,7 @@ class MLIntegration:
         total = (busca.get("paging") or {}).get("total", len(ids))
         anuncios: List[Dict[str, Any]] = []
         body_by_id: Dict[str, Dict[str, Any]] = {}
-        atributos = "id,title,price,original_price,currency_id,available_quantity,sold_quantity,status,listing_type_id,seller_custom_field,attributes,shipping,thumbnail,permalink,category_id,pictures,sale_terms,tags,last_updated"
+        atributos = "id,title,price,original_price,currency_id,available_quantity,sold_quantity,status,listing_type_id,seller_custom_field,attributes,shipping,thumbnail,permalink,category_id,pictures,sale_terms,tags,last_updated,date_created"
         for i in range(0, len(ids), 20):
             lote = ids[i:i + 20]
             res = self._get("/items", {"ids": ",".join(lote), "attributes": atributos})
@@ -918,12 +1009,27 @@ class MLIntegration:
                     out[str(body.get("id"))] = self._parse_dt_iso(body.get("last_updated"))
         return out
 
+    def _date_created_map(self, ids: List[str]) -> Dict[str, Optional[datetime]]:
+        """Mapa item_id -> date_created (multiget leve, só 2 campos)."""
+        out: Dict[str, Optional[datetime]] = {}
+        ids = [str(i) for i in ids if i]
+        for i in range(0, len(ids), 20):
+            lote = ids[i:i + 20]
+            res = self._get("/items", {"ids": ",".join(lote), "attributes": "id,date_created"})
+            if not res:
+                continue
+            for entry in res:
+                if entry.get("code") == 200 and entry.get("body"):
+                    body = entry["body"]
+                    out[str(body.get("id"))] = self._parse_dt_iso(body.get("date_created"))
+        return out
+
     def _sync_itens(self, db: Session, ids: List[str]) -> int:
         """Busca o detalhe de lista (multiget) e faz upsert no cache p/ os ids dados."""
         ids = [str(i) for i in ids if i]
         if not ids:
             return 0
-        atributos = "id,title,price,original_price,currency_id,available_quantity,sold_quantity,status,listing_type_id,seller_custom_field,attributes,shipping,thumbnail,permalink,category_id,pictures,sale_terms,tags,last_updated"
+        atributos = "id,title,price,original_price,currency_id,available_quantity,sold_quantity,status,listing_type_id,seller_custom_field,attributes,shipping,thumbnail,permalink,category_id,pictures,sale_terms,tags,last_updated,date_created"
         body_by_id: Dict[str, Dict[str, Any]] = {}
         simples: List[Dict[str, Any]] = []
         for i in range(0, len(ids), 20):
@@ -936,7 +1042,9 @@ class MLIntegration:
                     body = entry["body"]
                     body_by_id[str(body.get("id"))] = body
                     simples.append(self._simplificar_item(body))
-        custos_frete = self._custos_frete_gratis([s["id"] for s in simples if s.get("frete_gratis")])
+        # Frete real de TODOS os itens (não só frete grátis): o custo do ML varia
+        # por faixa de preço/peso e vale também quando o comprador paga o frete.
+        custos_frete = self._custos_frete_gratis([s["id"] for s in simples])
         fee_cache: Dict[Any, Dict] = {}
         n = 0
         for s in simples:
@@ -946,8 +1054,11 @@ class MLIntegration:
             frete = custos_frete.get(str(s.get("id")))
             shipping_fee = {"list_cost": frete.get("valor"), "currency_id": frete.get("moeda")} if frete else None
             row = self._upsert_item_cache(db, body, shipping_fee=shipping_fee, cache_ttl_seconds=self.LIST_CACHE_TTL_SECONDS)
-            if row.preco_promocional is None:
-                row.preco_promocional = row.preco
+            # `price` do multiget já é o preço efetivo atual do anúncio. Alinhamos
+            # promo/original a ele a cada sync para o valor antigo não travar (ex:
+            # promo 49,99 presa enquanto o preço caiu p/ 42,99, invertendo a margem).
+            row.preco_promocional = row.preco
+            row.preco_original = body.get("original_price")
             # grava a tarifa real; só sobrescreve quando obteve valor (preserva último bom)
             valor, pct, fixo = self._tarifa_para(row.preco_promocional or row.preco, row.categoria_id, row.listing_type_id, fee_cache)
             if valor is not None:
@@ -1521,7 +1632,7 @@ class MLIntegration:
 
         anuncios: List[Dict] = []
         # multiget em lotes de 20
-        atributos = "id,title,price,original_price,currency_id,available_quantity,sold_quantity,status,listing_type_id,seller_custom_field,attributes,shipping,thumbnail,permalink,category_id,pictures,sale_terms,tags"
+        atributos = "id,title,price,original_price,currency_id,available_quantity,sold_quantity,status,listing_type_id,seller_custom_field,attributes,shipping,thumbnail,permalink,category_id,pictures,sale_terms,tags,date_created"
         for i in range(0, len(ids), 20):
             lote = ids[i:i + 20]
             res = self._get("/items", {"ids": ",".join(lote), "attributes": atributos})
@@ -1695,6 +1806,213 @@ class MLIntegration:
         self.sync_item(item_id, force=True)
         return {"ok": True, "aplicado": True, "preco_anterior": preco_anterior, "preco_novo": preco}
 
+    def atualizar_quantidade(self, item_id: str, quantidade: int) -> Dict:
+        """Altera o estoque (available_quantity) do anúncio no ML (PUT /items)."""
+        try:
+            quantidade = int(quantidade)
+        except (TypeError, ValueError):
+            return {"erro": "Quantidade inválida"}
+        if quantidade < 0:
+            return {"erro": "Quantidade não pode ser negativa"}
+
+        body = self._get(f"/items/{item_id}", {"attributes": "id,available_quantity,status,catalog_listing,logistic_type,shipping"})
+        if not body:
+            return {"erro": "Anúncio não encontrado"}
+        if body.get("status") == "closed":
+            return {"erro": "Anúncio finalizado: não é possível alterar o estoque.", "bloqueado": True}
+        # Anúncio FULL: o estoque é controlado pelo fulfillment do ML, não por aqui.
+        if (body.get("shipping") or {}).get("logistic_type") == "fulfillment":
+            return {"erro": "Anúncio FULL: o estoque é gerido pelo fulfillment do Mercado Livre e não pode ser alterado por aqui.", "bloqueado": True}
+        anterior = body.get("available_quantity")
+
+        resp = self._request_json("PUT", f"/items/{item_id}", {"available_quantity": quantidade})
+        if not resp or (isinstance(resp, dict) and resp.get("erro")):
+            cause = resp.get("erro") if isinstance(resp, dict) else None
+            return {"erro": cause or "Falha ao atualizar o estoque no Mercado Livre", "quantidade_anterior": anterior}
+        self.sync_item(item_id, force=True)
+        return {"ok": True, "quantidade_anterior": anterior, "quantidade_nova": quantidade}
+
+    def mudar_status(self, item_id: str, status: str) -> Dict:
+        """Muda o status do anúncio: 'active' (reativar), 'paused' (pausar) ou
+        'closed' (finalizar). Finalizar é irreversível no ML."""
+        status = (status or "").strip().lower()
+        if status not in {"active", "paused", "closed"}:
+            return {"erro": "Status inválido (use active, paused ou closed)"}
+
+        atual = self._get(f"/items/{item_id}", {"attributes": "id,status"})
+        if not atual:
+            return {"erro": "Anúncio não encontrado"}
+        if atual.get("status") == "closed":
+            return {"erro": "Anúncio já está finalizado: não é possível mudar o status.", "bloqueado": True}
+
+        resp = self._request_json("PUT", f"/items/{item_id}", {"status": status})
+        if not resp or (isinstance(resp, dict) and resp.get("erro")):
+            cause = resp.get("erro") if isinstance(resp, dict) else None
+            return {"erro": cause or "Falha ao mudar o status no Mercado Livre"}
+        self.sync_item(item_id, force=True)
+        return {"ok": True, "status": status}
+
+    def excluir_anuncio(self, item_id: str) -> Dict:
+        """Exclui o anúncio. O ML não apaga de verdade: fecha (closed) e depois
+        marca como deleted. Some dos ativos/pausados; o ML mantém o histórico."""
+        atual = self._get(f"/items/{item_id}", {"attributes": "id,status"})
+        if not atual:
+            return {"erro": "Anúncio não encontrado"}
+
+        # 1) Para excluir, o anúncio precisa estar fechado antes.
+        if atual.get("status") != "closed":
+            fechar = self._request_json("PUT", f"/items/{item_id}", {"status": "closed"})
+            if not fechar or (isinstance(fechar, dict) and fechar.get("erro")):
+                cause = fechar.get("erro") if isinstance(fechar, dict) else None
+                return {"erro": cause or "Falha ao finalizar o anúncio antes de excluir"}
+
+        # 2) Marca como deleted.
+        resp = self._request_json("PUT", f"/items/{item_id}", {"deleted": True})
+        if not resp or (isinstance(resp, dict) and resp.get("erro")):
+            cause = resp.get("erro") if isinstance(resp, dict) else None
+            return {"erro": cause or "Falha ao excluir o anúncio no Mercado Livre"}
+        self.sync_item(item_id, force=True)
+        return {"ok": True, "excluido": True}
+
+    # Atributos que NÃO devem ser copiados ao duplicar (códigos universais geram
+    # conflito "já existe" e campos read-only são rejeitados pelo POST /items).
+    _ATTRS_NAO_DUPLICAR = {"GTIN", "EAN", "UPC", "ISBN", "SELLER_SKU"}
+
+    def _attrs_para_duplicar(self, attributes):
+        out = []
+        for a in (attributes or []):
+            aid = a.get("id")
+            if not aid or aid in self._ATTRS_NAO_DUPLICAR:
+                continue
+            if a.get("value_id"):
+                out.append({"id": aid, "value_id": a.get("value_id")})
+            elif a.get("value_name") is not None:
+                out.append({"id": aid, "value_name": a.get("value_name")})
+        return out
+
+    def buscar_categorias(self, q: str, limite: int = 8):
+        """Busca categorias do ML por palavra-chave (domain_discovery).
+        Usado no 'duplicar em outra categoria'."""
+        termo = (q or "").strip()
+        if not termo:
+            return {"categorias": []}
+        res = self._get("/sites/MLB/domain_discovery/search", {"q": termo, "limit": limite})
+        cats = []
+        for c in (res or []):
+            if isinstance(c, dict) and c.get("category_id"):
+                cats.append({
+                    "category_id": c.get("category_id"),
+                    "category_name": c.get("category_name"),
+                    "domain_name": c.get("domain_name"),
+                })
+        return {"categorias": cats}
+
+    def duplicar_anuncio(self, item_id: str, category_id: str = None, novo_titulo: str = None) -> Dict:
+        """Duplica um anúncio criando um NOVO item no ML, já PAUSADO.
+        - category_id: se informado, cria na categoria nova (duplicar em outra categoria).
+        - Copia título, preço, atributos (menos códigos universais), fotos (por URL),
+          frete, garantia, variações (best-effort) e descrição.
+        Recriar anúncio é validado por categoria pelo ML; erros são repassados."""
+        src = self._get(f"/items/{item_id}")
+        if not src or (isinstance(src, dict) and src.get("erro")):
+            return {"erro": "Anúncio de origem não encontrado"}
+
+        # Fotos: re-referencia pela URL (o ML baixa de novo)
+        pictures = []
+        for p in (src.get("pictures") or []):
+            url = (p.get("secure_url") or p.get("url") or "").strip()
+            if url:
+                pictures.append({"source": url.replace("http://", "https://")})
+
+        body = {
+            "title": (novo_titulo or src.get("title") or "").strip(),
+            "category_id": category_id or src.get("category_id"),
+            "currency_id": src.get("currency_id") or "BRL",
+            "buying_mode": src.get("buying_mode") or "buy_it_now",
+            "listing_type_id": src.get("listing_type_id") or "gold_special",
+            "condition": src.get("condition") or "new",
+            "pictures": pictures,
+            "attributes": self._attrs_para_duplicar(src.get("attributes")),
+        }
+        if src.get("price") is not None:
+            body["price"] = src.get("price")
+
+        # Frete: copia modo/free_shipping, mas NUNCA logistic_type fulfillment
+        # (um anúncio novo não nasce no FULL — daria erro).
+        sh = src.get("shipping") or {}
+        if sh:
+            shipping = {}
+            if sh.get("mode"):
+                shipping["mode"] = sh.get("mode")
+            if sh.get("local_pick_up") is not None:
+                shipping["local_pick_up"] = sh.get("local_pick_up")
+            if sh.get("free_shipping") is not None:
+                shipping["free_shipping"] = sh.get("free_shipping")
+            lt = sh.get("logistic_type")
+            if lt and lt != "fulfillment":
+                shipping["logistic_type"] = lt
+            if shipping:
+                body["shipping"] = shipping
+
+        # Garantia / sale_terms
+        terms = []
+        for t in (src.get("sale_terms") or []):
+            if t.get("id") and t.get("value_name") is not None:
+                terms.append({"id": t.get("id"), "value_name": t.get("value_name")})
+        if terms:
+            body["sale_terms"] = terms
+
+        # Variações (best-effort): mantém combinações e qtd, descarta ids/picture_ids
+        variations = src.get("variations") or []
+        if variations:
+            novas = []
+            for v in variations:
+                nv = {
+                    "attribute_combinations": v.get("attribute_combinations") or [],
+                    "available_quantity": max(0, int(v.get("available_quantity") or 0)),
+                }
+                if v.get("price") is not None:
+                    nv["price"] = v.get("price")
+                attrs_v = self._attrs_para_duplicar(v.get("attributes"))
+                if attrs_v:
+                    nv["attributes"] = attrs_v
+                novas.append(nv)
+            body["variations"] = novas
+            body.pop("price", None)  # com variação o preço vai na variação
+        else:
+            body["available_quantity"] = max(1, int(src.get("available_quantity") or 1))
+
+        novo = self._request_json("POST", "/items", body)
+        if not novo or (isinstance(novo, dict) and novo.get("erro")):
+            cause = novo.get("erro") if isinstance(novo, dict) else None
+            return {"erro": cause or "Falha ao criar o anúncio duplicado no Mercado Livre"}
+        novo_id = novo.get("id")
+        if not novo_id:
+            return {"erro": "O Mercado Livre não retornou o ID do novo anúncio"}
+
+        # Nasce pausado para revisão antes de ativar
+        self._request_json("PUT", f"/items/{novo_id}", {"status": "paused"})
+
+        # Copia a descrição
+        try:
+            desc = self._get(f"/items/{item_id}/description") or {}
+            if desc.get("plain_text"):
+                self._request_json("POST", f"/items/{novo_id}/description", {"plain_text": desc.get("plain_text")})
+        except Exception:
+            pass
+
+        try:
+            self.sync_item(novo_id, force=True)
+        except Exception:
+            pass
+        return {
+            "ok": True,
+            "novo_id": novo_id,
+            "permalink": novo.get("permalink"),
+            "status": "paused",
+            "category_id": body["category_id"],
+        }
+
     def listar_anuncios(self, status: str = "active", offset: int = 0, limit: int = 50, force_refresh: bool = False, q: str = "") -> Dict:
         """Lista anúncios servindo do cache local (SQLite). Abrir a página NÃO bate
         na API — a atualização vem do polling incremental em segundo plano.
@@ -1716,6 +2034,111 @@ class MLIntegration:
             if not tem_cache:
                 self._sync_catalogo_async(status)
         return self._listar_anuncios_cache(status=status, offset=offset, limit=limit, q=termo_busca)
+
+    # ---------- Central de Promoções (seller-promotions) ----------
+    # Tipos que exigem o vendedor definir um preço de oferta (deal_price).
+    PROMO_TIPOS_COM_PRECO = {"DEAL", "PRICE_DISCOUNT", "DOD", "LIGHTNING", "PRE_NEGOTIATED"}
+
+    def listar_promocoes(self) -> Dict:
+        """Lista as promoções/campanhas ativas da conta na Central de Promoções do ML.
+        GET /seller-promotions/users/{user_id}?app_version=v2
+        """
+        if not self.user_id:
+            return {"erro": "ML_USER_ID não configurado", "promocoes": []}
+        resp = self._get_json(f"/seller-promotions/users/{self.user_id}", {"app_version": "v2"})
+        if not isinstance(resp, dict):
+            return {"erro": "Falha ao consultar promoções no Mercado Livre", "promocoes": []}
+        if resp.get("erro"):
+            return {"erro": resp.get("erro"), "promocoes": []}
+        promocoes = []
+        for p in (resp.get("results") or []):
+            if not isinstance(p, dict):
+                continue
+            status = (p.get("status") or "").lower()
+            # Só interessam as que ainda aceitam inscrição (em andamento ou agendadas).
+            if status and status not in {"started", "pending"}:
+                continue
+            promocoes.append({
+                "id": p.get("id"),
+                "type": p.get("type"),
+                "name": p.get("name") or p.get("id"),
+                "status": status,
+                "start_date": p.get("start_date"),
+                "finish_date": p.get("finish_date"),
+            })
+        return {"promocoes": promocoes, "total": len(promocoes)}
+
+    def listar_candidatos_promocao(self, promotion_id: str, promotion_type: str) -> Dict:
+        """Itens elegíveis mas ainda NÃO inscritos numa promoção (status=candidate).
+        GET /seller-promotions/promotions/{id}/items?promotion_type=&app_version=v2&status=candidate
+        Enriquece título/foto/SKU pelo cache local (sem 1 request por item).
+        """
+        if not promotion_id or not promotion_type:
+            return {"erro": "promotion_id e promotion_type são obrigatórios", "candidatos": []}
+        resp = self._get_json(
+            f"/seller-promotions/promotions/{promotion_id}/items",
+            {"promotion_type": promotion_type, "app_version": "v2", "status": "candidate"},
+        )
+        if not isinstance(resp, dict):
+            return {"erro": "Falha ao consultar candidatos no Mercado Livre", "candidatos": []}
+        if resp.get("erro"):
+            return {"erro": resp.get("erro"), "candidatos": []}
+        results = resp.get("results") or []
+        ids = [str(r.get("id")) for r in results if isinstance(r, dict) and r.get("id")]
+        # Busca título/foto/SKU de todos os ids de uma vez no cache local.
+        info_por_id: Dict[str, Dict[str, Any]] = {}
+        if ids:
+            db = self._db()
+            try:
+                rows = db.query(MercadoLivreItemCache).filter(MercadoLivreItemCache.item_id.in_(ids)).all()
+                for row in rows:
+                    info_por_id[str(row.item_id)] = {
+                        "titulo": row.titulo,
+                        "sku": row.sku or "",
+                        "thumbnail": row.thumbnail or row.imagem_principal,
+                    }
+            finally:
+                db.close()
+        candidatos = []
+        for r in results:
+            if not isinstance(r, dict) or not r.get("id"):
+                continue
+            item_id = str(r.get("id"))
+            info = info_por_id.get(item_id, {})
+            candidatos.append({
+                "id": item_id,
+                "titulo": info.get("titulo") or item_id,
+                "sku": info.get("sku") or "",
+                "thumbnail": info.get("thumbnail"),
+                "original_price": r.get("original_price"),
+                "price": r.get("price"),
+                "currency_id": r.get("currency_id"),
+                "suggested_discounted_price": r.get("suggested_discounted_price"),
+                "min_discounted_price": r.get("min_discounted_price"),
+                "max_discounted_price": r.get("max_discounted_price"),
+                "start_date": r.get("start_date"),
+                "end_date": r.get("end_date"),
+            })
+        return {"candidatos": candidatos, "total": len(candidatos)}
+
+    def inscrever_em_promocao(self, item_id: str, promotion_id: str, promotion_type: str, deal_price: Optional[float] = None) -> Dict:
+        """Inscreve um anúncio numa promoção da Central.
+        POST /seller-promotions/items/{item_id}?app_version=v2
+        Tipos com preço enviam deal_price; campanhas opt-in não.
+        """
+        if not item_id or not promotion_id or not promotion_type:
+            return {"erro": "item_id, promotion_id e promotion_type são obrigatórios"}
+        body: Dict[str, Any] = {"promotion_id": promotion_id, "promotion_type": promotion_type}
+        if promotion_type in self.PROMO_TIPOS_COM_PRECO:
+            if deal_price is None or deal_price <= 0:
+                return {"erro": "Esta promoção exige um preço de oferta (deal_price) válido."}
+            body["deal_price"] = float(deal_price)
+        resp = self._request_json("POST", f"/seller-promotions/items/{item_id}", body=body, params={"app_version": "v2"})
+        if not isinstance(resp, dict):
+            return {"erro": "Falha ao inscrever o anúncio na promoção"}
+        if resp.get("erro"):
+            return {"erro": resp.get("erro"), "status_code": resp.get("status_code")}
+        return {"ok": True, "item_id": item_id, "offer_id": resp.get("offer_id"), "price": resp.get("price"), "original_price": resp.get("original_price")}
 
 
 ml = MLIntegration()

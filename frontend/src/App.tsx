@@ -7,6 +7,7 @@ import { FornecedoresManager } from './components/FornecedoresManager'
 import { EmbaldesManager } from './components/EmbaldesManager'
 import { HistoricoFull } from './components/HistoricoFull'
 import { AnunciosML } from './components/AnunciosML'
+import { ListaCompra } from './components/ListaCompra'
 import { OperadoresManager } from './components/OperadoresManager'
 import { AppShell, type ShellNavGroup, type ShellStatusItem } from './components/AppShell'
 import {
@@ -47,6 +48,7 @@ interface NotaFiscal {
   data_emissao?: string
   data_upload?: string
   arquivo_original?: string
+  valor_frete?: number | null
   itens?: ItemNota[]
 }
 
@@ -114,6 +116,96 @@ interface OperadorOption {
   id: number
   nome: string
   ativo: number
+}
+
+interface ContaMLData {
+  nome?: string
+  nickname?: string
+  logo?: string | null
+  permalink?: string
+  reputacao?: { nivel?: string | null; power_seller?: string | null }
+  transacoes?: { total?: number | null; concluidas?: number | null; canceladas?: number | null }
+  anuncios?: { ativos?: number; premium?: number; classico?: number }
+}
+
+// Cores da régua de reputação do ML (nível 1 vermelho → 5 verde)
+const CORES_REPUTACAO = ['#f4524d', '#f9a825', '#fdd835', '#c0ca33', '#43a047']
+
+function nivelReputacaoIndex(nivel?: string | null): number {
+  if (!nivel) return -1
+  const n = parseInt(String(nivel).charAt(0), 10)
+  return Number.isNaN(n) ? -1 : Math.min(4, Math.max(0, n - 1))
+}
+
+function numBR(v?: number | null): string {
+  if (v == null || Number.isNaN(Number(v))) return '--'
+  return Number(v).toLocaleString('pt-BR')
+}
+
+function ContaMLCard() {
+  const [conta, setConta] = useState<ContaMLData | null>(null)
+  const [estado, setEstado] = useState<'carregando' | 'ok' | 'erro'>('carregando')
+
+  useEffect(() => {
+    let ativo = true
+    fetch(`${API_BASE}/api/ml/conta`, { cache: 'no-store' })
+      .then(r => r.json())
+      .then(d => { if (!ativo) return; if (d && !d.erro) { setConta(d); setEstado('ok') } else setEstado('erro') })
+      .catch(() => { if (ativo) setEstado('erro') })
+    return () => { ativo = false }
+  }, [])
+
+  const idxRep = nivelReputacaoIndex(conta?.reputacao?.nivel)
+  const linha = (label: string, valor: string, cor = '#1a1a1a') => (
+    <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: '0.5rem' }}>
+      <span style={{ fontSize: '0.82rem', color: '#667085' }}>{label}</span>
+      <strong style={{ fontSize: '0.95rem', color: cor }}>{valor}</strong>
+    </div>
+  )
+
+  return (
+    <div className="card" style={{ border: '2px solid #2d3277', boxShadow: '0 10px 24px rgba(45,50,119,0.08)' }}>
+      <div className="card-body" style={{ padding: '1rem' }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.75rem', marginBottom: '0.75rem' }}>
+          <div style={{ color: '#2d3277', fontWeight: 800, fontSize: '0.78rem', letterSpacing: '0.04em', textTransform: 'uppercase' }}>
+            Minha conta Mercado Livre
+          </div>
+          {conta?.permalink && (
+            <a href={conta.permalink} target="_blank" rel="noreferrer" style={{ fontSize: '0.72rem', fontWeight: 700, color: '#2d3277', border: '1px solid #c5cae9', borderRadius: '6px', padding: '0.2rem 0.6rem', textDecoration: 'none', whiteSpace: 'nowrap' }}>Ver conta</a>
+          )}
+        </div>
+
+        {estado === 'carregando' ? (
+          <div style={{ color: '#999', fontSize: '0.85rem', padding: '0.5rem 0' }}>Carregando conta…</div>
+        ) : estado === 'erro' ? (
+          <div style={{ color: '#999', fontSize: '0.85rem', padding: '0.5rem 0' }}>Não foi possível carregar os dados da conta. <a href={`${API_BASE}/api/ml/conectar`} style={{ color: '#2d3277' }}>Reconectar ML</a></div>
+        ) : conta && (
+          <>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '0.75rem' }}>
+              {conta.logo && <img src={conta.logo} alt="" style={{ width: 40, height: 40, borderRadius: 8, objectFit: 'cover', border: '1px solid #eee' }} />}
+              <div style={{ fontWeight: 800, fontSize: '0.95rem', color: '#1a1a1a', lineHeight: 1.2 }}>{conta.nome || conta.nickname}</div>
+            </div>
+
+            {/* Régua de reputação */}
+            <div style={{ display: 'flex', gap: 4, marginBottom: '0.85rem' }}>
+              {CORES_REPUTACAO.map((cor, i) => (
+                <div key={i} style={{ flex: 1, height: 9, borderRadius: 999, background: i === idxRep ? cor : `${cor}33` }} />
+              ))}
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.35rem 1.25rem' }}>
+              {linha('Ativos', numBR(conta.anuncios?.ativos))}
+              {linha('Vendas', numBR(conta.transacoes?.total))}
+              {linha('Premium', numBR(conta.anuncios?.premium))}
+              {linha('Concluídas', numBR(conta.transacoes?.concluidas), '#2e7d32')}
+              {linha('Clássico', numBR(conta.anuncios?.classico))}
+              {linha('Canceladas', numBR(conta.transacoes?.canceladas), '#c62828')}
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  )
 }
 
 function App() {
@@ -188,7 +280,10 @@ function App() {
   const [filtroBusca, setFiltroBusca] = useState('')
   const [filtroData, setFiltroData] = useState('')
   const [notaDetalheAberta, setNotaDetalheAberta] = useState<NotaFiscal | null>(null)
-  const [abaDetalhe, setAbaDetalhe] = useState<'detalhes' | 'conferencia' | 'divergencias'>('detalhes')
+  const [abaDetalhe, setAbaDetalhe] = useState<'detalhes' | 'conferencia' | 'divergencias' | 'editar'>('detalhes')
+  const [freteEditNota, setFreteEditNota] = useState('')
+  const [salvandoFreteNota, setSalvandoFreteNota] = useState(false)
+  const [msgFreteNota, setMsgFreteNota] = useState<{ tipo: 'ok' | 'erro'; texto: string } | null>(null)
   const [notasSelecionadas, setNotasSelecionadas] = useState<Set<number>>(new Set())
   const [deletando, setDeletando] = useState(false)
   const [downloadandoPdf, setDownloadandoPdf] = useState(false)
@@ -731,8 +826,36 @@ function App() {
       setNotaSelecionada(data)
       setProdutosNota(data.itens || [])
       setAbaDetalhe('detalhes')
+      setFreteEditNota(data.valor_frete ? String(data.valor_frete) : '')
+      setMsgFreteNota(null)
     } catch (err) {
       console.error('Erro ao abrir nota:', err)
+    }
+  }
+
+  const salvarFreteNota = async () => {
+    if (!notaDetalheAberta) return
+    const valor = Number(String(freteEditNota).replace(',', '.'))
+    if (!Number.isFinite(valor) || valor < 0) {
+      setMsgFreteNota({ tipo: 'erro', texto: 'Informe um valor de frete válido' })
+      return
+    }
+    setSalvandoFreteNota(true); setMsgFreteNota(null)
+    try {
+      const r = await fetch(`${API_BASE}/api/notas-fiscais/${notaDetalheAberta.id}/frete`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ valor_frete: valor }),
+      })
+      const d = await r.json()
+      if (!r.ok || d.erro) throw new Error(d.erro || 'Falha ao salvar o frete')
+      setNotaDetalheAberta(prev => prev ? { ...prev, valor_frete: valor } : prev)
+      setMsgFreteNota({ tipo: 'ok', texto: `Frete salvo: ${valor.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}` })
+      void loadNotas(true)
+    } catch (e) {
+      setMsgFreteNota({ tipo: 'erro', texto: String(e instanceof Error ? e.message : e) })
+    } finally {
+      setSalvandoFreteNota(false)
     }
   }
 
@@ -1524,6 +1647,7 @@ function App() {
       label: 'Marketplace',
       items: [
         { key: 'anuncios', label: 'Anuncios ML', icon: 'megaphone', active: pagina === 'anuncios', onClick: () => setPagina('anuncios') },
+        { key: 'lista-compra', label: 'Lista de Compra', icon: 'receipt', active: pagina === 'lista-compra', onClick: () => setPagina('lista-compra') },
         { key: 'inbound', label: 'Inbound FULL', icon: 'truck', active: pagina === 'embaldes', badge: inboundsAtivos.length, onClick: () => setPagina('embaldes') },
         { key: 'historico-full', label: 'Histórico FULL', icon: 'sync', active: pagina === 'historico-full', onClick: () => setPagina('historico-full') },
         { key: 'divergencias', label: 'Divergencias', icon: 'warning', badge: divergencias.length, active: pagina === 'divergencias', onClick: () => setPagina('divergencias') },
@@ -2027,27 +2151,59 @@ function App() {
                       )}
                     </div>
                   </div>
+
+                  {/* Quebra por inbound: % de cada um que está rolando */}
+                  {inboundsAtivos.filter((i) => Number(i.total_planejado_full || 0) > 0).length > 0 && (
+                    <div style={{ marginTop: '1rem', borderTop: '1px solid #e3f2fd', paddingTop: '0.85rem', display: 'grid', gap: '0.8rem' }}>
+                      <div style={{ color: '#1565c0', fontWeight: 700, fontSize: '0.72rem', letterSpacing: '0.04em', textTransform: 'uppercase' }}>
+                        Por inbound
+                      </div>
+                      {inboundsAtivos
+                        .filter((i) => Number(i.total_planejado_full || 0) > 0)
+                        .map((inb, idx) => {
+                          const planejado = Number(inb.total_planejado_full || 0)
+                          const baixado = Number(inb.total_baixado_full || 0)
+                          const pct = planejado > 0 ? Math.round((baixado / planejado) * 100) : 0
+                          const espera = Number(inb.qtd_em_espera || 0)
+                          return (
+                            <div key={inb.numero_inbound || idx} style={{ display: 'grid', gap: '0.3rem' }}>
+                              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: '0.5rem', fontSize: '0.82rem' }}>
+                                <span style={{ fontWeight: 700, color: '#0d47a1', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                  {inb.nome_embalde || 'Inbound'}{inb.numero_inbound ? ` · #${inb.numero_inbound}` : ''}
+                                </span>
+                                <span style={{ fontWeight: 800, color: '#1976d2', flexShrink: 0 }}>{pct}%</span>
+                              </div>
+                              <div style={{ height: '7px', background: '#e3f2fd', borderRadius: '999px', overflow: 'hidden' }}>
+                                <div style={{ height: '100%', width: `${pct}%`, background: '#1976d2', transition: 'width 0.3s' }} />
+                              </div>
+                              <div style={{ fontSize: '0.75rem', color: '#666', display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
+                                <span>{baixado} de {planejado} un</span>
+                                {espera > 0 && <span style={{ color: '#8e24aa' }}>Em espera: {espera}</span>}
+                              </div>
+                            </div>
+                          )
+                        })}
+                    </div>
+                  )}
                 </div>
               </div>
             )}
 
-            <div className="card" style={{
-              border: '2px solid #ffd54f',
-              boxShadow: '0 10px 24px rgba(255, 152, 0, 0.08)'
-            }}>
-              <div className="card-body" style={{ padding: '1rem' }}>
-                <div style={{ color: '#e65100', fontWeight: 800, fontSize: '0.78rem', letterSpacing: '0.04em', textTransform: 'uppercase', marginBottom: '0.75rem' }}>
-                  Notas sem estar 100% para Olist
-                </div>
-                <div style={{ display: 'grid', gap: '0.75rem' }}>
-                  <div style={{ fontSize: '1.75rem', fontWeight: 800, color: '#e65100' }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+              {/* Card da conta do Mercado Livre */}
+              <ContaMLCard />
+
+              {/* Notas sem estar 100% — compacto */}
+              <div className="card" style={{ border: '2px solid #ffd54f', boxShadow: '0 10px 24px rgba(255, 152, 0, 0.08)' }}>
+                <div className="card-body" style={{ padding: '0.85rem 1rem', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.75rem' }}>
+                  <div style={{ color: '#e65100', fontWeight: 800, fontSize: '0.74rem', letterSpacing: '0.04em', textTransform: 'uppercase' }}>
+                    Notas sem estar 100% para Olist
+                  </div>
+                  <div style={{ fontSize: '1.4rem', fontWeight: 800, color: '#e65100', lineHeight: 1 }}>
                     {notasFiltradas.filter(n => {
                       const p = calcularProgresso(n.itens)
                       return p.total > 0 && p.percentual < 100
                     }).length}
-                  </div>
-                  <div style={{ fontSize: '0.82rem', color: '#666' }}>
-                    Notas em andamento
                   </div>
                 </div>
               </div>
@@ -2356,6 +2512,7 @@ function App() {
                         { key: 'detalhes', label: 'Detalhes' },
                         { key: 'conferencia', label: 'Conferência' },
                         { key: 'divergencias', label: `Divergências (${divergenciasDaNota(notaDetalheAberta).length})` },
+                        { key: 'editar', label: '✏️ Editar' },
                       ].map((tab) => {
                         const ativa = abaDetalhe === tab.key
                         return (
@@ -2710,6 +2867,71 @@ function App() {
                         )}
                       </div>
                     )}
+
+                    {abaDetalhe === 'editar' && (() => {
+                      const itens = notaDetalheAberta.itens || []
+                      const totalProdutos = itens.reduce((s, i) => s + (i.quantidade_nf || 0) * (i.preco_unitario || 0), 0)
+                      const qtdTotal = itens.reduce((s, i) => s + (i.quantidade_nf || 0), 0)
+                      const freteNum = Number(String(freteEditNota).replace(',', '.'))
+                      const freteValido = Number.isFinite(freteNum) && freteNum >= 0
+                      const freteUnitMedio = freteValido && qtdTotal > 0 ? freteNum / qtdTotal : 0
+                      return (
+                        <div style={{ display: 'grid', gap: '1.25rem', maxWidth: 620 }}>
+                          <div style={{ background: '#f9f9f9', border: '2px solid #007acc', padding: '1.75rem', borderRadius: '10px' }}>
+                            <h3 style={{ margin: '0 0 .35rem', color: '#1a1a1a', fontSize: '1.1rem' }}>Frete total da entrega</h3>
+                            <p style={{ margin: '0 0 1.1rem', color: '#607d8b', fontSize: '.9rem', lineHeight: 1.5 }}>
+                              Informe o valor total pago de frete nesta nota. Ele é rateado entre os produtos
+                              (proporcional ao valor de cada item) e entra no <strong>custo médio ponderado</strong> —
+                              a mesma regra de estoque antigo + novo do <strong>Fornecedores × Catálogo</strong> —
+                              sendo absorvido na <strong>margem de contribuição</strong> de cada produto.
+                            </p>
+                            <label style={{ display: 'block', fontSize: '.78rem', fontWeight: 700, color: '#455a64', textTransform: 'uppercase', letterSpacing: '.03em', marginBottom: '.4rem' }}>
+                              Frete total (R$)
+                            </label>
+                            <div style={{ display: 'flex', gap: '.6rem', alignItems: 'center', flexWrap: 'wrap' }}>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '.4rem', background: '#fff', border: '1px solid #cfd8dc', borderRadius: 8, padding: '.55rem .7rem', flex: '1 1 180px', minWidth: 0 }}>
+                                <span style={{ color: '#607d8b', fontWeight: 700 }}>R$</span>
+                                <input
+                                  type="text"
+                                  inputMode="decimal"
+                                  value={freteEditNota}
+                                  onChange={(e) => setFreteEditNota(e.target.value)}
+                                  placeholder="0,00"
+                                  style={{ flex: 1, minWidth: 0, border: 'none', outline: 'none', fontSize: '1.05rem', fontWeight: 700, color: '#1a1a1a' }}
+                                />
+                              </div>
+                              <button
+                                onClick={salvarFreteNota}
+                                disabled={salvandoFreteNota || !freteValido}
+                                style={{ padding: '.7rem 1.4rem', background: freteValido ? '#1976D2' : '#b0bec5', color: '#fff', border: 'none', borderRadius: 8, fontWeight: 700, cursor: salvandoFreteNota ? 'wait' : (freteValido ? 'pointer' : 'not-allowed'), whiteSpace: 'nowrap' }}
+                              >
+                                {salvandoFreteNota ? 'Salvando...' : 'Salvar frete'}
+                              </button>
+                            </div>
+                            {msgFreteNota && (
+                              <div style={{ marginTop: '.7rem', fontSize: '.85rem', fontWeight: 700, color: msgFreteNota.tipo === 'ok' ? '#2e7d32' : '#c62828' }}>
+                                {msgFreteNota.texto}
+                              </div>
+                            )}
+                          </div>
+
+                          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: '.75rem' }}>
+                            <div style={{ background: '#fff', border: '1px solid #e0e0e0', borderRadius: 8, padding: '.9rem 1rem' }}>
+                              <div style={{ color: '#90a4ae', fontSize: '.72rem', fontWeight: 700, textTransform: 'uppercase' }}>Total dos produtos</div>
+                              <div style={{ marginTop: '.3rem', fontWeight: 800, color: '#1a1a1a' }}>{totalProdutos.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</div>
+                            </div>
+                            <div style={{ background: '#fff', border: '1px solid #e0e0e0', borderRadius: 8, padding: '.9rem 1rem' }}>
+                              <div style={{ color: '#90a4ae', fontSize: '.72rem', fontWeight: 700, textTransform: 'uppercase' }}>Itens (un)</div>
+                              <div style={{ marginTop: '.3rem', fontWeight: 800, color: '#1a1a1a' }}>{qtdTotal}</div>
+                            </div>
+                            <div style={{ background: '#fff', border: '1px solid #e0e0e0', borderRadius: 8, padding: '.9rem 1rem' }}>
+                              <div style={{ color: '#90a4ae', fontSize: '.72rem', fontWeight: 700, textTransform: 'uppercase' }}>Frete médio / un</div>
+                              <div style={{ marginTop: '.3rem', fontWeight: 800, color: '#1976D2' }}>{freteUnitMedio.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</div>
+                            </div>
+                          </div>
+                        </div>
+                      )
+                    })()}
                   </div>
                 </div>
               </div>
@@ -3078,6 +3300,15 @@ function App() {
       'Painel Mercado Livre',
       'Acompanhe anuncios, estoque, imagens, precificacao e dimensoes.',
       <AnunciosML onVoltar={voltarParaInicial} />
+    )
+  }
+
+  // ===== PÁGINA DE LISTA DE COMPRA =====
+  if (pagina === 'lista-compra') {
+    return renderComShell(
+      'Lista de Compra',
+      'Prioridade de compra pela curva ABC do ML cruzada com estoque e velocidade de venda.',
+      <ListaCompra />
     )
   }
 

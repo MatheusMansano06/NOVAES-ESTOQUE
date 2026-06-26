@@ -298,6 +298,14 @@ class ItemEmbaleFU(Base):
     em_espera = Column(Integer, default=0)  # 1 = em espera, 0 = normal
     data_em_espera = Column(DateTime, nullable=True)
 
+    # Excluído da separação ("não vai ser enviado") — fica fora da lista de
+    # separação mas é mantido no Histórico FULL (reversível).
+    nao_enviar = Column(Integer, default=0)  # 1 = não enviar, 0 = normal
+    data_nao_enviar = Column(DateTime, nullable=True)
+
+    # Foto do produto puxada da Olist (anexos), cacheada no item.
+    olist_imagem = Column(Text, nullable=True)
+
     criado_em = Column(DateTime, default=datetime.utcnow)
 
     embalde = relationship("EmbaleFU", back_populates="itens")
@@ -398,6 +406,7 @@ class MercadoLivreItemCache(Base):
     raw_item_json = Column(Text, nullable=True)
     ml_last_updated = Column(DateTime, nullable=True)
     ml_last_changed_at = Column(DateTime, nullable=True)
+    date_created = Column(DateTime, nullable=True)  # quando o anúncio foi criado no ML
     cache_version = Column(Integer, default=1)
     synced_at = Column(DateTime, default=datetime.utcnow, index=True)
     cache_expires_at = Column(DateTime, nullable=True, index=True)
@@ -421,3 +430,33 @@ class MercadoLivreSyncState(Base):
     synced_at = Column(DateTime, default=datetime.utcnow)
     cache_expires_at = Column(DateTime, nullable=True)
     last_error = Column(Text, nullable=True)
+
+
+class SkuVendasSnapshot(Base):
+    """
+    Foto diária do total de vendas (sold_quantity) de cada anúncio do ML.
+    Serve para calcular a VELOCIDADE de venda recente (diff entre snapshots),
+    que alimenta a Lista de Compra. Um registro por anúncio por dia.
+    """
+    __tablename__ = "sku_vendas_snapshot"
+
+    id = Column(Integer, primary_key=True)
+    item_id = Column(String(50), index=True)
+    sku = Column(String(120), index=True)
+    vendidos = Column(Integer, default=0)
+    criado_em = Column(DateTime, default=datetime.utcnow, index=True)
+
+
+class OlistEstoqueSnapshot(Base):
+    """
+    Saldo atual de cada SKU na Olist (o estoque "orgânico" real do vendedor).
+    Atualizado em segundo plano (1 chamada por SKU). A Lista de Compra soma este
+    saldo ao estoque FULL do ML para o total real do produto.
+    """
+    __tablename__ = "olist_estoque_snapshot"
+
+    id = Column(Integer, primary_key=True)
+    sku = Column(String(120), unique=True, index=True)
+    produto_id = Column(String(100), nullable=True)
+    saldo = Column(Float, default=0)
+    atualizado_em = Column(DateTime, default=datetime.utcnow, index=True)
