@@ -813,6 +813,13 @@ function ResumoTooltip({ anuncio, resumo, editavel = false, modal = false, onSav
       <LinhaResumo label="Preco original" valor={brl(resumoMargem.precoOriginal)} risco={resumoMargem.temPromo} />
       <LinhaResumo label="Preco promocional" valor={brl(resumoMargem.precoPromocional)} cor={resumoMargem.temPromo ? '#067647' : undefined} />
       <LinhaResumo label="Frete" valor={resumoMargem.frete != null ? `-${brl(resumoMargem.frete)}` : '--'} extra={resumoMargem.frete != null ? `${percentual(resumoMargem.frete, resumoMargem.precoPromocional)}%` : undefined} cor="#b42318" />
+      {resumoMargem.frete != null && (
+        <div style={{ fontSize: '.66rem', color: '#98a2b3', lineHeight: 1.4, margin: '-.15rem 0 .35rem', paddingLeft: '.1rem' }}>
+          O valor do frete é informado pelo ML e é baseado nas dimensões do anúncio
+          {anuncio.dimensoes?.texto ? ` (${anuncio.dimensoes.texto})` : ''}. Se o ML identificar
+          medidas diferentes na venda, o valor do frete pode mudar.
+        </div>
+      )}
       <LinhaResumo label="Tarifa de venda" valor={resumoMargem.tarifa != null ? `-${brl(resumoMargem.tarifa)}` : '--'} extra={resumoMargem.tarifaPct != null ? `${resumoMargem.tarifaPct.toFixed(2)}%` : undefined} cor="#b42318" />
       <LinhaResumo label="Custo" valor={resumoMargem.custo != null ? `-${brl(resumoMargem.custo)}` : '--'} cor="#b42318" />
       <LinhaResumo label="Imposto" valor={resumoMargem.imposto != null ? `-${brl(resumoMargem.imposto)}` : '--'} extra={resumoMargem.impostoPct ? `${resumoMargem.impostoPct.toFixed(2)}%` : undefined} cor="#b42318" />

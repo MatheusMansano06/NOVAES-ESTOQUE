@@ -117,10 +117,13 @@ def _parse_dimensions_from_attributes(attributes: List[Dict[str, Any]]) -> Optio
                     pass
         return None
 
-    altura = pick("PACKAGE_HEIGHT", "HEIGHT")
-    largura = pick("PACKAGE_WIDTH", "WIDTH")
-    comprimento = pick("PACKAGE_LENGTH", "LENGTH")
-    peso = pick("PACKAGE_WEIGHT", "WEIGHT")
+    # SELLER_PACKAGE_* (declarado pelo vendedor) tem prioridade: é o que o ML usa
+    # para cobrar o frete e o que aparece na nota "dimensões do anúncio". Só cai
+    # nos PACKAGE_*/genéricos (medidos pelo ML) quando o vendedor não declarou.
+    altura = pick("SELLER_PACKAGE_HEIGHT", "PACKAGE_HEIGHT", "HEIGHT")
+    largura = pick("SELLER_PACKAGE_WIDTH", "PACKAGE_WIDTH", "WIDTH")
+    comprimento = pick("SELLER_PACKAGE_LENGTH", "PACKAGE_LENGTH", "LENGTH")
+    peso = pick("SELLER_PACKAGE_WEIGHT", "PACKAGE_WEIGHT", "WEIGHT")
 
     if altura is None and largura is None and comprimento is None and peso is None:
         return None
@@ -157,6 +160,7 @@ class MLIntegration:
 
         self._lock = threading.Lock()
         self._catalog_sync_lock = threading.Lock()
+        self._token_lock = threading.Lock()
         self._ultima_req = 0.0
         self._intervalo_min = 60.0 / 240.0  # margem sob o limite do ML
 
@@ -289,19 +293,34 @@ class MLIntegration:
             return dados["access_token"]
         return None
 
-    def get_access_token(self) -> Optional[str]:
-        dados = self._carregar_token()
+    @staticmethod
+    def _token_valido(dados: Optional[Dict]) -> Optional[str]:
+        """Devolve o access_token se ainda válido (>2min de folga), senão None."""
         if not dados:
             return None
         expires_at = dados.get("expires_at")
         if expires_at:
             try:
                 if datetime.utcnow() < (datetime.fromisoformat(expires_at) - timedelta(seconds=120)):
-                    return dados["access_token"]
+                    return dados.get("access_token")
             except ValueError:
                 pass
-        rt = dados.get("refresh_token")
-        return self._renovar_token(rt) if rt else None
+        return None
+
+    def get_access_token(self) -> Optional[str]:
+        token = self._token_valido(self._carregar_token())
+        if token:
+            return token
+        # Precisa renovar. O refresh_token do ML é uso único: se duas threads
+        # renovarem ao mesmo tempo, uma invalida a outra e a cadeia morre. Por
+        # isso serializamos o refresh e re-checamos dentro do lock (double-check).
+        with self._token_lock:
+            dados = self._carregar_token()
+            token = self._token_valido(dados)
+            if token:
+                return token
+            rt = dados.get("refresh_token") if dados else None
+            return self._renovar_token(rt) if rt else None
 
     def _get(self, path: str, params: Optional[Dict] = None) -> Optional[Dict]:
         token = self.get_access_token()
@@ -1020,7 +1039,9 @@ class MLIntegration:
                     body = entry["body"]
                     body_by_id[str(body.get("id"))] = body
                     simples.append(self._simplificar_item(body))
-        custos_frete = self._custos_frete_gratis([s["id"] for s in simples if s.get("frete_gratis")])
+        # Frete real de TODOS os itens (não só frete grátis): o custo do ML varia
+        # por faixa de preço/peso e vale também quando o comprador paga o frete.
+        custos_frete = self._custos_frete_gratis([s["id"] for s in simples])
         fee_cache: Dict[Any, Dict] = {}
         n = 0
         for s in simples:
@@ -1030,8 +1051,11 @@ class MLIntegration:
             frete = custos_frete.get(str(s.get("id")))
             shipping_fee = {"list_cost": frete.get("valor"), "currency_id": frete.get("moeda")} if frete else None
             row = self._upsert_item_cache(db, body, shipping_fee=shipping_fee, cache_ttl_seconds=self.LIST_CACHE_TTL_SECONDS)
-            if row.preco_promocional is None:
-                row.preco_promocional = row.preco
+            # `price` do multiget já é o preço efetivo atual do anúncio. Alinhamos
+            # promo/original a ele a cada sync para o valor antigo não travar (ex:
+            # promo 49,99 presa enquanto o preço caiu p/ 42,99, invertendo a margem).
+            row.preco_promocional = row.preco
+            row.preco_original = body.get("original_price")
             # grava a tarifa real; só sobrescreve quando obteve valor (preserva último bom)
             valor, pct, fixo = self._tarifa_para(row.preco_promocional or row.preco, row.categoria_id, row.listing_type_id, fee_cache)
             if valor is not None:
