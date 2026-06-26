@@ -557,11 +557,16 @@ export function FornecedoresManager({ onVoltar }: FornecedoresManagerProps) {
                 {catalogoFiltrado.map(prod => {
                   const skuML = (prod.olist_sku || '').trim().toUpperCase()
                   const custoOficial = skuML ? custosOficiais[skuML] : undefined
-                  // Custo oficial (editado aqui) tem prioridade sobre o custo médio das compras.
-                  const custo = custoOficial?.custo ?? prod.custoMedioGeral
+                  // Nesta aba a margem usa o CUSTO REAL = média ponderada das compras (c/ frete).
+                  // O custo oficial fica como referência (ele segue valendo nos Anúncios ML).
+                  // Sem compras registradas, cai no oficial para não zerar a margem.
+                  const custoMedio = prod.custoMedioGeral
+                  const custo = custoMedio > 0 ? custoMedio : (custoOficial?.custo ?? 0)
+                  const fonteCusto = custoMedio > 0 ? 'média ponderada c/ frete' : (custoOficial ? 'custo oficial (sem compras)' : 'sem custo')
                   const editandoEsteCusto = editandoCustoSku === skuML && !!skuML
                   const anuncio = skuML ? margensML[skuML] : undefined
                   const precoML = anuncio ? (anuncio.promocional ?? anuncio.preco ?? 0) : 0
+                  const usandoPromo = !!anuncio && anuncio.promocional != null && anuncio.preco != null && anuncio.promocional !== anuncio.preco
                   const freteML = anuncio?.frete ?? 0
                   const tarifaML = anuncio?.tarifa ?? 0
                   const impostoML = precoML > 0 ? precoML * impostoPct / 100 : 0
@@ -584,46 +589,46 @@ export function FornecedoresManager({ onVoltar }: FornecedoresManagerProps) {
                           </div>
                         </div>
                         <div style={{ textAlign: 'right' }}>
-                          <div style={{ fontSize: '0.75rem', color: '#666' }}>
-                            {custoOficial ? 'Custo oficial' : 'Custo médio (c/ frete)'}
-                          </div>
-                          {editandoEsteCusto ? (
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', justifyContent: 'flex-end', marginTop: '0.2rem' }}>
-                              <span style={{ fontSize: '0.85rem', color: '#666' }}>R$</span>
-                              <input
-                                type="number" min="0" step="0.01" autoFocus
-                                value={custoEditValor}
-                                onChange={(e) => setCustoEditValor(e.target.value)}
-                                onKeyDown={(e) => { if (e.key === 'Enter') salvarCustoOficial(prod.olist_sku || ''); if (e.key === 'Escape') { setEditandoCustoSku(null); setCustoEditValor('') } }}
-                                style={{ width: '90px', padding: '0.35rem', borderRadius: '6px', border: '1px solid #1976D2', textAlign: 'right', fontSize: '1rem', fontWeight: 700 }}
-                              />
-                              <button onClick={() => salvarCustoOficial(prod.olist_sku || '')} disabled={salvandoCusto}
-                                style={{ padding: '0.35rem 0.7rem', background: '#1976D2', color: '#fff', border: 'none', borderRadius: '6px', cursor: salvandoCusto ? 'wait' : 'pointer', fontWeight: 700, fontSize: '0.82rem' }}>
-                                {salvandoCusto ? '...' : 'Salvar'}
-                              </button>
-                              <button onClick={() => { setEditandoCustoSku(null); setCustoEditValor('') }}
-                                style={{ padding: '0.35rem 0.6rem', background: '#fff', color: '#666', border: '1px solid #ddd', borderRadius: '6px', cursor: 'pointer', fontSize: '0.82rem' }}>
-                                Cancelar
-                              </button>
-                            </div>
-                          ) : (
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', justifyContent: 'flex-end', marginTop: '0.2rem' }}>
-                              <span style={{ fontSize: '1.1rem', fontWeight: 700, color: '#1a1a1a' }}>{brl(custo)}</span>
-                              {skuML ? (
-                                <button
-                                  onClick={() => { setEditandoCustoSku(skuML); setCustoEditValor(String((custoOficial?.custo ?? prod.custoMedioGeral ?? 0).toFixed(2))) }}
-                                  title="Editar o custo oficial deste produto"
-                                  style={{ padding: '0.25rem 0.6rem', background: '#fff', color: '#1976D2', border: '1px solid #90caf9', borderRadius: '6px', cursor: 'pointer', fontSize: '0.78rem', fontWeight: 700 }}>
-                                  ✏️ editar
+                          <div style={{ fontSize: '0.75rem', color: '#666' }}>Custo usado na margem</div>
+                          <div style={{ fontSize: '1.25rem', fontWeight: 800, color: '#0c447c', marginTop: '0.1rem' }}>{brl(custo)}</div>
+                          <div style={{ fontSize: '0.68rem', color: '#0f6e56', fontWeight: 700 }}>{fonteCusto}</div>
+                          {/* Custo oficial: referência + edição (continua valendo nos Anúncios ML) */}
+                          <div style={{ marginTop: '0.4rem', paddingTop: '0.35rem', borderTop: '1px dashed #e0e0e0' }}>
+                            {editandoEsteCusto ? (
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', justifyContent: 'flex-end' }}>
+                                <span style={{ fontSize: '0.85rem', color: '#666' }}>R$</span>
+                                <input
+                                  type="number" min="0" step="0.01" autoFocus
+                                  value={custoEditValor}
+                                  onChange={(e) => setCustoEditValor(e.target.value)}
+                                  onKeyDown={(e) => { if (e.key === 'Enter') salvarCustoOficial(prod.olist_sku || ''); if (e.key === 'Escape') { setEditandoCustoSku(null); setCustoEditValor('') } }}
+                                  style={{ width: '90px', padding: '0.35rem', borderRadius: '6px', border: '1px solid #1976D2', textAlign: 'right', fontSize: '0.95rem', fontWeight: 700 }}
+                                />
+                                <button onClick={() => salvarCustoOficial(prod.olist_sku || '')} disabled={salvandoCusto}
+                                  style={{ padding: '0.35rem 0.7rem', background: '#1976D2', color: '#fff', border: 'none', borderRadius: '6px', cursor: salvandoCusto ? 'wait' : 'pointer', fontWeight: 700, fontSize: '0.78rem' }}>
+                                  {salvandoCusto ? '...' : 'Salvar'}
                                 </button>
-                              ) : (
-                                <span title="Vincule o produto a um SKU Olist para definir o custo oficial" style={{ fontSize: '0.72rem', color: '#bbb' }}>sem SKU</span>
-                              )}
-                            </div>
-                          )}
-                          {custoOficial && !editandoEsteCusto && (
-                            <div style={{ fontSize: '0.68rem', color: '#999', marginTop: '0.15rem' }}>média compras: {brl(prod.custoMedioGeral)}</div>
-                          )}
+                                <button onClick={() => { setEditandoCustoSku(null); setCustoEditValor('') }}
+                                  style={{ padding: '0.35rem 0.6rem', background: '#fff', color: '#666', border: '1px solid #ddd', borderRadius: '6px', cursor: 'pointer', fontSize: '0.78rem' }}>
+                                  Cancelar
+                                </button>
+                              </div>
+                            ) : (
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', justifyContent: 'flex-end', fontSize: '0.7rem', color: '#999' }}>
+                                <span>custo oficial (Anúncios ML): <strong style={{ color: '#666' }}>{custoOficial ? brl(custoOficial.custo) : '—'}</strong></span>
+                                {skuML ? (
+                                  <button
+                                    onClick={() => { setEditandoCustoSku(skuML); setCustoEditValor(String((custoOficial?.custo ?? prod.custoMedioGeral ?? 0).toFixed(2))) }}
+                                    title="Editar o custo oficial (usado nos Anúncios ML)"
+                                    style={{ padding: '0.2rem 0.5rem', background: '#fff', color: '#1976D2', border: '1px solid #90caf9', borderRadius: '6px', cursor: 'pointer', fontSize: '0.72rem', fontWeight: 700 }}>
+                                    ✏️ editar
+                                  </button>
+                                ) : (
+                                  <span title="Vincule o produto a um SKU Olist para definir o custo oficial" style={{ color: '#bbb' }}>sem SKU</span>
+                                )}
+                              </div>
+                            )}
+                          </div>
                         </div>
                       </div>
 
@@ -632,14 +637,26 @@ export function FornecedoresManager({ onVoltar }: FornecedoresManagerProps) {
                         {anuncio ? (
                           <div style={{ display: 'flex', alignItems: 'center', gap: '1.5rem', flexWrap: 'wrap' }}>
                             <div>
-                              <div style={{ fontSize: '0.72rem', color: '#666' }}>Preço no ML{anuncio.tipo_anuncio ? ` · ${anuncio.tipo_anuncio}` : ''}</div>
+                              <div style={{ fontSize: '0.72rem', color: '#666' }}>Preço no ML{anuncio.tipo_anuncio ? ` · ${anuncio.tipo_anuncio}` : ''}{usandoPromo ? ' · promocional' : ''}</div>
                               <div style={{ fontSize: '1.05rem', fontWeight: 700, color: '#1a1a1a' }}>{brl(precoML)}</div>
                             </div>
                             <div style={{ display: 'flex', gap: '1rem', fontSize: '0.74rem', color: '#666', flexWrap: 'wrap' }}>
-                              <span>Frete <strong style={{ color: '#b42318' }}>{anuncio.frete != null ? `-${brl(freteML)}` : '—'}</strong></span>
-                              <span>Tarifa <strong style={{ color: '#b42318' }}>{anuncio.tarifa != null ? `-${brl(tarifaML)}` : '—'}</strong></span>
-                              <span>Imposto <strong style={{ color: '#b42318' }}>-{brl(impostoML)}</strong></span>
-                              <span>Custo <strong style={{ color: '#b42318' }}>-{brl(custo)}</strong></span>
+                              <span style={{ display: 'flex', flexDirection: 'column' }}>
+                                <span>Frete <strong style={{ color: '#b42318' }}>{anuncio.frete != null ? `-${brl(freteML)}` : '—'}</strong></span>
+                                <span style={{ fontSize: '0.62rem', color: '#a0a0a0' }}>direto do ML</span>
+                              </span>
+                              <span style={{ display: 'flex', flexDirection: 'column' }}>
+                                <span>Tarifa <strong style={{ color: '#b42318' }}>{anuncio.tarifa != null ? `-${brl(tarifaML)}` : '—'}</strong></span>
+                                <span style={{ fontSize: '0.62rem', color: '#a0a0a0' }}>{anuncio.tarifa_pct != null ? `${anuncio.tarifa_pct.toFixed(1)}% · ML` : 'direto do ML'}</span>
+                              </span>
+                              <span style={{ display: 'flex', flexDirection: 'column' }}>
+                                <span>Imposto <strong style={{ color: '#b42318' }}>-{brl(impostoML)}</strong></span>
+                                <span style={{ fontSize: '0.62rem', color: '#a0a0a0' }}>{impostoPct}% s/ preço</span>
+                              </span>
+                              <span style={{ display: 'flex', flexDirection: 'column' }}>
+                                <span>Custo <strong style={{ color: '#b42318' }}>-{brl(custo)}</strong></span>
+                                <span style={{ fontSize: '0.62rem', color: '#0f6e56', fontWeight: 600 }}>{fonteCusto}</span>
+                              </span>
                             </div>
                             <div style={{ marginLeft: 'auto', textAlign: 'right' }}>
                               <div style={{ fontSize: '0.72rem', color: '#666' }}>Margem de contribuição</div>
@@ -650,6 +667,11 @@ export function FornecedoresManager({ onVoltar }: FornecedoresManagerProps) {
                                     ? <span style={{ fontSize: '0.78rem', fontWeight: 600 }}>tarifa indisponível — reconecte o ML</span>
                                     : '—'}
                               </div>
+                              {margemML !== null && (
+                                <div style={{ fontSize: '0.62rem', color: '#90a4ae', marginTop: '0.15rem' }}>
+                                  {brl(precoML)} − {brl(freteML)} − {brl(tarifaML)} − {brl(impostoML)} − {brl(custo)}
+                                </div>
+                              )}
                             </div>
                             {anuncio.permalink && (
                               <a href={anuncio.permalink} target="_blank" rel="noreferrer"
