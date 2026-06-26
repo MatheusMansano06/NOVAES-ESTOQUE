@@ -48,6 +48,7 @@ interface NotaFiscal {
   data_emissao?: string
   data_upload?: string
   arquivo_original?: string
+  valor_frete?: number | null
   itens?: ItemNota[]
 }
 
@@ -279,7 +280,10 @@ function App() {
   const [filtroBusca, setFiltroBusca] = useState('')
   const [filtroData, setFiltroData] = useState('')
   const [notaDetalheAberta, setNotaDetalheAberta] = useState<NotaFiscal | null>(null)
-  const [abaDetalhe, setAbaDetalhe] = useState<'detalhes' | 'conferencia' | 'divergencias'>('detalhes')
+  const [abaDetalhe, setAbaDetalhe] = useState<'detalhes' | 'conferencia' | 'divergencias' | 'editar'>('detalhes')
+  const [freteEditNota, setFreteEditNota] = useState('')
+  const [salvandoFreteNota, setSalvandoFreteNota] = useState(false)
+  const [msgFreteNota, setMsgFreteNota] = useState<{ tipo: 'ok' | 'erro'; texto: string } | null>(null)
   const [notasSelecionadas, setNotasSelecionadas] = useState<Set<number>>(new Set())
   const [deletando, setDeletando] = useState(false)
   const [downloadandoPdf, setDownloadandoPdf] = useState(false)
@@ -822,8 +826,36 @@ function App() {
       setNotaSelecionada(data)
       setProdutosNota(data.itens || [])
       setAbaDetalhe('detalhes')
+      setFreteEditNota(data.valor_frete ? String(data.valor_frete) : '')
+      setMsgFreteNota(null)
     } catch (err) {
       console.error('Erro ao abrir nota:', err)
+    }
+  }
+
+  const salvarFreteNota = async () => {
+    if (!notaDetalheAberta) return
+    const valor = Number(String(freteEditNota).replace(',', '.'))
+    if (!Number.isFinite(valor) || valor < 0) {
+      setMsgFreteNota({ tipo: 'erro', texto: 'Informe um valor de frete válido' })
+      return
+    }
+    setSalvandoFreteNota(true); setMsgFreteNota(null)
+    try {
+      const r = await fetch(`${API_BASE}/api/notas-fiscais/${notaDetalheAberta.id}/frete`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ valor_frete: valor }),
+      })
+      const d = await r.json()
+      if (!r.ok || d.erro) throw new Error(d.erro || 'Falha ao salvar o frete')
+      setNotaDetalheAberta(prev => prev ? { ...prev, valor_frete: valor } : prev)
+      setMsgFreteNota({ tipo: 'ok', texto: `Frete salvo: ${valor.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}` })
+      void loadNotas(true)
+    } catch (e) {
+      setMsgFreteNota({ tipo: 'erro', texto: String(e instanceof Error ? e.message : e) })
+    } finally {
+      setSalvandoFreteNota(false)
     }
   }
 
@@ -2480,6 +2512,7 @@ function App() {
                         { key: 'detalhes', label: 'Detalhes' },
                         { key: 'conferencia', label: 'Conferência' },
                         { key: 'divergencias', label: `Divergências (${divergenciasDaNota(notaDetalheAberta).length})` },
+                        { key: 'editar', label: '✏️ Editar' },
                       ].map((tab) => {
                         const ativa = abaDetalhe === tab.key
                         return (
@@ -2834,6 +2867,71 @@ function App() {
                         )}
                       </div>
                     )}
+
+                    {abaDetalhe === 'editar' && (() => {
+                      const itens = notaDetalheAberta.itens || []
+                      const totalProdutos = itens.reduce((s, i) => s + (i.quantidade_nf || 0) * (i.preco_unitario || 0), 0)
+                      const qtdTotal = itens.reduce((s, i) => s + (i.quantidade_nf || 0), 0)
+                      const freteNum = Number(String(freteEditNota).replace(',', '.'))
+                      const freteValido = Number.isFinite(freteNum) && freteNum >= 0
+                      const freteUnitMedio = freteValido && qtdTotal > 0 ? freteNum / qtdTotal : 0
+                      return (
+                        <div style={{ display: 'grid', gap: '1.25rem', maxWidth: 620 }}>
+                          <div style={{ background: '#f9f9f9', border: '2px solid #007acc', padding: '1.75rem', borderRadius: '10px' }}>
+                            <h3 style={{ margin: '0 0 .35rem', color: '#1a1a1a', fontSize: '1.1rem' }}>Frete total da entrega</h3>
+                            <p style={{ margin: '0 0 1.1rem', color: '#607d8b', fontSize: '.9rem', lineHeight: 1.5 }}>
+                              Informe o valor total pago de frete nesta nota. Ele é rateado entre os produtos
+                              (proporcional ao valor de cada item) e entra no <strong>custo médio ponderado</strong> —
+                              a mesma regra de estoque antigo + novo do <strong>Fornecedores × Catálogo</strong> —
+                              sendo absorvido na <strong>margem de contribuição</strong> de cada produto.
+                            </p>
+                            <label style={{ display: 'block', fontSize: '.78rem', fontWeight: 700, color: '#455a64', textTransform: 'uppercase', letterSpacing: '.03em', marginBottom: '.4rem' }}>
+                              Frete total (R$)
+                            </label>
+                            <div style={{ display: 'flex', gap: '.6rem', alignItems: 'center', flexWrap: 'wrap' }}>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '.4rem', background: '#fff', border: '1px solid #cfd8dc', borderRadius: 8, padding: '.55rem .7rem', flex: '1 1 180px', minWidth: 0 }}>
+                                <span style={{ color: '#607d8b', fontWeight: 700 }}>R$</span>
+                                <input
+                                  type="text"
+                                  inputMode="decimal"
+                                  value={freteEditNota}
+                                  onChange={(e) => setFreteEditNota(e.target.value)}
+                                  placeholder="0,00"
+                                  style={{ flex: 1, minWidth: 0, border: 'none', outline: 'none', fontSize: '1.05rem', fontWeight: 700, color: '#1a1a1a' }}
+                                />
+                              </div>
+                              <button
+                                onClick={salvarFreteNota}
+                                disabled={salvandoFreteNota || !freteValido}
+                                style={{ padding: '.7rem 1.4rem', background: freteValido ? '#1976D2' : '#b0bec5', color: '#fff', border: 'none', borderRadius: 8, fontWeight: 700, cursor: salvandoFreteNota ? 'wait' : (freteValido ? 'pointer' : 'not-allowed'), whiteSpace: 'nowrap' }}
+                              >
+                                {salvandoFreteNota ? 'Salvando...' : 'Salvar frete'}
+                              </button>
+                            </div>
+                            {msgFreteNota && (
+                              <div style={{ marginTop: '.7rem', fontSize: '.85rem', fontWeight: 700, color: msgFreteNota.tipo === 'ok' ? '#2e7d32' : '#c62828' }}>
+                                {msgFreteNota.texto}
+                              </div>
+                            )}
+                          </div>
+
+                          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: '.75rem' }}>
+                            <div style={{ background: '#fff', border: '1px solid #e0e0e0', borderRadius: 8, padding: '.9rem 1rem' }}>
+                              <div style={{ color: '#90a4ae', fontSize: '.72rem', fontWeight: 700, textTransform: 'uppercase' }}>Total dos produtos</div>
+                              <div style={{ marginTop: '.3rem', fontWeight: 800, color: '#1a1a1a' }}>{totalProdutos.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</div>
+                            </div>
+                            <div style={{ background: '#fff', border: '1px solid #e0e0e0', borderRadius: 8, padding: '.9rem 1rem' }}>
+                              <div style={{ color: '#90a4ae', fontSize: '.72rem', fontWeight: 700, textTransform: 'uppercase' }}>Itens (un)</div>
+                              <div style={{ marginTop: '.3rem', fontWeight: 800, color: '#1a1a1a' }}>{qtdTotal}</div>
+                            </div>
+                            <div style={{ background: '#fff', border: '1px solid #e0e0e0', borderRadius: 8, padding: '.9rem 1rem' }}>
+                              <div style={{ color: '#90a4ae', fontSize: '.72rem', fontWeight: 700, textTransform: 'uppercase' }}>Frete médio / un</div>
+                              <div style={{ marginTop: '.3rem', fontWeight: 800, color: '#1976D2' }}>{freteUnitMedio.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</div>
+                            </div>
+                          </div>
+                        </div>
+                      )
+                    })()}
                   </div>
                 </div>
               </div>
