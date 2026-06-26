@@ -12,6 +12,9 @@ interface Anuncio {
   sku: string
   preco: number
   preco_original?: number | null
+  preco_promocional?: number | null
+  tarifa?: number | null
+  tarifa_pct?: number | null
   disponivel: number
   vendidos: number
   status: string
@@ -128,10 +131,12 @@ function carregarImpostoAtual(): number {
 
 function montarResumoMargem(anuncio: Anuncio, resumo?: PricingSnapshot, live?: LivePriceSummary | null, breakdown?: LivePriceBreakdown | null, custoOficial?: CustoOficial | null): MarginViewModel {
   const precoOriginal = live?.cheio ?? (resumo?.precoOriginal && resumo.precoOriginal > 0 ? resumo.precoOriginal : (anuncio.preco_original || anuncio.preco))
-  const precoPromocional = live?.promocional ?? (resumo?.precoPromocional && resumo.precoPromocional > 0 ? resumo.precoPromocional : anuncio.preco)
+  const precoPromocional = live?.promocional ?? (resumo?.precoPromocional && resumo.precoPromocional > 0 ? resumo.precoPromocional : (anuncio.preco_promocional || anuncio.preco))
   const frete = resumo?.frete ?? breakdown?.frete ?? anuncio.frete_custo ?? null
-  const tarifa = resumo?.tarifa ?? breakdown?.tarifa ?? null
-  const tarifaPct = resumo?.tarifaPct ?? breakdown?.tarifaPct ?? null
+  // tarifa/tarifaPct também vêm da lista (sync do cache), então o card mostra a
+  // MC sem depender do hover que busca o detalhe ao vivo.
+  const tarifa = resumo?.tarifa ?? breakdown?.tarifa ?? anuncio.tarifa ?? null
+  const tarifaPct = resumo?.tarifaPct ?? breakdown?.tarifaPct ?? anuncio.tarifa_pct ?? null
   // Custo oficial (planilha/banco) tem prioridade sobre o snapshot do Precificador.
   const custo = custoOficial?.custo ?? resumo?.custo ?? null
   const impostoPct = custoOficial?.imposto_pct ?? resumo?.impostoPct ?? carregarImpostoAtual()
@@ -938,10 +943,10 @@ function PriceBubble({ anuncio, resumo, statusCor, statusLabel, onPriceChanged, 
       onClick={() => setAberto(v => !v)}
       style={{
         position: 'relative',
-        minWidth: '148px',
+        minWidth: '186px',
         marginLeft: 'auto',
-        padding: '.42rem .7rem .48rem',
-        borderRadius: '10px',
+        padding: '.6rem .85rem .68rem',
+        borderRadius: '12px',
         background: '#fff',
         border: aberto ? '1px solid #5b3cc4' : '1px solid #9fc2ff',
         boxShadow: (hovered || aberto) ? '0 10px 24px rgba(52,131,250,.18)' : 'none',
@@ -970,9 +975,9 @@ function PriceBubble({ anuncio, resumo, statusCor, statusLabel, onPriceChanged, 
 
 function BubbleMetric({ label, value, cor }: { label: string; value: string; cor: string }) {
   return (
-    <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 8, padding: '.34rem .45rem' }}>
-      <div style={{ fontSize: '.62rem', color: '#98a2b3', fontWeight: 700 }}>{label}</div>
-      <div style={{ fontSize: '.82rem', color: cor, fontWeight: 800, lineHeight: 1.2 }}>{value}</div>
+    <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 9, padding: '.46rem .55rem' }}>
+      <div style={{ fontSize: '.66rem', color: '#98a2b3', fontWeight: 700 }}>{label}</div>
+      <div style={{ fontSize: '.98rem', color: cor, fontWeight: 800, lineHeight: 1.25 }}>{value}</div>
     </div>
   )
 }
