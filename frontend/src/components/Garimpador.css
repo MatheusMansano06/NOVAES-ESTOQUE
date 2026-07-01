@@ -468,6 +468,37 @@
 }
 .gp-warn-line { font-size: 0.8rem; color: #8a6420; display: flex; gap: 0.5rem; align-items: baseline; }
 
+/* top lojas & vendedores */
+.gp-sellers { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 0.7rem; margin-top: 0.4rem; }
+.gp-seller {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  text-decoration: none;
+  border: 1px solid var(--gp-line);
+  border-radius: 12px;
+  padding: 0.7rem 0.85rem;
+  background: #fff;
+  transition: transform 0.12s ease, box-shadow 0.12s ease, border-color 0.12s ease;
+}
+.gp-seller:hover { transform: translateY(-2px); border-color: var(--gp-gold); box-shadow: 0 8px 18px rgba(30, 34, 85, 0.12); }
+.gp-seller-rank {
+  flex: none;
+  width: 1.7rem; height: 1.7rem;
+  display: flex; align-items: center; justify-content: center;
+  border-radius: 999px;
+  background: linear-gradient(135deg, #ffd06b 0%, var(--gp-gold) 100%);
+  color: var(--gp-navy-deep);
+  font-weight: 800; font-size: 0.8rem;
+}
+.gp-seller-body { flex: 1; min-width: 0; }
+.gp-seller-name { font-weight: 800; color: var(--gp-ink); font-size: 0.9rem; display: flex; align-items: center; gap: 0.4rem; }
+.gp-seller-badge { font-size: 0.62rem; font-weight: 800; color: #fff; background: #2d8cff; padding: 0.08rem 0.4rem; border-radius: 999px; text-transform: uppercase; }
+.gp-seller-meta { display: flex; flex-wrap: wrap; gap: 0.5rem 0.75rem; margin-top: 0.25rem; font-size: 0.74rem; color: var(--gp-muted); }
+.gp-seller-rep { display: inline-flex; align-items: center; gap: 0.3rem; text-transform: capitalize; }
+.gp-rep-dot { width: 0.6rem; height: 0.6rem; border-radius: 999px; display: inline-block; }
+.gp-seller-go { flex: none; color: var(--gp-gold); font-weight: 800; }
+
 @media (max-width: 720px) {
   .gp-two-col { grid-template-columns: 1fr; }
   .gp-hero h1 { font-size: 1.3rem; }

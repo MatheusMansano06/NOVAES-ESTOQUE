@@ -32,6 +32,14 @@ interface Metricas {
   amostra: number
   fonte: string
 }
+interface Vendedor {
+  nome: string
+  oficial?: boolean
+  ofertas?: number
+  reputacao?: string | null
+  vendas?: number | null
+  link?: string | null
+}
 interface GarimpoResult {
   ok?: boolean
   query?: string
@@ -42,8 +50,19 @@ interface GarimpoResult {
   atributos_populares?: Record<string, AtributoValor[]>
   total_catalogo_nominal?: number | null
   metricas?: Metricas | null
+  top_vendedores?: Vendedor[]
   avisos?: string[]
   erro?: string
+}
+
+// Reputação ML: level_id (ex "5_green") -> cor + rótulo
+const REP_CORES: Record<string, string> = {
+  '5_green': '#00a650', '4_light_green': '#7dd056', '3_yellow': '#f5c518',
+  '2_orange': '#ff9500', '1_red': '#e63946',
+}
+function repInfo(level?: string | null): { cor: string; label: string } {
+  if (!level) return { cor: '#c7cbe0', label: '—' }
+  return { cor: REP_CORES[level] || '#c7cbe0', label: level.replace(/_/g, ' ') }
 }
 
 // Cor de calor (heat map) por frequência: frio (âmbar claro) → quente (vermelho)
@@ -414,10 +433,47 @@ export function Garimpador() {
             </div>
           )}
 
-          {/* Produtos — clicáveis, abrem o anúncio */}
+          {/* Top lojas & vendedores do nicho — clicáveis pra loja no ML */}
+          {dados.top_vendedores && dados.top_vendedores.length > 0 && (
+            <div className="gp-panel">
+              <h3 className="gp-panel-title">🏪 Top lojas &amp; vendedores do nicho</h3>
+              <p className="gp-seo-hint">Quem mais vence a buy box nas ofertas do topo — clique para ver a loja no Mercado Livre.</p>
+              <div className="gp-sellers">
+                {dados.top_vendedores.map((v, i) => {
+                  const rep = repInfo(v.reputacao)
+                  return (
+                    <a
+                      key={v.nome || i}
+                      className="gp-seller"
+                      href={v.link || '#'}
+                      target="_blank"
+                      rel="noreferrer"
+                      title={`Ver ${v.nome} no Mercado Livre`}
+                    >
+                      <span className="gp-seller-rank">{i + 1}</span>
+                      <div className="gp-seller-body">
+                        <div className="gp-seller-name">
+                          {v.nome}
+                          {v.oficial && <span className="gp-seller-badge">Oficial</span>}
+                        </div>
+                        <div className="gp-seller-meta">
+                          <span className="gp-seller-rep"><span className="gp-rep-dot" style={{ background: rep.cor }} />{rep.label}</span>
+                          {v.vendas != null && <span>{v.vendas.toLocaleString('pt-BR')} vendas</span>}
+                          {v.ofertas != null && <span>{v.ofertas} no topo</span>}
+                        </div>
+                      </div>
+                      <span className="gp-seller-go">↗</span>
+                    </a>
+                  )
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* Produtos — clicáveis, abrem o anúncio (com oferta ativa em destaque) */}
           {dados.produtos && dados.produtos.length > 0 && (
             <div className="gp-panel">
-              <h3 className="gp-panel-title">📦 Produtos em destaque no catálogo</h3>
+              <h3 className="gp-panel-title">📦 Produtos do catálogo <span className="gp-muted">(com oferta ativa em destaque)</span></h3>
               <div className="gp-prod-grid">
                 {dados.produtos.map((p, i) => (
                   <a
