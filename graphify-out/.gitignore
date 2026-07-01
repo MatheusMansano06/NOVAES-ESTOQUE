@@ -1,0 +1,4 @@
+# Graphify cache e backups temporários
+cache/
+2026-*/
+.graphify_semantic_marker
