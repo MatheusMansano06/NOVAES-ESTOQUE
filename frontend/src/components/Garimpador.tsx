@@ -57,22 +57,21 @@ interface GarimpoResult {
 
 // Reputação ML: level_id (ex "5_green") -> cor + rótulo
 const REP_CORES: Record<string, string> = {
-  '5_green': '#00a650', '4_light_green': '#7dd056', '3_yellow': '#f5c518',
-  '2_orange': '#ff9500', '1_red': '#e63946',
+  '5_green': '#12b76a', '4_light_green': '#79c34a', '3_yellow': '#eab308',
+  '2_orange': '#f59e0b', '1_red': '#ef4444',
 }
 function repInfo(level?: string | null): { cor: string; label: string } {
-  if (!level) return { cor: '#c7cbe0', label: '—' }
-  return { cor: REP_CORES[level] || '#c7cbe0', label: level.replace(/_/g, ' ') }
+  if (!level) return { cor: '#c7cbd6', label: '—' }
+  return { cor: REP_CORES[level] || '#c7cbd6', label: level.replace(/_/g, ' ') }
 }
 
-// Cor de calor (heat map) por frequência: frio (âmbar claro) → quente (vermelho)
+// Mapa de calor monocromático (um único tom): frequência baixa = claro, alta = intenso
 function heatColor(forca: number): { background: string; color: string } {
   const f = Math.max(0, Math.min(1, forca))
-  const hue = 46 - f * 42 // 46 (ouro) → 4 (vermelho)
-  const light = 91 - f * 45 // 91% (claro) → 46% (intenso)
+  const light = 95 - f * 58 // 95% (quase branco) -> 37% (navy sólido)
   return {
-    background: `hsl(${hue}, 92%, ${light}%)`,
-    color: f > 0.5 ? '#fff' : '#6b4e00',
+    background: `hsl(232, 40%, ${light}%)`,
+    color: f > 0.42 ? '#fff' : '#3a4066',
   }
 }
 
@@ -126,10 +125,10 @@ function temMetricas(m?: Metricas | null): m is Metricas {
 }
 
 function PainelMetricas({ m }: { m: Metricas }) {
-  const cards: { label: string; value: string; sub?: string; gold?: boolean }[] = []
+  const cards: { label: string; value: string; sub?: string }[] = []
 
   if (m.total_anuncios != null) {
-    cards.push({ label: 'Anúncios', value: m.total_anuncios.toLocaleString('pt-BR'), gold: true })
+    cards.push({ label: 'Anúncios', value: m.total_anuncios.toLocaleString('pt-BR') })
   }
   if (m.preco_medio != null) {
     const faixa =
@@ -151,7 +150,6 @@ function PainelMetricas({ m }: { m: Metricas }) {
       label: 'No Full',
       value: m.pct_full != null ? pct(m.pct_full) : m.qtd_full!.toLocaleString('pt-BR'),
       sub: m.pct_full != null && m.qtd_full != null ? `${m.qtd_full.toLocaleString('pt-BR')} ofertas` : undefined,
-      gold: true,
     })
   }
   if (m.pct_frete_gratis != null) {
@@ -164,24 +162,21 @@ function PainelMetricas({ m }: { m: Metricas }) {
   if (cards.length === 0) return null
 
   return (
-    <div className="gp-metrics">
-      <div className="gp-metrics-head">📊 Raio-x do mercado</div>
+    <div className="gp-panel gp-metrics">
+      <h3 className="gp-panel-title">Raio-x do mercado</h3>
       <div className="gp-stat-grid">
         {cards.map((c, i) => (
           <div className="gp-stat" key={i}>
             <div className="gp-stat-label">{c.label}</div>
-            <div className={`gp-stat-value${c.gold ? ' gp-gold' : ''}`}>{c.value}</div>
-            {c.sub && <div className="gp-stat-sub">{c.sub}</div>}
+            <div className="gp-stat-value">{c.value}</div>
+            <div className="gp-stat-sub">{c.sub || ' '}</div>
           </div>
         ))}
       </div>
       {(m.fonte || m.amostra != null) && (
         <p className="gp-metrics-source">
-          <span>ℹ️</span>
-          <span>
-            {m.fonte}
-            {m.amostra != null ? ` · amostra de ${m.amostra.toLocaleString('pt-BR')} itens` : ''}
-          </span>
+          {m.fonte}
+          {m.amostra != null ? ` · amostra de ${m.amostra.toLocaleString('pt-BR')} itens` : ''}
         </p>
       )}
     </div>
@@ -234,24 +229,22 @@ export function Garimpador() {
 
   return (
     <div className="gp-root">
-      {/* HERO / busca */}
+      {/* Busca */}
       <div className="gp-hero">
-        <div className="gp-hero-eyebrow">⛏️ Garimpador de mercado</div>
-        <h1>Encontre o ouro escondido no Mercado Livre</h1>
-        <p className="gp-hero-sub">
-          Digite um produto e desenterre nicho, demanda, preços e quem domina a concorrência.
-        </p>
+        <div className="gp-hero-eyebrow">Pesquisa de mercado</div>
+        <h1>Analise qualquer produto do Mercado Livre</h1>
+        <p className="gp-hero-sub">Nicho, demanda, preços e concorrência — em uma busca.</p>
         <div className="gp-searchbar">
-          <span className="gp-search-icon">🔎</span>
+          <span className="gp-search-icon" aria-hidden>⌕</span>
           <input
             className="gp-search-input"
             value={termo}
             onChange={(e) => setTermo(e.target.value)}
             onKeyDown={(e) => { if (e.key === 'Enter') buscar() }}
-            placeholder="Ex: varal de chão, suporte de celular, organizador de gaveta…"
+            placeholder="Ex: varal de chão, suporte de celular…"
           />
           <button className="gp-search-btn" onClick={buscar} disabled={loading || !termo.trim()}>
-            {loading ? '⛏️ Garimpando…' : 'Garimpar'}
+            {loading ? 'Buscando…' : 'Analisar'}
           </button>
         </div>
       </div>
@@ -259,23 +252,20 @@ export function Garimpador() {
       {/* Estados */}
       {loading && (
         <div className="gp-state">
-          <div className="gp-pick">⛏️</div>
-          <div className="gp-state-title">
-            Garimpando <strong style={{ color: '#2d3277' }}>"{termo}"</strong>…
-          </div>
-          <div className="gp-state-desc">Escavando categorias, títulos e preços no Mercado Livre.</div>
+          <div className="gp-spinner" aria-hidden />
+          <div className="gp-state-title">Analisando “{termo}”…</div>
+          <div className="gp-state-desc">Buscando categoria, títulos, preços e vendedores.</div>
         </div>
       )}
 
       {erro && !loading && (
-        <div className="gp-error"><span>✕</span><span>{erro}</span></div>
+        <div className="gp-error"><span>{erro}</span></div>
       )}
 
       {!dados && !loading && !erro && (
         <div className="gp-state">
-          <div className="gp-state-emoji">💎</div>
-          <div className="gp-state-title">Sua garimpagem começa aqui.</div>
-          <div className="gp-state-desc">Busque um produto para descobrir nicho, demanda e concorrência.</div>
+          <div className="gp-state-title">Comece uma pesquisa</div>
+          <div className="gp-state-desc">Digite um produto acima para analisar o mercado.</div>
         </div>
       )}
 
@@ -285,9 +275,9 @@ export function Garimpador() {
           {/* Categoria detectada */}
           {dados.categoria?.nome && (
             <div className="gp-catbar">
-              <span className="gp-cat-label">Categoria detectada:</span>
+              <span className="gp-cat-label">Categoria detectada</span>
               <span className="gp-cat-chip">
-                🗂️ {dados.categoria.dominio || dados.categoria.nome}
+                {dados.categoria.dominio || dados.categoria.nome}
                 {dados.categoria.id && <span className="gp-cat-id">{dados.categoria.id}</span>}
               </span>
               {dados.total_catalogo_nominal != null && (
@@ -305,8 +295,8 @@ export function Garimpador() {
           <div className="gp-two-col">
             <div className="gp-panel">
               <h3 className="gp-panel-title">
-                🔥 Mais buscados no Mercado Livre
-                {dados.categoria?.nome && <span className="gp-muted">({dados.categoria.nome})</span>}
+                Mais buscados
+                {dados.categoria?.nome && <span className="gp-muted">{dados.categoria.nome}</span>}
               </h3>
               <div className="gp-chips-wrap">
                 {(dados.mais_buscados || []).map((kw, i) => (
@@ -319,7 +309,7 @@ export function Garimpador() {
             </div>
 
             <div className="gp-panel">
-              <h3 className="gp-panel-title">🌡️ Mapa de calor das palavras nos títulos</h3>
+              <h3 className="gp-panel-title">Palavras nos títulos <span className="gp-muted">mapa de calor</span></h3>
               <div className="gp-heat">
                 {palFreq.map((p, i) => {
                   const c = heatColor(p.n / (maxPalavra || 1))
@@ -340,7 +330,7 @@ export function Garimpador() {
               </div>
               {palFreq.length > 0 && (
                 <button className="gp-forma-btn" onClick={() => setSeoAberto(true)}>
-                  ✨ Formar título otimizado
+                  Formar título otimizado
                 </button>
               )}
             </div>
@@ -349,15 +339,15 @@ export function Garimpador() {
           {/* Kit de anúncio gerado (título + palavras-chave SEO + relacionados) */}
           {seoAberto && (
             <div className="gp-panel gp-seo">
-              <h3 className="gp-panel-title">✨ Kit de anúncio gerado</h3>
-              <p className="gp-seo-hint">
-                Montado com as palavras que os concorrentes mais usam nos títulos e as buscas reais dos
-                clientes. É só copiar e colar no seu anúncio.
+              <h3 className="gp-panel-title">Kit de anúncio</h3>
+              <p className="gp-hint">
+                Montado com as palavras que os concorrentes mais usam e as buscas reais dos clientes.
+                É só copiar e colar.
               </p>
 
               <div className="gp-seo-block gp-seo-hero">
                 <div className="gp-seo-head">
-                  <span className="gp-seo-label">📌 Título otimizado</span>
+                  <span className="gp-seo-label">Título otimizado</span>
                   <span className={`gp-charcount${tituloOtimizado.length > 60 ? ' gp-over' : ''}`}>
                     {tituloOtimizado.length}/60
                   </span>
@@ -368,14 +358,14 @@ export function Garimpador() {
                   onClick={() => copiar(tituloOtimizado, 'titulo')}
                   disabled={!tituloOtimizado}
                 >
-                  {copiado === 'titulo' ? '✓ Copiado!' : '📋 Copiar título'}
+                  {copiado === 'titulo' ? 'Copiado' : 'Copiar título'}
                 </button>
               </div>
 
               <div className="gp-seo-grid">
                 <div className="gp-seo-block">
                   <div className="gp-seo-head">
-                    <span className="gp-seo-label">🔑 Palavras-chave (SEO da ficha)</span>
+                    <span className="gp-seo-label">Palavras-chave (SEO da ficha)</span>
                   </div>
                   <div className="gp-seo-text">{palavrasSeoStr || '—'}</div>
                   <button
@@ -383,13 +373,13 @@ export function Garimpador() {
                     onClick={() => copiar(palavrasSeoStr, 'seo')}
                     disabled={!palavrasSeoStr}
                   >
-                    {copiado === 'seo' ? '✓ Copiado!' : '📋 Copiar palavras-chave'}
+                    {copiado === 'seo' ? 'Copiado' : 'Copiar palavras-chave'}
                   </button>
                 </div>
 
                 <div className="gp-seo-block">
                   <div className="gp-seo-head">
-                    <span className="gp-seo-label">🎯 Termos relacionados (o que o cliente busca)</span>
+                    <span className="gp-seo-label">Termos relacionados</span>
                   </div>
                   <div className="gp-seo-text">{relacionadasStr || '—'}</div>
                   <button
@@ -397,7 +387,7 @@ export function Garimpador() {
                     onClick={() => copiar(relacionadasStr, 'rel')}
                     disabled={!relacionadasStr}
                   >
-                    {copiado === 'rel' ? '✓ Copiado!' : '📋 Copiar relacionados'}
+                    {copiado === 'rel' ? 'Copiado' : 'Copiar relacionados'}
                   </button>
                 </div>
               </div>
@@ -407,7 +397,7 @@ export function Garimpador() {
           {/* Domínio do nicho */}
           {dados.atributos_populares && Object.keys(dados.atributos_populares).length > 0 && (
             <div className="gp-panel">
-              <h3 className="gp-panel-title">🏷️ Quem domina o nicho (top do catálogo)</h3>
+              <h3 className="gp-panel-title">Quem domina o nicho <span className="gp-muted">top do catálogo</span></h3>
               <div className="gp-attr-grid">
                 {Object.entries(dados.atributos_populares).map(([nome, valores]) => {
                   const maxV = valores[0]?.n || 1
@@ -436,8 +426,7 @@ export function Garimpador() {
           {/* Top lojas & vendedores do nicho — clicáveis pra loja no ML */}
           {dados.top_vendedores && dados.top_vendedores.length > 0 && (
             <div className="gp-panel">
-              <h3 className="gp-panel-title">🏪 Top lojas &amp; vendedores do nicho</h3>
-              <p className="gp-seo-hint">Quem mais vence a buy box nas ofertas do topo — clique para ver a loja no Mercado Livre.</p>
+              <h3 className="gp-panel-title">Top lojas &amp; vendedores <span className="gp-muted">quem vence a buy box</span></h3>
               <div className="gp-sellers">
                 {dados.top_vendedores.map((v, i) => {
                   const rep = repInfo(v.reputacao)
@@ -462,7 +451,7 @@ export function Garimpador() {
                           {v.ofertas != null && <span>{v.ofertas} no topo</span>}
                         </div>
                       </div>
-                      <span className="gp-seller-go">↗</span>
+                      <span className="gp-seller-go" aria-hidden>↗</span>
                     </a>
                   )
                 })}
@@ -473,7 +462,7 @@ export function Garimpador() {
           {/* Produtos — clicáveis, abrem o anúncio (com oferta ativa em destaque) */}
           {dados.produtos && dados.produtos.length > 0 && (
             <div className="gp-panel">
-              <h3 className="gp-panel-title">📦 Produtos do catálogo <span className="gp-muted">(com oferta ativa em destaque)</span></h3>
+              <h3 className="gp-panel-title">Produtos do catálogo <span className="gp-muted">com oferta em destaque</span></h3>
               <div className="gp-prod-grid">
                 {dados.produtos.map((p, i) => (
                   <a
@@ -487,8 +476,8 @@ export function Garimpador() {
                     <span className="gp-prod-cta">Ver anúncio ↗</span>
                     <div className="gp-prod-thumb">
                       {p.thumbnail
-                        ? <img src={p.thumbnail} alt="" />
-                        : <span className="gp-ph">📦</span>}
+                        ? <img src={p.thumbnail} alt="" loading="lazy" />
+                        : <span className="gp-ph" aria-hidden />}
                     </div>
                     <div className="gp-prod-name">{(p.nome || '').slice(0, 70)}</div>
                     <div className="gp-prod-meta">
@@ -505,7 +494,7 @@ export function Garimpador() {
           {dados.avisos && dados.avisos.length > 0 && (
             <div className="gp-warn">
               {dados.avisos.map((a, i) => (
-                <div className="gp-warn-line" key={i}><span>ℹ️</span><span>{a}</span></div>
+                <div className="gp-warn-line" key={i}>{a}</div>
               ))}
             </div>
           )}
