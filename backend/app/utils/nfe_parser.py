@@ -185,40 +185,199 @@ class NFeParsing:
     @staticmethod
     def parse_pdf_ocr(file_path: str) -> Dict:
         """
-        Parse PDF - currently limited to error messaging (Phase 2 feature)
-        In production, PDFs require manual processing or use of pre-extracted XML
+        Parse PDF using OCR + pdfplumber para extrair dados estruturados
+        Tenta primeiro extrair texto com pdfplumber, depois OCR se necessário
         """
-        try:
-            # Verificar tamanho do arquivo
-            import os
-            tamanho_mb = os.path.getsize(file_path) / (1024 * 1024)
+        import os
+        import re
+        from datetime import datetime
 
-            if tamanho_mb > 10:
+        try:
+            tamanho_mb = os.path.getsize(file_path) / (1024 * 1024)
+            if tamanho_mb > 50:
                 return {
                     "sucesso": False,
-                    "erro": f"PDF muito grande ({tamanho_mb:.1f}MB). Máximo: 10MB. Tente um PDF menor ou enviando o XML da NF-e.",
+                    "erro": f"PDF muito grande ({tamanho_mb:.1f}MB). Máximo: 50MB.",
                     "itens": []
                 }
 
-            # Avisar que PDF requer processamento manual ou XML
-            return {
-                "sucesso": False,
-                "erro": (
-                    "Upload de PDF não está completamente suportado ainda (está em desenvolvimento). "
-                    "Por favor, baixe o arquivo **XML** da nota fiscal pelo site do fornecedor/SEFAZ "
-                    "e envie aquele arquivo. O XML tem todos os dados corretos e processamento será instantâneo. "
-                    "PDFs podem ter problemas de leitura com OCR."
-                ),
-                "itens": []
-            }
+            try:
+                import pdfplumber
+            except ImportError:
+                return {
+                    "sucesso": False,
+                    "erro": "pdfplumber não instalado. Execute: pip install pdfplumber",
+                    "itens": []
+                }
+
+            texto_completo = ""
+
+            # Tentar extrair texto com pdfplumber (mais rápido, sem OCR)
+            try:
+                with pdfplumber.open(file_path) as pdf:
+                    for page in pdf.pages:
+                        texto_completo += page.extract_text() or ""
+            except Exception as e:
+                logger.warning(f"pdfplumber falhou, tentando OCR: {e}")
+                texto_completo = ""
+
+            # Se pdfplumber não extraiu nada, usar OCR
+            if not texto_completo or len(texto_completo.strip()) < 100:
+                try:
+                    from pdf2image import convert_from_path
+                    import pytesseract
+
+                    images = convert_from_path(file_path, first_page=1, last_page=min(30, len(open(file_path, 'rb').read()) // 10000))
+                    for image in images:
+                        texto_completo += pytesseract.image_to_string(image, lang='por') + "\n"
+                except ImportError:
+                    return {
+                        "sucesso": False,
+                        "erro": "Dependências OCR não instaladas. Execute: pip install pdf2image pytesseract",
+                        "itens": []
+                    }
+                except Exception as e:
+                    logger.error(f"OCR falhou: {e}")
+                    return {
+                        "sucesso": False,
+                        "erro": f"Falha ao processar PDF com OCR: {str(e)}",
+                        "itens": []
+                    }
+
+            if not texto_completo or len(texto_completo.strip()) < 50:
+                return {
+                    "sucesso": False,
+                    "erro": "Não foi possível extrair texto do PDF. Verifique se é um PDF válido.",
+                    "itens": []
+                }
+
+            # Parse dos dados estruturados do texto extraído
+            return NFeParsing._extrair_dados_nfe_texto(texto_completo)
 
         except Exception as e:
             logger.error(f"Erro ao processar PDF: {str(e)}")
             return {
                 "sucesso": False,
-                "erro": (
-                    f"Erro ao processar o PDF: {str(e)}. "
-                    "Recomendação: Use o arquivo XML da nota fiscal em vez de PDF."
-                ),
+                "erro": f"Erro ao processar PDF: {str(e)}",
+                "itens": []
+            }
+
+    @staticmethod
+    def _extrair_dados_nfe_texto(texto: str) -> Dict:
+        """
+        Extrai dados estruturados de NF a partir de texto (de PDF ou OCR)
+        Busca padrões comuns em notas fiscais eletrônicas
+        """
+        import re
+        from datetime import datetime
+
+        try:
+            # Normalizar texto
+            texto_limpo = texto.upper()
+
+            # Extrair número da NF (padrão: NF nº 123456 ou NF-e nº 123456 ou NF 123456)
+            match_nf = re.search(r'NF[- ]?E?\s*(?:nº|numero|n[\°º]?)\s*:?\s*(\d{6,})', texto_limpo)
+            numero_nf = match_nf.group(1) if match_nf else ""
+
+            # Série (padrão: Série 1 ou S: 1)
+            match_serie = re.search(r'(?:SÉRIE|S[\s:]?)\s*:?\s*(\d{1,3})', texto_limpo)
+            serie = match_serie.group(1) if match_serie else "1"
+
+            # Data (padrão: 01/01/2024 ou 2024-01-01)
+            match_data = re.search(r'(\d{1,2})[/-](\d{1,2})[/-](\d{4})', texto)
+            data_emissao = None
+            if match_data:
+                try:
+                    dia, mes, ano = match_data.groups()
+                    data_emissao = datetime(int(ano), int(mes), int(dia))
+                except:
+                    pass
+
+            # CNPJ/CPF (padrão: 12.345.678/0001-99)
+            match_cnpj = re.search(r'(\d{2})[.\s]?(\d{3})[.\s]?(\d{3})[.\s]?([0-9]{4})[/-]?(\d{2})', texto)
+            cnpj = "".join(match_cnpj.groups()) if match_cnpj else ""
+
+            # Fornecedor (palavra após EMITENTE/FORNECEDOR)
+            match_fornecedor = re.search(r'(?:EMITENTE|FORNECEDOR|RAZÃO SOCIAL)[:\s]*([A-Z\s0-9]{5,80})', texto_limpo)
+            fornecedor = match_fornecedor.group(1).strip() if match_fornecedor else "Fornecedor Desconhecido"
+
+            # Endereço (buscar padrão de rua, número, cidade)
+            match_endereco = re.search(r'(?:RUA|AV\.|AVENIDA|TRAVESSA)\s+([A-Z\s0-9,\-\.]{10,100})', texto_limpo)
+            endereco = match_endereco.group(1).strip() if match_endereco else ""
+
+            # Itens: buscar padrões como "Descrição | Qtd | Preço"
+            # Procura por linhas com números de quantidade e preço
+            itens = []
+
+            # Padrão 1: Linhas com quantidade e preço unitário
+            padrao_item = r'([A-Z0-9\s\-\/]{10,100}?)\s+(\d+[,.]?\d*)\s+(?:UN|PC|KG|MT|L)?\s+(?:R\$\s*)?(\d+[,.]?\d{2})'
+            for match in re.finditer(padrao_item, texto_limpo):
+                try:
+                    descricao = match.group(1).strip()
+                    quantidade = float(match.group(2).replace(',', '.'))
+                    preco = float(match.group(3).replace(',', '.'))
+
+                    if quantidade > 0 and preco > 0 and len(descricao) > 3:
+                        itens.append({
+                            "codigo": f"PDF-{len(itens)+1:03d}",  # Código temporal
+                            "descricao": descricao[:100],
+                            "quantidade": quantidade,
+                            "preco": preco
+                        })
+                except (ValueError, AttributeError):
+                    continue
+
+            # Se não encontrou itens com padrão regex, tentar padrão mais simples
+            if not itens:
+                linhas = texto.split('\n')
+                for linha in linhas:
+                    # Procura linhas que parecem ser itens (texto + números)
+                    if len(linha) > 10 and any(char.isdigit() for char in linha):
+                        # Tenta extrair números da linha
+                        numeros = re.findall(r'\d+[,.]?\d*', linha)
+                        if len(numeros) >= 2:  # Mínimo: quantidade e preço
+                            try:
+                                descricao = re.sub(r'\d+[,.]?\d*', '', linha).strip()
+                                if descricao and len(descricao) > 3:
+                                    quantidade = float(numeros[0].replace(',', '.'))
+                                    preco = float(numeros[-1].replace(',', '.'))
+
+                                    if quantidade > 0 and preco > 0 and len(descricao) < 150:
+                                        itens.append({
+                                            "codigo": f"PDF-{len(itens)+1:03d}",
+                                            "descricao": descricao[:100],
+                                            "quantidade": quantidade,
+                                            "preco": preco
+                                        })
+                                        if len(itens) >= 100:  # Limitar a 100 itens
+                                            break
+                            except (ValueError, IndexError):
+                                continue
+
+            # Validação mínima
+            if not numero_nf:
+                return {
+                    "sucesso": False,
+                    "erro": "Não foi possível extrair o número da NF do PDF. Verifique se o arquivo é uma nota fiscal válida.",
+                    "itens": []
+                }
+
+            return {
+                "numero_nf": numero_nf,
+                "serie": serie,
+                "data_emissao": data_emissao.isoformat() if data_emissao else datetime.now().isoformat(),
+                "fornecedor": fornecedor,
+                "cnpj": cnpj,
+                "endereco": endereco,
+                "itens": itens,
+                "sucesso": True,
+                "aviso": "Dados extraídos via OCR - validar manualmente" if len(itens) < 5 else None
+            }
+
+        except Exception as e:
+            logger.error(f"Erro ao extrair dados de NF do texto: {str(e)}")
+            return {
+                "sucesso": False,
+                "erro": f"Erro ao processar dados da NF: {str(e)}",
                 "itens": []
             }
