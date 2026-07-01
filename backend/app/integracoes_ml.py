@@ -1916,6 +1916,12 @@ class MLIntegration:
         "ml", "pc", "pcs", "und", "pça", "pçs", "the", "and", "of",
     }
     _GARIMPO_ATTRS_DIST = ("Marca", "Modelo", "Cor", "Material", "Tipo", "Formato")
+    # Métricas agregadas do Garimpador (orçamento de chamadas p/ não estourar ~15s):
+    # busca até N produtos, sonda no máx. MAX_CALLS deles em /products/{id}/items,
+    # e para cedo ao juntar ALVO produtos com ofertas reais.
+    _GARIMPO_PRODUTOS_BUSCA = 40   # limit do /products/search (muitos dão 404 nas ofertas)
+    _GARIMPO_MAX_CALLS = 20        # teto de chamadas /products/{id}/items (~10s p/ ficar sob 15s)
+    _GARIMPO_ALVO_PRODUTOS = 18    # produtos com oferta suficientes -> para
 
     def garimpar(self, q: str) -> Dict:
         """Garimpador de Categoria — analisa um termo de busca usando os endpoints
@@ -1954,12 +1960,15 @@ class MLIntegration:
                 mais_buscados = [t.get("keyword") for t in tr if t.get("keyword")][:20]
                 avisos.append("Categoria sem tendências próprias — mostrando tendências gerais do ML.")
 
-        # 3) Catálogo (products/search) — produtos, palavras e atributos
+        # 3) Catálogo (products/search) — produtos, palavras e atributos.
+        # Pede um lote maior porque muitos catalog products retornam 404
+        # ("No winners found") em /products/{id}/items; assim sobram candidatos
+        # com ofertas reais para as métricas agregadas.
         produtos: List[Dict] = []
         palavras: Counter = Counter()
         attr_dist: Dict[str, Counter] = {}
         total_nominal = None
-        ps = self._get("/products/search", {"status": "active", "site_id": "MLB", "q": termo})
+        ps = self._get("/products/search", {"status": "active", "site_id": "MLB", "q": termo, "limit": self._GARIMPO_PRODUTOS_BUSCA})
         if isinstance(ps, dict):
             total_nominal = (ps.get("paging") or {}).get("total")
             for it in (ps.get("results") or []):
@@ -1975,13 +1984,17 @@ class MLIntegration:
                         attrs[an] = av
                         if an in self._GARIMPO_ATTRS_DIST:
                             attr_dist.setdefault(an, Counter())[av] += 1
+                pid = it.get("id")
                 produtos.append({
-                    "id": it.get("id"),
+                    "id": pid,
                     "nome": nome,
                     "marca": attrs.get("Marca"),
                     "thumbnail": thumb,
                     "dominio": it.get("domain_id"),
                     "atributos": attrs,
+                    # URL clicável da página de catálogo (PDP) do produto
+                    "permalink": it.get("permalink") or (f"https://www.mercadolivre.com.br/p/{pid}" if pid else None),
+                    "preco": None,  # preenchido abaixo pela melhor oferta (buy box), se houver
                 })
                 for w in re.findall(r"[a-zà-ÿ0-9]{3,}", nome.lower()):
                     if w not in self._GARIMPO_STOPWORDS:
@@ -1993,10 +2006,72 @@ class MLIntegration:
             for nome, cnt in attr_dist.items()
         }
 
-        avisos.append(
-            "Métricas de anúncios (total real, %Full, frete grátis, preço médio) "
-            "indisponíveis: o ML retorna 403 na busca de anúncios para este app."
-        )
+        # 4) Métricas agregadas via /products/{id}/items (ofertas reais por produto
+        # de catálogo). A busca pública de anúncios dá 403 aqui, então aproximamos
+        # as métricas da categoria agregando as ofertas do TOPO do catálogo.
+        # Custo controlado por orçamento de chamadas (_GARIMPO_MAX_CALLS): paramos
+        # cedo se juntarmos ofertas suficientes de produtos válidos.
+        metricas = None
+        precos: List[float] = []
+        qtd_full = 0
+        qtd_free = 0
+        qtd_oficiais = 0
+        produtos_com_oferta = 0
+        chamadas = 0
+        for prod in produtos:
+            if chamadas >= self._GARIMPO_MAX_CALLS or produtos_com_oferta >= self._GARIMPO_ALVO_PRODUTOS:
+                break
+            pid = prod.get("id")
+            if not pid:
+                continue
+            chamadas += 1
+            ofertas_resp = self._get(f"/products/{pid}/items", {"limit": 50})
+            if not isinstance(ofertas_resp, dict):
+                continue  # 404 "No winners found" / erro: pula gracioso
+            ofertas = ofertas_resp.get("results") or []
+            if not ofertas:
+                continue
+            produtos_com_oferta += 1
+            preco_produto = None
+            for of in ofertas:
+                pr = of.get("price")
+                if isinstance(pr, (int, float)):
+                    precos.append(float(pr))
+                    if preco_produto is None:
+                        preco_produto = float(pr)  # 1ª oferta = buy box winner
+                sh = of.get("shipping") or {}
+                if sh.get("logistic_type") == "fulfillment":
+                    qtd_full += 1
+                if sh.get("free_shipping"):
+                    qtd_free += 1
+                if of.get("official_store_id") is not None:
+                    qtd_oficiais += 1
+            if preco_produto is not None:
+                prod["preco"] = preco_produto
+
+        amostra = len(precos)
+        if amostra:
+            metricas = {
+                "total_anuncios": amostra,
+                "preco_medio": round(sum(precos) / amostra, 2),
+                "preco_min": round(min(precos), 2),
+                "preco_max": round(max(precos), 2),
+                "qtd_full": qtd_full,
+                "pct_full": round(100.0 * qtd_full / amostra, 1),
+                "pct_frete_gratis": round(100.0 * qtd_free / amostra, 1),
+                "qtd_lojas_oficiais": qtd_oficiais,
+                "amostra": amostra,
+                "fonte": f"agregado de {produtos_com_oferta} produtos do catálogo (topo) via /products/{{id}}/items",
+            }
+            avisos.append(
+                "Métricas são uma AMOSTRA das ofertas dos produtos do topo do catálogo "
+                "(a busca pública de anúncios dá 403 para este app), não o universo da categoria."
+            )
+        else:
+            avisos.append(
+                "Sem métricas de anúncios: nenhum produto do topo do catálogo tinha "
+                "oferta ativa (a busca pública de anúncios dá 403 para este app)."
+            )
 
         return {
             "ok": True,
@@ -2007,6 +2082,7 @@ class MLIntegration:
             "produtos": produtos,
             "atributos_populares": atributos_populares,
             "total_catalogo_nominal": total_nominal,
+            "metricas": metricas,
             "avisos": avisos,
         }
 
