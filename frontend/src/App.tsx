@@ -8,6 +8,7 @@ import { EmbaldesManager } from './components/EmbaldesManager'
 import { HistoricoFull } from './components/HistoricoFull'
 import { AnunciosML } from './components/AnunciosML'
 import { ListaCompra } from './components/ListaCompra'
+import { Garimpador } from './components/Garimpador'
 import { OperadoresManager } from './components/OperadoresManager'
 import { AppShell, type ShellNavGroup, type ShellStatusItem } from './components/AppShell'
 import {
@@ -82,7 +83,7 @@ interface ProdutoEstoque {
   }>
 }
 
-type Pagina = 'bemvindo' | 'inicial' | 'conferencia' | 'produtos_nota' | 'relacionamento_produto' | 'fornecedores' | 'embaldes' | 'anuncios' | 'notas-fiscais' | 'divergencias' | 'lista-separacao' | 'historico-full' | 'operadores'
+type Pagina = 'bemvindo' | 'inicial' | 'conferencia' | 'produtos_nota' | 'relacionamento_produto' | 'fornecedores' | 'embaldes' | 'anuncios' | 'notas-fiscais' | 'divergencias' | 'lista-separacao' | 'historico-full' | 'operadores' | 'lista-compra' | 'garimpador'
 
 interface Divergencia {
   item_id: number
@@ -1647,6 +1648,7 @@ function App() {
       label: 'Marketplace',
       items: [
         { key: 'anuncios', label: 'Anuncios ML', icon: 'megaphone', active: pagina === 'anuncios', onClick: () => setPagina('anuncios') },
+        { key: 'garimpador', label: 'Garimpador', icon: 'search', active: pagina === 'garimpador', onClick: () => setPagina('garimpador') },
         { key: 'lista-compra', label: 'Lista de Compra', icon: 'receipt', active: pagina === 'lista-compra', onClick: () => setPagina('lista-compra') },
         { key: 'inbound', label: 'Inbound FULL', icon: 'truck', active: pagina === 'embaldes', badge: inboundsAtivos.length, onClick: () => setPagina('embaldes') },
         { key: 'historico-full', label: 'Histórico FULL', icon: 'sync', active: pagina === 'historico-full', onClick: () => setPagina('historico-full') },
@@ -3309,6 +3311,15 @@ function App() {
       'Lista de Compra',
       'Prioridade de compra pela curva ABC do ML cruzada com estoque e velocidade de venda.',
       <ListaCompra />
+    )
+  }
+
+  // ===== PÁGINA DO GARIMPADOR =====
+  if (pagina === 'garimpador') {
+    return renderComShell(
+      'Garimpador de Buscas',
+      'Analise um produto no Mercado Livre: nicho, demanda por palavra-chave e concorrência.',
+      <Garimpador />
     )
   }
 

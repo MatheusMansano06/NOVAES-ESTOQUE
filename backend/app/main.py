@@ -4585,6 +4585,16 @@ async def ml_conta(request: Request):
     return JSONResponse(result, status_code=code, headers={"Cache-Control": "no-store"})
 
 
+async def ml_garimpo(request: Request):
+    """GET /api/ml/garimpo?q=varal — Garimpador de Categoria.
+    Analisa um termo no ML: categoria/nicho, mais buscados na categoria,
+    palavras frequentes e distribuição de atributos do catálogo."""
+    q = request.query_params.get("q", "")
+    result = ml.garimpar(q)
+    code = 200 if result.get("ok") else int(result.get("status_code") or 502)
+    return JSONResponse(result, status_code=code, headers={"Cache-Control": "no-store"})
+
+
 _lock_estoque_olist = threading.Lock()
 
 
@@ -5101,6 +5111,7 @@ routes = [
     Route("/api/ml/anuncios/{item_id:str}/duplicar", ml_anuncio_duplicar, methods=["POST"]),
     Route("/api/ml/categorias", ml_categorias_buscar, methods=["GET"]),
     Route("/api/ml/conta", ml_conta, methods=["GET"]),
+    Route("/api/ml/garimpo", ml_garimpo, methods=["GET"]),
     Route("/api/lista-compra", lista_compra, methods=["GET"]),
     Route("/api/lista-compra/atualizar-estoque", lista_compra_atualizar_estoque, methods=["POST"]),
     Route("/api/lista-compra/vincular-estoque-olist", lista_compra_vincular_estoque_olist, methods=["POST"]),

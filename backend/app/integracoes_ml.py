@@ -12,6 +12,7 @@ Leitura de anúncios:
 """
 
 import os
+import re
 import json
 import time
 import threading
@@ -20,6 +21,7 @@ import uuid
 import urllib.request
 import urllib.parse
 import urllib.error
+from collections import Counter
 from datetime import datetime, timedelta
 from typing import Optional, Dict, List, Any
 from dotenv import load_dotenv
@@ -1906,6 +1908,107 @@ class MLIntegration:
                     "domain_name": c.get("domain_name"),
                 })
         return {"categorias": cats}
+
+    # Palavras irrelevantes para a nuvem de termos (PT + unidades comuns)
+    _GARIMPO_STOPWORDS = {
+        "de", "da", "do", "com", "para", "por", "em", "e", "a", "o", "os", "as",
+        "um", "uma", "no", "na", "nos", "nas", "sem", "kit", "un", "cm", "mm",
+        "ml", "pc", "pcs", "und", "pça", "pçs", "the", "and", "of",
+    }
+    _GARIMPO_ATTRS_DIST = ("Marca", "Modelo", "Cor", "Material", "Tipo", "Formato")
+
+    def garimpar(self, q: str) -> Dict:
+        """Garimpador de Categoria — analisa um termo de busca usando os endpoints
+        que o app TEM acesso (a busca de anúncios /sites/MLB/search dá 403 aqui).
+        Combina 3 fontes:
+          - domain_discovery  -> categoria/nicho do termo
+          - trends/MLB/{cat}  -> demanda: mais buscados na categoria
+          - products/search   -> catálogo: produtos, palavras e distribuição de atributos
+        Métricas por-anúncio (total real, %Full, frete, preço) não entram: 403 do ML."""
+        termo = (q or "").strip()
+        if not termo:
+            return {"ok": False, "status_code": 400, "erro": "informe ?q="}
+
+        avisos: List[str] = []
+
+        # 1) Categoria (domain_discovery) — descobre o nicho
+        categoria = None
+        dd = self._get("/sites/MLB/domain_discovery/search", {"q": termo, "limit": 1})
+        if isinstance(dd, list) and dd:
+            c = dd[0]
+            categoria = {
+                "id": c.get("category_id"),
+                "nome": c.get("category_name"),
+                "dominio": c.get("domain_name"),
+            }
+
+        # 2) Mais buscados na categoria (trends) — o card estrela do Garimpador
+        mais_buscados: List[str] = []
+        if categoria and categoria.get("id"):
+            tr = self._get(f"/trends/MLB/{categoria['id']}")
+            if isinstance(tr, list):
+                mais_buscados = [t.get("keyword") for t in tr if t.get("keyword")][:20]
+        if not mais_buscados:
+            tr = self._get("/trends/MLB")  # fallback: tendências gerais do site
+            if isinstance(tr, list) and tr:
+                mais_buscados = [t.get("keyword") for t in tr if t.get("keyword")][:20]
+                avisos.append("Categoria sem tendências próprias — mostrando tendências gerais do ML.")
+
+        # 3) Catálogo (products/search) — produtos, palavras e atributos
+        produtos: List[Dict] = []
+        palavras: Counter = Counter()
+        attr_dist: Dict[str, Counter] = {}
+        total_nominal = None
+        ps = self._get("/products/search", {"status": "active", "site_id": "MLB", "q": termo})
+        if isinstance(ps, dict):
+            total_nominal = (ps.get("paging") or {}).get("total")
+            for it in (ps.get("results") or []):
+                nome = it.get("name") or ""
+                pics = it.get("pictures") or []
+                thumb = None
+                if pics:
+                    thumb = pics[0].get("url") or pics[0].get("secure_url")
+                attrs: Dict[str, str] = {}
+                for a in (it.get("attributes") or []):
+                    an, av = a.get("name"), a.get("value_name")
+                    if an and av:
+                        attrs[an] = av
+                        if an in self._GARIMPO_ATTRS_DIST:
+                            attr_dist.setdefault(an, Counter())[av] += 1
+                produtos.append({
+                    "id": it.get("id"),
+                    "nome": nome,
+                    "marca": attrs.get("Marca"),
+                    "thumbnail": thumb,
+                    "dominio": it.get("domain_id"),
+                    "atributos": attrs,
+                })
+                for w in re.findall(r"[a-zà-ÿ0-9]{3,}", nome.lower()):
+                    if w not in self._GARIMPO_STOPWORDS:
+                        palavras[w] += 1
+
+        palavras_frequentes = [{"palavra": w, "n": n} for w, n in palavras.most_common(25)]
+        atributos_populares = {
+            nome: [{"valor": v, "n": n} for v, n in cnt.most_common(8)]
+            for nome, cnt in attr_dist.items()
+        }
+
+        avisos.append(
+            "Métricas de anúncios (total real, %Full, frete grátis, preço médio) "
+            "indisponíveis: o ML retorna 403 na busca de anúncios para este app."
+        )
+
+        return {
+            "ok": True,
+            "query": termo,
+            "categoria": categoria,
+            "mais_buscados": mais_buscados,
+            "palavras_frequentes": palavras_frequentes,
+            "produtos": produtos,
+            "atributos_populares": atributos_populares,
+            "total_catalogo_nominal": total_nominal,
+            "avisos": avisos,
+        }
 
     def duplicar_anuncio(self, item_id: str, category_id: str = None, novo_titulo: str = None) -> Dict:
         """Duplica um anúncio criando um NOVO item no ML, já PAUSADO.
