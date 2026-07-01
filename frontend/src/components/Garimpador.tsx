@@ -46,10 +46,37 @@ interface GarimpoResult {
   erro?: string
 }
 
-// Tamanho de fonte proporcional à frequência (nuvem de palavras)
-function tamanhoPalavra(n: number, max: number): number {
-  if (max <= 0) return 0.85
-  return 0.8 + (n / max) * 0.95 // ~0.8rem .. 1.75rem
+// Cor de calor (heat map) por frequência: frio (âmbar claro) → quente (vermelho)
+function heatColor(forca: number): { background: string; color: string } {
+  const f = Math.max(0, Math.min(1, forca))
+  const hue = 46 - f * 42 // 46 (ouro) → 4 (vermelho)
+  const light = 91 - f * 45 // 91% (claro) → 46% (intenso)
+  return {
+    background: `hsl(${hue}, 92%, ${light}%)`,
+    color: f > 0.5 ? '#fff' : '#6b4e00',
+  }
+}
+
+const capitalizar = (w: string) => (w ? w.charAt(0).toUpperCase() + w.slice(1) : w)
+
+// Título otimizado: encadeia as palavras mais frequentes (só alfabéticas, 3+) até ~60 chars
+function gerarTitulo(pal: Palavra[], limite = 60): string {
+  const usadas: string[] = []
+  let len = 0
+  for (const p of pal) {
+    if (!/^[a-zà-ÿ]{3,}$/i.test(p.palavra)) continue
+    const w = capitalizar(p.palavra)
+    const add = (len ? 1 : 0) + w.length
+    if (len + add > limite) break
+    usadas.push(w)
+    len += add
+  }
+  return usadas.join(' ')
+}
+
+// Palavras-chave de SEO (as frequentes) prontas para copiar
+function palavrasSeo(pal: Palavra[]): string {
+  return pal.map((p) => p.palavra).filter((w) => /^[a-zà-ÿ0-9]{2,}$/i.test(w)).join(', ')
 }
 
 function brl(v: number): string {
@@ -147,6 +174,16 @@ export function Garimpador() {
   const [loading, setLoading] = useState(false)
   const [erro, setErro] = useState('')
   const [dados, setDados] = useState<GarimpoResult | null>(null)
+  const [seoAberto, setSeoAberto] = useState(false)
+  const [copiado, setCopiado] = useState<string | null>(null)
+
+  const copiar = async (texto: string, chave: string) => {
+    try {
+      await navigator.clipboard.writeText(texto)
+      setCopiado(chave)
+      setTimeout(() => setCopiado((c) => (c === chave ? null : c)), 1600)
+    } catch { /* clipboard bloqueado pelo navegador */ }
+  }
 
   const buscar = async () => {
     const q = termo.trim()
@@ -154,6 +191,7 @@ export function Garimpador() {
     setLoading(true)
     setErro('')
     setDados(null)
+    setSeoAberto(false)
     try {
       const res = await fetch(`${API_BASE}/api/ml/garimpo?q=${encodeURIComponent(q)}`, { cache: 'no-store' })
       const data: GarimpoResult = await res.json()
@@ -170,6 +208,10 @@ export function Garimpador() {
   }
 
   const maxPalavra = dados?.palavras_frequentes?.[0]?.n || 0
+  const palFreq = dados?.palavras_frequentes || []
+  const tituloOtimizado = gerarTitulo(palFreq)
+  const palavrasSeoStr = palavrasSeo(palFreq)
+  const relacionadasStr = (dados?.mais_buscados || []).join(', ')
 
   return (
     <div className="gp-root">
@@ -258,31 +300,90 @@ export function Garimpador() {
             </div>
 
             <div className="gp-panel">
-              <h3 className="gp-panel-title">💬 Palavras frequentes nos títulos</h3>
-              <div className="gp-cloud">
-                {(dados.palavras_frequentes || []).map((p, i) => {
-                  const forca = p.n / (maxPalavra || 1)
+              <h3 className="gp-panel-title">🌡️ Mapa de calor das palavras nos títulos</h3>
+              <div className="gp-heat">
+                {palFreq.map((p, i) => {
+                  const c = heatColor(p.n / (maxPalavra || 1))
                   return (
                     <span
                       key={i}
-                      className="gp-word"
-                      title={`${p.n}x`}
-                      style={{
-                        fontSize: `${tamanhoPalavra(p.n, maxPalavra)}rem`,
-                        fontWeight: p.n === maxPalavra ? 800 : 600,
-                        color: `rgba(45,50,119,${(0.45 + 0.55 * forca).toFixed(2)})`,
-                      }}
+                      className="gp-heat-pill"
+                      title={`${p.n} ocorrências`}
+                      style={{ background: c.background, color: c.color }}
                     >
-                      {p.palavra}
+                      {p.palavra}<b className="gp-heat-n">{p.n}</b>
                     </span>
                   )
                 })}
-                {(!dados.palavras_frequentes || dados.palavras_frequentes.length === 0) && (
+                {palFreq.length === 0 && (
                   <span className="gp-empty-note">Sem palavras suficientes.</span>
                 )}
               </div>
+              {palFreq.length > 0 && (
+                <button className="gp-forma-btn" onClick={() => setSeoAberto(true)}>
+                  ✨ Formar título otimizado
+                </button>
+              )}
             </div>
           </div>
+
+          {/* Kit de anúncio gerado (título + palavras-chave SEO + relacionados) */}
+          {seoAberto && (
+            <div className="gp-panel gp-seo">
+              <h3 className="gp-panel-title">✨ Kit de anúncio gerado</h3>
+              <p className="gp-seo-hint">
+                Montado com as palavras que os concorrentes mais usam nos títulos e as buscas reais dos
+                clientes. É só copiar e colar no seu anúncio.
+              </p>
+
+              <div className="gp-seo-block gp-seo-hero">
+                <div className="gp-seo-head">
+                  <span className="gp-seo-label">📌 Título otimizado</span>
+                  <span className={`gp-charcount${tituloOtimizado.length > 60 ? ' gp-over' : ''}`}>
+                    {tituloOtimizado.length}/60
+                  </span>
+                </div>
+                <div className="gp-seo-titulo">{tituloOtimizado || '—'}</div>
+                <button
+                  className="gp-copy-btn"
+                  onClick={() => copiar(tituloOtimizado, 'titulo')}
+                  disabled={!tituloOtimizado}
+                >
+                  {copiado === 'titulo' ? '✓ Copiado!' : '📋 Copiar título'}
+                </button>
+              </div>
+
+              <div className="gp-seo-grid">
+                <div className="gp-seo-block">
+                  <div className="gp-seo-head">
+                    <span className="gp-seo-label">🔑 Palavras-chave (SEO da ficha)</span>
+                  </div>
+                  <div className="gp-seo-text">{palavrasSeoStr || '—'}</div>
+                  <button
+                    className="gp-copy-btn"
+                    onClick={() => copiar(palavrasSeoStr, 'seo')}
+                    disabled={!palavrasSeoStr}
+                  >
+                    {copiado === 'seo' ? '✓ Copiado!' : '📋 Copiar palavras-chave'}
+                  </button>
+                </div>
+
+                <div className="gp-seo-block">
+                  <div className="gp-seo-head">
+                    <span className="gp-seo-label">🎯 Termos relacionados (o que o cliente busca)</span>
+                  </div>
+                  <div className="gp-seo-text">{relacionadasStr || '—'}</div>
+                  <button
+                    className="gp-copy-btn"
+                    onClick={() => copiar(relacionadasStr, 'rel')}
+                    disabled={!relacionadasStr}
+                  >
+                    {copiado === 'rel' ? '✓ Copiado!' : '📋 Copiar relacionados'}
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
 
           {/* Domínio do nicho */}
           {dados.atributos_populares && Object.keys(dados.atributos_populares).length > 0 && (

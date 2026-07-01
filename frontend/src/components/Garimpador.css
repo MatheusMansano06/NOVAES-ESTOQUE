@@ -247,12 +247,113 @@
 }
 .gp-chips-wrap { display: flex; flex-wrap: wrap; gap: 0.5rem; }
 
-/* nuvem de palavras */
-.gp-cloud { display: flex; flex-wrap: wrap; gap: 0.35rem 0.7rem; align-items: baseline; }
-.gp-word { line-height: 1.2; transition: color 0.12s ease; }
-.gp-word:hover { color: var(--gp-gold) !important; }
+/* mapa de calor das palavras */
+.gp-heat { display: flex; flex-wrap: wrap; gap: 0.45rem; }
+.gp-heat-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  border-radius: 999px;
+  padding: 0.34rem 0.55rem 0.34rem 0.8rem;
+  font-size: 0.86rem;
+  font-weight: 700;
+  line-height: 1;
+  box-shadow: 0 1px 2px rgba(30, 34, 85, 0.12);
+  transition: transform 0.12s ease, box-shadow 0.12s ease;
+}
+.gp-heat-pill:hover { transform: translateY(-2px); box-shadow: 0 6px 14px rgba(30, 34, 85, 0.18); }
+.gp-heat-n {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.35rem;
+  height: 1.35rem;
+  padding: 0 0.35rem;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.32);
+  font-size: 0.72rem;
+  font-weight: 800;
+}
 
 .gp-empty-note { color: #9aa0bf; font-size: 0.85rem; }
+
+/* botão formar título */
+.gp-forma-btn {
+  margin-top: 1rem;
+  width: 100%;
+  border: none;
+  border-radius: 11px;
+  padding: 0.7rem 1rem;
+  font-size: 0.92rem;
+  font-weight: 800;
+  color: var(--gp-navy-deep);
+  background: linear-gradient(135deg, #ffd06b 0%, var(--gp-gold) 100%);
+  cursor: pointer;
+  box-shadow: 0 6px 16px rgba(245, 166, 35, 0.32);
+  transition: transform 0.12s ease, box-shadow 0.12s ease, filter 0.12s ease;
+}
+.gp-forma-btn:hover { transform: translateY(-1px); filter: brightness(1.04); box-shadow: 0 10px 22px rgba(245, 166, 35, 0.4); }
+.gp-forma-btn:active { transform: translateY(0); }
+
+/* kit de anúncio gerado (SEO) */
+.gp-seo {
+  background:
+    radial-gradient(120% 160% at 100% 0%, rgba(245, 166, 35, 0.1) 0%, rgba(245, 166, 35, 0) 42%),
+    linear-gradient(180deg, #fbfaff 0%, #ffffff 100%);
+  border: 1px solid #e2e5f5;
+}
+.gp-seo-hint { margin: -0.35rem 0 1rem; color: var(--gp-muted); font-size: 0.85rem; }
+.gp-seo-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-top: 1rem; }
+.gp-seo-block {
+  border: 1px solid var(--gp-line);
+  border-radius: 12px;
+  padding: 0.9rem 1rem;
+  background: #fff;
+}
+.gp-seo-hero {
+  border: 1px solid var(--gp-gold-soft);
+  background: linear-gradient(135deg, #fffaf0 0%, #ffffff 60%);
+}
+.gp-seo-head { display: flex; align-items: center; justify-content: space-between; gap: 0.6rem; margin-bottom: 0.55rem; }
+.gp-seo-label { font-size: 0.78rem; font-weight: 800; color: var(--gp-navy); text-transform: uppercase; letter-spacing: 0.03em; }
+.gp-charcount { font-size: 0.72rem; font-weight: 700; color: #22a06b; background: #e7f7ef; padding: 0.12rem 0.5rem; border-radius: 999px; }
+.gp-charcount.gp-over { color: #c0392b; background: #fdecea; }
+.gp-seo-titulo {
+  font-size: 1.15rem;
+  font-weight: 800;
+  color: var(--gp-ink);
+  line-height: 1.35;
+  padding: 0.55rem 0.7rem;
+  border-radius: 9px;
+  background: #fffdf7;
+  border: 1px dashed var(--gp-gold);
+  margin-bottom: 0.7rem;
+}
+.gp-seo-text {
+  font-size: 0.88rem;
+  color: #3a3f63;
+  line-height: 1.55;
+  padding: 0.55rem 0.7rem;
+  border-radius: 9px;
+  background: #f7f8fd;
+  margin-bottom: 0.7rem;
+  word-break: break-word;
+}
+.gp-copy-btn {
+  border: 1px solid var(--gp-navy);
+  border-radius: 9px;
+  padding: 0.45rem 0.9rem;
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: #fff;
+  background: var(--gp-navy);
+  cursor: pointer;
+  transition: background 0.12s ease, transform 0.1s ease;
+}
+.gp-copy-btn:hover { background: var(--gp-navy-deep); }
+.gp-copy-btn:active { transform: scale(0.98); }
+.gp-copy-btn:disabled { opacity: 0.45; cursor: not-allowed; }
+@media (max-width: 720px) { .gp-seo-grid { grid-template-columns: 1fr; } }
 
 /* domínio do nicho — barras */
 .gp-attr-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 1.1rem; }
