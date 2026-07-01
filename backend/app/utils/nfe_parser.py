@@ -185,29 +185,40 @@ class NFeParsing:
     @staticmethod
     def parse_pdf_ocr(file_path: str) -> Dict:
         """
-        Parse PDF using OCR (optional, phase 2)
-        Requires pytesseract and poppler
+        Parse PDF - currently limited to error messaging (Phase 2 feature)
+        In production, PDFs require manual processing or use of pre-extracted XML
         """
         try:
-            from pdf2image import convert_from_path
-            import pytesseract
+            # Verificar tamanho do arquivo
+            import os
+            tamanho_mb = os.path.getsize(file_path) / (1024 * 1024)
 
-            images = convert_from_path(file_path)
-            texto_completo = ""
+            if tamanho_mb > 10:
+                return {
+                    "sucesso": False,
+                    "erro": f"PDF muito grande ({tamanho_mb:.1f}MB). Máximo: 10MB. Tente um PDF menor ou enviando o XML da NF-e.",
+                    "itens": []
+                }
 
-            for image in images:
-                texto = pytesseract.image_to_string(image, lang='por')
-                texto_completo += texto
-
+            # Avisar que PDF requer processamento manual ou XML
             return {
-                "sucesso": True,
-                "texto": texto_completo,
-                "requer_validacao_manual": True
+                "sucesso": False,
+                "erro": (
+                    "Upload de PDF não está completamente suportado ainda (está em desenvolvimento). "
+                    "Por favor, baixe o arquivo **XML** da nota fiscal pelo site do fornecedor/SEFAZ "
+                    "e envie aquele arquivo. O XML tem todos os dados corretos e processamento será instantâneo. "
+                    "PDFs podem ter problemas de leitura com OCR."
+                ),
+                "itens": []
             }
 
         except Exception as e:
-            logger.error(f"Erro ao processar PDF com OCR: {str(e)}")
+            logger.error(f"Erro ao processar PDF: {str(e)}")
             return {
                 "sucesso": False,
-                "erro": str(e)
+                "erro": (
+                    f"Erro ao processar o PDF: {str(e)}. "
+                    "Recomendação: Use o arquivo XML da nota fiscal em vez de PDF."
+                ),
+                "itens": []
             }
