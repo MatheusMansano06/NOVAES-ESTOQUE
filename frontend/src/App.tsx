@@ -8,6 +8,8 @@ import { EmbaldesManager } from './components/EmbaldesManager'
 import { HistoricoFull } from './components/HistoricoFull'
 import { AnunciosML } from './components/AnunciosML'
 import { ListaCompra } from './components/ListaCompra'
+import { RadarFull } from './components/RadarFull'
+import { EstoqueEmbalagens } from './components/EstoqueEmbalagens'
 import { Garimpador } from './components/Garimpador'
 import { OperadoresManager } from './components/OperadoresManager'
 import { AppShell, type ShellNavGroup, type ShellStatusItem } from './components/AppShell'
@@ -83,7 +85,7 @@ interface ProdutoEstoque {
   }>
 }
 
-type Pagina = 'bemvindo' | 'inicial' | 'conferencia' | 'produtos_nota' | 'relacionamento_produto' | 'fornecedores' | 'embaldes' | 'anuncios' | 'notas-fiscais' | 'divergencias' | 'lista-separacao' | 'historico-full' | 'operadores' | 'lista-compra' | 'garimpador'
+type Pagina = 'bemvindo' | 'inicial' | 'conferencia' | 'produtos_nota' | 'relacionamento_produto' | 'fornecedores' | 'embaldes' | 'anuncios' | 'notas-fiscais' | 'divergencias' | 'lista-separacao' | 'historico-full' | 'operadores' | 'lista-compra' | 'radar-full' | 'estoque-embalagens' | 'garimpador'
 
 interface Divergencia {
   item_id: number
@@ -228,6 +230,10 @@ function App() {
   const [notas, setNotas] = useState<NotaFiscal[]>([])
   const [estoque, setEstoque] = useState<ProdutoEstoque[]>([])
   const [divergencias, setDivergencias] = useState<Divergencia[]>([])
+  // KPIs do dashboard vindos do Radar (Envie HOJE) e da Lista de Compra (compra urgente).
+  // Carregam em segundo plano; o backend tem cache, então a maioria das visitas é instantânea.
+  const [radarHoje, setRadarHoje] = useState<number | null>(null)
+  const [compraUrgente, setCompraUrgente] = useState<number | null>(null)
   const [loading, setLoading] = useState(false)
   const [message, setMessage] = useState('')
   const [modalOpen, setModalOpen] = useState(false)
@@ -442,6 +448,22 @@ function App() {
       window.fetch = originalFetch
     }
   }, [operadorSessao])
+
+  // KPIs de ação do dashboard: "Envie HOJE" (Radar) e "Compra urgente" (Lista de
+  // Compra). Busca em segundo plano ao abrir o dashboard; o backend tem cache.
+  useEffect(() => {
+    if (pagina !== 'inicial' || !operadorSessao) return
+    let vivo = true
+    fetch(`${API_BASE}/api/ml/radar-full?meta_dias=30&lead_time=5`, { cache: 'no-store' })
+      .then(r => r.json())
+      .then(d => { if (vivo && d?.resumo) setRadarHoje(d.resumo.hoje ?? 0) })
+      .catch(() => {})
+    fetch(`${API_BASE}/api/lista-compra?meta_dias=75`, { cache: 'no-store' })
+      .then(r => r.json())
+      .then(d => { if (vivo && d?.resumo) setCompraUrgente(d.resumo.maxima ?? 0) })
+      .catch(() => {})
+    return () => { vivo = false }
+  }, [pagina, operadorSessao])
 
   const loadIntegracoes = async () => {
     try {
@@ -1650,7 +1672,9 @@ function App() {
         { key: 'anuncios', label: 'Anuncios ML', icon: 'megaphone', active: pagina === 'anuncios', onClick: () => setPagina('anuncios') },
         { key: 'garimpador', label: 'Garimpador', icon: 'search', active: pagina === 'garimpador', onClick: () => setPagina('garimpador') },
         { key: 'lista-compra', label: 'Lista de Compra', icon: 'receipt', active: pagina === 'lista-compra', onClick: () => setPagina('lista-compra') },
+        { key: 'radar-full', label: 'Radar de Envio', icon: 'radar', active: pagina === 'radar-full', onClick: () => setPagina('radar-full') },
         { key: 'inbound', label: 'Inbound FULL', icon: 'truck', active: pagina === 'embaldes', badge: inboundsAtivos.length, onClick: () => setPagina('embaldes') },
+        { key: 'estoque-embalagens', label: 'Estoque de Embalagens', icon: 'box', active: pagina === 'estoque-embalagens', onClick: () => setPagina('estoque-embalagens') },
         { key: 'historico-full', label: 'Histórico FULL', icon: 'sync', active: pagina === 'historico-full', onClick: () => setPagina('historico-full') },
         { key: 'divergencias', label: 'Divergencias', icon: 'warning', badge: divergencias.length, active: pagina === 'divergencias', onClick: () => setPagina('divergencias') },
       ],
@@ -2090,12 +2114,17 @@ function App() {
       <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
           <section className="nvs-kpi-grid" style={{ marginBottom: '1.5rem' }}>
             {[
-              { tag: 'FN', cor: 'blue', titulo: 'Fornecedores', valor: estoque.length > 0 ? new Set(estoque.flatMap(e => e.notas_fiscais.map(n => n.fornecedor))).size : 0, helper: 'Fornecedores cadastrados' },
-              { tag: 'IT', cor: 'green', titulo: 'Itens sincronizados', valor: itensSincronizados, helper: `${todosItens.length} itens no fluxo` },
-              { tag: 'IN', cor: 'yellow', titulo: 'Inbounds ativos', valor: inboundsAtivos.length, helper: inboundsAtivos.length > 0 ? `${progressoBaixasInbound.restante} un pendente` : 'Sem inbound em aberto' },
-              { tag: 'DG', cor: 'red', titulo: 'Itens divergentes', valor: divergencias.length, helper: divergencias.length > 0 ? 'Exigem ação imediata' : 'Nenhuma divergência' },
+              { tag: 'EH', cor: 'red', titulo: 'Envie HOJE', valor: radarHoje ?? '…', helper: radarHoje == null ? 'lendo estoque do Full…' : (radarHoje > 0 ? 'produtos no limite do prazo' : 'nada no limite hoje'), ir: 'radar-full' as Pagina },
+              { tag: 'CU', cor: 'yellow', titulo: 'Compra urgente', valor: compraUrgente ?? '…', helper: compraUrgente == null ? 'calculando prioridade…' : (compraUrgente > 0 ? 'SKUs abaixo do mínimo' : 'estoque saudável'), ir: 'lista-compra' as Pagina },
+              { tag: 'FN', cor: 'blue', titulo: 'Fornecedores', valor: estoque.length > 0 ? new Set(estoque.flatMap(e => e.notas_fiscais.map(n => n.fornecedor))).size : 0, helper: 'Fornecedores cadastrados', ir: 'fornecedores' as Pagina },
+              { tag: 'IT', cor: 'green', titulo: 'Itens sincronizados', valor: itensSincronizados, helper: `${todosItens.length} itens no fluxo`, ir: 'anuncios' as Pagina },
+              { tag: 'IN', cor: 'yellow', titulo: 'Inbounds ativos', valor: inboundsAtivos.length, helper: inboundsAtivos.length > 0 ? `${progressoBaixasInbound.restante} un pendente` : 'Sem inbound em aberto', ir: 'embaldes' as Pagina },
+              { tag: 'DG', cor: 'red', titulo: 'Itens divergentes', valor: divergencias.length, helper: divergencias.length > 0 ? 'Exigem ação imediata' : 'Nenhuma divergência', ir: 'divergencias' as Pagina },
             ].map((item) => (
-              <div className="nvs-kpi-card" key={item.titulo}>
+              <div className="nvs-kpi-card" key={item.titulo} role="button" tabIndex={0} title={`Abrir ${item.titulo}`}
+                onClick={() => setPagina(item.ir)}
+                onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setPagina(item.ir) } }}
+                style={{ cursor: 'pointer' }}>
                 <div className="nvs-kpi-card__head">
                   <div className={`nvs-kpi-card__icon is-${item.cor}`}>
                     <span style={{ fontSize: '0.68rem', fontWeight: 800 }}>{item.tag}</span>
@@ -2103,7 +2132,7 @@ function App() {
                   <span className="nvs-kpi-card__label">{item.titulo}</span>
                 </div>
                 <div className="nvs-kpi-card__value">{item.valor}</div>
-                <div className="nvs-kpi-card__helper">{item.helper}</div>
+                <div className="nvs-kpi-card__helper">{item.helper} <span style={{ color: '#90a4ae', fontWeight: 700 }}>→</span></div>
               </div>
             ))}
           </section>
@@ -3311,6 +3340,24 @@ function App() {
       'Lista de Compra',
       'Prioridade de compra pela curva ABC do ML cruzada com estoque e velocidade de venda.',
       <ListaCompra />
+    )
+  }
+
+  // ===== PÁGINA DE ESTOQUE DE EMBALAGENS =====
+  if (pagina === 'estoque-embalagens') {
+    return renderComShell(
+      'Estoque de Embalagens',
+      'Controle de caixas e inserts com baixa automática por venda.',
+      <EstoqueEmbalagens />
+    )
+  }
+
+  // ===== PÁGINA DO RADAR DE ENVIO FULL =====
+  if (pagina === 'radar-full') {
+    return renderComShell(
+      'Radar de Envio Full',
+      'O momento certo de enviar cada produto pro Full — antes da ruptura.',
+      <RadarFull onVerListaCompra={() => setPagina('lista-compra')} />
     )
   }
 

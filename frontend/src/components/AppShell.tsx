@@ -13,6 +13,7 @@ type IconName =
   | 'sync'
   | 'user'
   | 'search'
+  | 'radar'
 
 export interface ShellNavItem {
   key: string
@@ -133,6 +134,15 @@ function ShellIcon({ name }: { name: IconName }) {
           <path d="M12 4 3.7 18.2A1.4 1.4 0 0 0 4.9 20h14.2a1.4 1.4 0 0 0 1.2-1.8L12 4Z" />
           <path d="M12 9v4" />
           <path d="M12 17h.01" />
+        </svg>
+      )
+    case 'radar':
+      return (
+        <svg {...shared}>
+          <path d="M12 12 8 6.5" />
+          <path d="M4 12a8 8 0 1 0 4-6.9" />
+          <path d="M7.5 12A4.5 4.5 0 1 0 12 7.5" />
+          <circle cx="12" cy="12" r="1" />
         </svg>
       )
     case 'menu':

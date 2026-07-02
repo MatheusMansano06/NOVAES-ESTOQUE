@@ -404,6 +404,8 @@ class MercadoLivreItemCache(Base):
     shipping_preview_json = Column(Text, nullable=True)
     shipping_tags_json = Column(Text, nullable=True)
     raw_item_json = Column(Text, nullable=True)
+    inventory_ids_json = Column(Text, nullable=True)  # inventory_ids do Full (item ou variações)
+    embalagem_baixa_vendidos = Column(Integer, nullable=True)  # último vendidos já baixado das embalagens
     ml_last_updated = Column(DateTime, nullable=True)
     ml_last_changed_at = Column(DateTime, nullable=True)
     date_created = Column(DateTime, nullable=True)  # quando o anúncio foi criado no ML
@@ -460,3 +462,73 @@ class OlistEstoqueSnapshot(Base):
     produto_id = Column(String(100), nullable=True)
     saldo = Column(Float, default=0)
     atualizado_em = Column(DateTime, default=datetime.utcnow, index=True)
+
+
+class Embalagem(Base):
+    """
+    Um tipo de embalagem em estoque (caixa, envelope, folheto/brinde).
+    - criterio='dimensao': caixa casada automaticamente pela dimensão do produto.
+    - criterio='toda_venda': item que entra em toda venda (folheto/brinde), 1 por unidade.
+    estoque_atual e custo_medio são mantidos pelas compras/movimentos.
+    """
+    __tablename__ = "embalagens"
+
+    id = Column(Integer, primary_key=True)
+    nome = Column(String(150), index=True)
+    criterio = Column(String(20), default="dimensao", index=True)  # dimensao | toda_venda
+    altura_cm = Column(Float, nullable=True)
+    largura_cm = Column(Float, nullable=True)
+    comprimento_cm = Column(Float, nullable=True)
+    estoque_atual = Column(Integer, default=0)
+    estoque_minimo = Column(Integer, default=0)  # alerta de baixa
+    custo_medio = Column(Float, default=0)
+    url_compra = Column(Text, nullable=True)
+    ativo = Column(Integer, default=1)
+    observacao = Column(Text, nullable=True)
+    criado_em = Column(DateTime, default=datetime.utcnow)
+    atualizado_em = Column(DateTime, default=datetime.utcnow)
+
+    compras = relationship("EmbalagemCompra", back_populates="embalagem", cascade="all, delete-orphan")
+    movimentos = relationship("EmbalagemMovimento", back_populates="embalagem", cascade="all, delete-orphan")
+
+
+class EmbalagemCompra(Base):
+    """Entrada de estoque (kit): quantidade de unidades + valor total pago."""
+    __tablename__ = "embalagem_compras"
+
+    id = Column(Integer, primary_key=True)
+    embalagem_id = Column(Integer, ForeignKey("embalagens.id"), index=True)
+    quantidade = Column(Integer, default=0)
+    valor_total = Column(Float, default=0)
+    custo_unitario = Column(Float, default=0)  # valor_total / quantidade
+    url = Column(Text, nullable=True)
+    observacao = Column(Text, nullable=True)
+    data = Column(DateTime, default=datetime.utcnow, index=True)
+
+    embalagem = relationship("Embalagem", back_populates="compras")
+
+
+class EmbalagemMovimento(Base):
+    """Histórico de movimentação: baixa por venda, ajuste manual ou compra."""
+    __tablename__ = "embalagem_movimentos"
+
+    id = Column(Integer, primary_key=True)
+    embalagem_id = Column(Integer, ForeignKey("embalagens.id"), index=True)
+    item_id = Column(String(50), nullable=True, index=True)
+    sku = Column(String(120), nullable=True, index=True)
+    quantidade = Column(Integer, default=0)  # negativo = consumo
+    motivo = Column(String(20), default="venda", index=True)  # venda | ajuste | compra
+    descricao = Column(String(255), nullable=True)
+    data = Column(DateTime, default=datetime.utcnow, index=True)
+
+    embalagem = relationship("Embalagem", back_populates="movimentos")
+
+
+class EmbalagemVinculo(Base):
+    """Override manual: força uma embalagem (caixa) para um SKU, vencendo o auto-match."""
+    __tablename__ = "embalagem_vinculos"
+
+    id = Column(Integer, primary_key=True)
+    sku = Column(String(120), unique=True, index=True)
+    embalagem_id = Column(Integer, ForeignKey("embalagens.id"), index=True)
+    criado_em = Column(DateTime, default=datetime.utcnow)

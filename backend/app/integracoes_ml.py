@@ -368,6 +368,58 @@ class MLIntegration:
     def _get_json(self, path: str, params: Optional[Dict] = None):
         return self._get(path, params)
 
+    # --- Fulfillment / inbound (Radar de Envio Full) -------------------------
+    # Status do estoque no Full que ainda NÃO está liberado para venda, mas está
+    # a caminho (chegou/chegando). Confirmado ao vivo na API.
+    CHEGANDO_STATUS = {"transfer", "internalProcess", "inbound", "receiving"}
+
+    @staticmethod
+    def _inventory_ids_do_body(body: Dict[str, Any]) -> List[str]:
+        """inventory_id do item (topo) ou das variações. Só itens Full têm."""
+        if not isinstance(body, dict):
+            return []
+        top = body.get("inventory_id")
+        if top:
+            return [str(top)]
+        return [str(v.get("inventory_id")) for v in (body.get("variations") or [])
+                if v.get("inventory_id")]
+
+    def inventory_ids_do_item(self, item_id: str, db: Optional[Session] = None) -> List[str]:
+        """Lê os inventory_ids do cache; se faltar, resolve via /items/{id} e
+        persiste no cache para as próximas leituras ficarem instantâneas."""
+        db = db or self._db()
+        row = self._cache_query(db, str(item_id))
+        if row and row.inventory_ids_json:
+            cached = self._json_load(row.inventory_ids_json, [])
+            if cached:
+                return [str(i) for i in cached]
+        body = self._get(f"/items/{item_id}")
+        if not body:
+            return []
+        ids = self._inventory_ids_do_body(body)
+        if row is not None and ids:
+            row.inventory_ids_json = self._json_dump(ids)
+            try:
+                db.commit()
+            except Exception:
+                db.rollback()
+        return ids
+
+    def stock_fulfillment(self, inventory_id: str) -> Optional[Dict[str, int]]:
+        """Estoque de um inventory no Full: {available, chegando, total}.
+        available = liberado p/ venda; chegando = em trânsito/processo (não liberado)."""
+        s = self._get(f"/inventories/{inventory_id}/stock/fulfillment")
+        if not s:
+            return None
+        chegando = sum(int(d.get("quantity") or 0)
+                       for d in (s.get("not_available_detail") or [])
+                       if d.get("status") in self.CHEGANDO_STATUS)
+        return {
+            "available": int(s.get("available_quantity") or 0),
+            "chegando": chegando,
+            "total": int(s.get("total") or 0),
+        }
+
     def _request_json(self, method: str, path: str, body: Optional[Dict] = None, params: Optional[Dict] = None) -> Optional[Any]:
         token = self.get_access_token()
         if not token:
@@ -658,6 +710,9 @@ class MLIntegration:
         row.attributes_json = self._json_dump(body.get("attributes") or [])
         row.pictures_json = self._json_dump(body.get("pictures") or [])
         row.raw_item_json = self._json_dump(body)
+        inv_ids = self._inventory_ids_do_body(body)
+        if inv_ids:
+            row.inventory_ids_json = self._json_dump(inv_ids)
         row.ml_last_updated = self._parse_dt_iso(body.get("last_updated"))
         if body.get("date_created"):
             row.date_created = self._parse_dt_iso(body.get("date_created"))
