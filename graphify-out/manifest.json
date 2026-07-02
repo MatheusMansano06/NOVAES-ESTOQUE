@@ -1,0 +1,217 @@
+{
+  ".claude/launch.json": {
+    "mtime": 1782320526.4561298,
+    "ast_hash": "120406df266cf61b361ba275dae094c1",
+    "semantic_hash": "120406df266cf61b361ba275dae094c1"
+  },
+  ".claude/settings.local.json": {
+    "mtime": 1782906491.203278,
+    "ast_hash": "83358cf06e3d333c4bd6d5a1b7f15547",
+    "semantic_hash": "83358cf06e3d333c4bd6d5a1b7f15547"
+  },
+  "backend/app/integracoes_ml.py": {
+    "mtime": 1782481345.5661669,
+    "ast_hash": "d9da3fca7e9f5eb6067de13a2f684a3b",
+    "semantic_hash": "d9da3fca7e9f5eb6067de13a2f684a3b"
+  },
+  "backend/app/integracoes_olist.py": {
+    "mtime": 1782224153.9301672,
+    "ast_hash": "7542c727f24ea2790dccd89ab28b421a",
+    "semantic_hash": "7542c727f24ea2790dccd89ab28b421a"
+  },
+  "backend/app/jobs.py": {
+    "mtime": 1781634012.0958812,
+    "ast_hash": "288cfbddd25ff2259745229ca8d76f0a",
+    "semantic_hash": "288cfbddd25ff2259745229ca8d76f0a"
+  },
+  "backend/app/main.py": {
+    "mtime": 1782213422.4212475,
+    "ast_hash": "b55136c097aaec49cf27bb7fc786bc6a",
+    "semantic_hash": "b55136c097aaec49cf27bb7fc786bc6a"
+  },
+  "backend/app/models.py": {
+    "mtime": 1782158405.4810526,
+    "ast_hash": "ca7cc8ae4fe425adc223a21fa7af1530",
+    "semantic_hash": "ca7cc8ae4fe425adc223a21fa7af1530"
+  },
+  "backend/app/schemas.py": {
+    "mtime": 1781211056.0622578,
+    "ast_hash": "0ffb8fca5507616c67f7a0a91eb31d12",
+    "semantic_hash": "0ffb8fca5507616c67f7a0a91eb31d12"
+  },
+  "backend/app/utils/__init__.py": {
+    "mtime": 1781211056.072228,
+    "ast_hash": "09cd6059dcf2528bde1abca862e0da4c",
+    "semantic_hash": "09cd6059dcf2528bde1abca862e0da4c"
+  },
+  "backend/app/utils/embale_parser.py": {
+    "mtime": 1781293319.8448918,
+    "ast_hash": "37fc3ee514b0c0c48757fc83328f5b8a",
+    "semantic_hash": "37fc3ee514b0c0c48757fc83328f5b8a"
+  },
+  "backend/app/utils/fornecedores.py": {
+    "mtime": 1781211056.072228,
+    "ast_hash": "c6cdd71fc168c9a9e8eb9ab24b426585",
+    "semantic_hash": "c6cdd71fc168c9a9e8eb9ab24b426585"
+  },
+  "backend/app/utils/lista_compra.py": {
+    "mtime": 1782158477.1973896,
+    "ast_hash": "25f18afcb9b38c6ad9d583cbee7a1b9a",
+    "semantic_hash": "25f18afcb9b38c6ad9d583cbee7a1b9a"
+  },
+  "backend/app/utils/nfe_parser.py": {
+    "mtime": 1781699114.8373098,
+    "ast_hash": "f1181b75d4de151feb85bf4af7dfc8a7",
+    "semantic_hash": "f1181b75d4de151feb85bf4af7dfc8a7"
+  },
+  "backend/app/utils/nfe_pdf_generator.py": {
+    "mtime": 1781211056.073744,
+    "ast_hash": "836924777508178bd4e18a417737f420",
+    "semantic_hash": "836924777508178bd4e18a417737f420"
+  },
+  "backend/app/utils/recomendacao_engine.py": {
+    "mtime": 1781211056.0668056,
+    "ast_hash": "0c2fd4bae410ef6f925b68333fa044d9",
+    "semantic_hash": "0c2fd4bae410ef6f925b68333fa044d9"
+  },
+  "backend/database.py": {
+    "mtime": 1781286658.2335868,
+    "ast_hash": "7df1d3662db905e0fe5544c5b52b0666",
+    "semantic_hash": "7df1d3662db905e0fe5544c5b52b0666"
+  },
+  "backend/seed_data.py": {
+    "mtime": 1781211056.0522227,
+    "ast_hash": "196113968a04c8c95f4ac740a1fd9b2d",
+    "semantic_hash": "196113968a04c8c95f4ac740a1fd9b2d"
+  },
+  "backend/sync_from_production.py": {
+    "mtime": 1781632190.8572862,
+    "ast_hash": "114842b2ede770287cad7162e8a74908",
+    "semantic_hash": "114842b2ede770287cad7162e8a74908"
+  },
+  "frontend/package.json": {
+    "mtime": 1781266602.1701481,
+    "ast_hash": "ecc5c3da8b08437179379af62f1c72e1",
+    "semantic_hash": "ecc5c3da8b08437179379af62f1c72e1"
+  },
+  "frontend/src/App.tsx": {
+    "mtime": 1782503936.153662,
+    "ast_hash": "9c18993ed835ce82127843602cb3e07a",
+    "semantic_hash": "9c18993ed835ce82127843602cb3e07a"
+  },
+  "frontend/src/ModalDetalhes.tsx": {
+    "mtime": 1781286798.6064322,
+    "ast_hash": "888fc7c76296671f2c79d18074344300",
+    "semantic_hash": "888fc7c76296671f2c79d18074344300"
+  },
+  "frontend/src/ModalDetalhesNota.tsx": {
+    "mtime": 1781286798.6064322,
+    "ast_hash": "549ea07fcde5859b4b130d7fa3ba0f43",
+    "semantic_hash": "549ea07fcde5859b4b130d7fa3ba0f43"
+  },
+  "frontend/src/ModalDetalhesNotaFiscal.tsx": {
+    "mtime": 1781211056.0079467,
+    "ast_hash": "12cb0bd977b5c79f30336a53aa7b95e0",
+    "semantic_hash": "12cb0bd977b5c79f30336a53aa7b95e0"
+  },
+  "frontend/src/components/AnunciosML.tsx": {
+    "mtime": 1782481387.1026335,
+    "ast_hash": "5f10f6b4d7c74864cdf0fbd93b060637",
+    "semantic_hash": "5f10f6b4d7c74864cdf0fbd93b060637"
+  },
+  "frontend/src/components/AppShell.tsx": {
+    "mtime": 1781900819.2144246,
+    "ast_hash": "bb8020568c74ff821c500f273b09e87e",
+    "semantic_hash": "bb8020568c74ff821c500f273b09e87e"
+  },
+  "frontend/src/components/EmbaldesManager.tsx": {
+    "mtime": 1782150387.5827289,
+    "ast_hash": "653e35400fdf5904762769d2181c487e",
+    "semantic_hash": "653e35400fdf5904762769d2181c487e"
+  },
+  "frontend/src/components/FornecedoresManager.tsx": {
+    "mtime": 1782504741.7870073,
+    "ast_hash": "8d3d3ba020e9a424bbc8c222bce04876",
+    "semantic_hash": "8d3d3ba020e9a424bbc8c222bce04876"
+  },
+  "frontend/src/components/HistoricoFull.tsx": {
+    "mtime": 1782129690.8618824,
+    "ast_hash": "3333a2e6ad56ddabd489c0f1291d3103",
+    "semantic_hash": "3333a2e6ad56ddabd489c0f1291d3103"
+  },
+  "frontend/src/components/ListaCompra.tsx": {
+    "mtime": 1782159878.7328892,
+    "ast_hash": "4c895f34f8d5502b08119d004439fbf6",
+    "semantic_hash": "4c895f34f8d5502b08119d004439fbf6"
+  },
+  "frontend/src/components/MLAnuncioEditorModal.tsx": {
+    "mtime": 1781632190.8603108,
+    "ast_hash": "bc171d2d26eee5d66bfe0ceaecf818a1",
+    "semantic_hash": "bc171d2d26eee5d66bfe0ceaecf818a1"
+  },
+  "frontend/src/components/ModalRecomendacaoDetalhes.tsx": {
+    "mtime": 1781211055.998036,
+    "ast_hash": "ebc6d3281c957352fde2ce144eed7041",
+    "semantic_hash": "ebc6d3281c957352fde2ce144eed7041"
+  },
+  "frontend/src/components/NotaFiscalList.tsx": {
+    "mtime": 1781211055.9944842,
+    "ast_hash": "2ae635c842435516f4f38c71f179562d",
+    "semantic_hash": "2ae635c842435516f4f38c71f179562d"
+  },
+  "frontend/src/components/OperadoresManager.tsx": {
+    "mtime": 1781899953.699516,
+    "ast_hash": "de0c0316f3fef197923e4f163daf8650",
+    "semantic_hash": "de0c0316f3fef197923e4f163daf8650"
+  },
+  "frontend/src/components/Precificador.tsx": {
+    "mtime": 1781632190.8603108,
+    "ast_hash": "60c0eab41496fc602c93df869c50b7ab",
+    "semantic_hash": "60c0eab41496fc602c93df869c50b7ab"
+  },
+  "frontend/src/components/RecomendacoesRecompra.tsx": {
+    "mtime": 1781211055.9747303,
+    "ast_hash": "32b7ac65c5399c596facdbf108b313c6",
+    "semantic_hash": "32b7ac65c5399c596facdbf108b313c6"
+  },
+  "frontend/src/components/UploadNFe.tsx": {
+    "mtime": 1781211055.9912298,
+    "ast_hash": "1ccc293894eb6329fd981a8b8b13bad8",
+    "semantic_hash": "1ccc293894eb6329fd981a8b8b13bad8"
+  },
+  "frontend/src/main.tsx": {
+    "mtime": 1781266542.3215344,
+    "ast_hash": "7b0c69c7858f8b2edfdfdd25b4987b85",
+    "semantic_hash": "7b0c69c7858f8b2edfdfdd25b4987b85"
+  },
+  "frontend/src/services/api.ts": {
+    "mtime": 1781899907.1713908,
+    "ast_hash": "fa0ce95af1ff0f2e93d15a8a5e883d7b",
+    "semantic_hash": "fa0ce95af1ff0f2e93d15a8a5e883d7b"
+  },
+  "frontend/tsconfig.json": {
+    "mtime": 1781266587.626839,
+    "ast_hash": "b149ea2536df58f450cb546bbba370ca",
+    "semantic_hash": "b149ea2536df58f450cb546bbba370ca"
+  },
+  "frontend/tsconfig.node.json": {
+    "mtime": 1781211021.2240748,
+    "ast_hash": "767b2e9abe6452170cdc399ca052cfbc",
+    "semantic_hash": "767b2e9abe6452170cdc399ca052cfbc"
+  },
+  "frontend/vite.config.ts": {
+    "mtime": 1781211056.0109913,
+    "ast_hash": "1c4b086fadb4c13cf648d9eb6465fbcd",
+    "semantic_hash": "1c4b086fadb4c13cf648d9eb6465fbcd"
+  },
+  "run-backend.ps1": {
+    "mtime": 1781211091.243592,
+    "ast_hash": "55d387b5a7751f29d1de1c9691d4219c",
+    "semantic_hash": "55d387b5a7751f29d1de1c9691d4219c"
+  },
+  "run-frontend.ps1": {
+    "mtime": 1781211091.245117,
+    "ast_hash": "9c657e0d79ad0e9f0196c1cd8fba7e8a",
+    "semantic_hash": "9c657e0d79ad0e9f0196c1cd8fba7e8a"
+  }
+}

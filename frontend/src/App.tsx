@@ -1657,6 +1657,7 @@ function App() {
   ]
 
   const navGroups: ShellNavGroup[] = [
+    // === DASHBOARD (PRINCIPAL) ===
     {
       label: 'Dashboard',
       items: [
@@ -1666,15 +1667,28 @@ function App() {
         { key: 'fornecedores', label: 'Fornecedores', icon: 'users', active: pagina === 'fornecedores', onClick: () => setPagina('fornecedores') },
       ],
     },
+    // === MARKETPLACE ===
     {
       label: 'Marketplace',
       items: [
         { key: 'anuncios', label: 'Anuncios ML', icon: 'megaphone', active: pagina === 'anuncios', onClick: () => setPagina('anuncios') },
+      ],
+    },
+    // === FERRAMENTAS ===
+    {
+      label: 'Ferramentas',
+      items: [
         { key: 'garimpador', label: 'Garimpador', icon: 'search', active: pagina === 'garimpador', onClick: () => setPagina('garimpador') },
+        { key: 'estoque-embalagens', label: 'Estoque de Embalagens', icon: 'box', active: pagina === 'estoque-embalagens', onClick: () => setPagina('estoque-embalagens') },
         { key: 'lista-compra', label: 'Lista de Compra', icon: 'receipt', active: pagina === 'lista-compra', onClick: () => setPagina('lista-compra') },
+      ],
+    },
+    // === FULL ===
+    {
+      label: 'FULL',
+      items: [
         { key: 'radar-full', label: 'Radar de Envio', icon: 'radar', active: pagina === 'radar-full', onClick: () => setPagina('radar-full') },
         { key: 'inbound', label: 'Inbound FULL', icon: 'truck', active: pagina === 'embaldes', badge: inboundsAtivos.length, onClick: () => setPagina('embaldes') },
-        { key: 'estoque-embalagens', label: 'Estoque de Embalagens', icon: 'box', active: pagina === 'estoque-embalagens', onClick: () => setPagina('estoque-embalagens') },
         { key: 'historico-full', label: 'Histórico FULL', icon: 'sync', active: pagina === 'historico-full', onClick: () => setPagina('historico-full') },
         { key: 'divergencias', label: 'Divergencias', icon: 'warning', badge: divergencias.length, active: pagina === 'divergencias', onClick: () => setPagina('divergencias') },
       ],
