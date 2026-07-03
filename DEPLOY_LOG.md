@@ -1,30 +1,21 @@
-# Deploy para Produção - 2026-07-01
+# Deploy para Produção - 2026-07-03
 
 ## 🚀 Status: EM PROGRESSO
 
-**Hora do Push**: 2026-07-01 09:50 UTC  
+**Hora do Push**: 2026-07-03 07:55 UTC  
 **Branch**: main  
 **Destino**: https://novaes-estoque-production.up.railway.app
 
 ## 📦 O Que Está Sendo Deployado
 
-### ✅ Commits Incluídos (3 novos)
+### ✅ Commits Incluídos (1 novo)
 
-1. **feat(graphify)**: Mapeamento de arquitetura com grafo de conhecimento
-   - Commit: `1675c50`
-   - 913 nodes, 1492 edges, 82 comunidades
-   - Script Python para consultas (god-nodes, search, callers, etc)
-
-2. **fix(nfe-upload)**: PDF travando silenciosamente (diagnosticado)
-   - Commit: `5dae349`
-   - Identificação do problema raiz
-   - Documentação completa do bug
-
-3. **feat(nfe-upload)**: Suporte completo a PDF com OCR + parsing
-   - Commit: `9671ac0`
-   - pdfplumber + pytesseract (dual-mode)
-   - Extração automática via regex: número NF, série, CNPJ, fornecedor, itens
-   - Testado com Nota.pdf (2.5MB, 27 páginas) → ✓ Funciona em 3-5s
+1. **feat**: Porcentagem de itens processados em inbounds encerrados
+   - Commit: `df182ce`
+   - Backend: Novo campo `qtd_baixados_apos_encerramento` no endpoint `/api/embaldes`
+   - Frontend: Exibe % de itens "feito" na aba de inbounds encerrados
+   - Cores dinâmicas: verde=100%, laranja=50-99%, vermelho=<50%
+   - Atualizado .claude/launch.json com configuração do backend
 
 ## 🔧 Dependências (já no requirements.txt)
 
