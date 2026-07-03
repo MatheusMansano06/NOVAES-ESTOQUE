@@ -12,6 +12,7 @@ Leitura de anúncios:
 """
 
 import os
+import re
 import json
 import time
 import threading
@@ -20,6 +21,8 @@ import uuid
 import urllib.request
 import urllib.parse
 import urllib.error
+from collections import Counter
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta
 from typing import Optional, Dict, List, Any
 from dotenv import load_dotenv
@@ -346,8 +349,76 @@ class MLIntegration:
                 return None
         return None
 
+    def _get_raw(self, path: str, params: Optional[Dict], token: str) -> Optional[Dict]:
+        """GET sem throttle serial — para sondagens em PARALELO (ThreadPoolExecutor).
+        Recebe o token pronto (evita corrida no refresh). Pool pequeno fica sob o
+        limite do ML. Retorna dict/list em 200, None em erro (404/403/timeout)."""
+        if not token:
+            return None
+        url = f"{self.API_BASE}{path}"
+        if params:
+            url += "?" + urllib.parse.urlencode(params)
+        req = urllib.request.Request(url, headers={"Authorization": f"Bearer {token}", "Accept": "application/json"})
+        try:
+            with urllib.request.urlopen(req, timeout=20) as r:
+                return json.loads(r.read().decode("utf-8"))
+        except Exception:
+            return None
+
     def _get_json(self, path: str, params: Optional[Dict] = None):
         return self._get(path, params)
+
+    # --- Fulfillment / inbound (Radar de Envio Full) -------------------------
+    # Status do estoque no Full que ainda NÃO está liberado para venda, mas está
+    # a caminho (chegou/chegando). Confirmado ao vivo na API.
+    CHEGANDO_STATUS = {"transfer", "internalProcess", "inbound", "receiving"}
+
+    @staticmethod
+    def _inventory_ids_do_body(body: Dict[str, Any]) -> List[str]:
+        """inventory_id do item (topo) ou das variações. Só itens Full têm."""
+        if not isinstance(body, dict):
+            return []
+        top = body.get("inventory_id")
+        if top:
+            return [str(top)]
+        return [str(v.get("inventory_id")) for v in (body.get("variations") or [])
+                if v.get("inventory_id")]
+
+    def inventory_ids_do_item(self, item_id: str, db: Optional[Session] = None) -> List[str]:
+        """Lê os inventory_ids do cache; se faltar, resolve via /items/{id} e
+        persiste no cache para as próximas leituras ficarem instantâneas."""
+        db = db or self._db()
+        row = self._cache_query(db, str(item_id))
+        if row and row.inventory_ids_json:
+            cached = self._json_load(row.inventory_ids_json, [])
+            if cached:
+                return [str(i) for i in cached]
+        body = self._get(f"/items/{item_id}")
+        if not body:
+            return []
+        ids = self._inventory_ids_do_body(body)
+        if row is not None and ids:
+            row.inventory_ids_json = self._json_dump(ids)
+            try:
+                db.commit()
+            except Exception:
+                db.rollback()
+        return ids
+
+    def stock_fulfillment(self, inventory_id: str) -> Optional[Dict[str, int]]:
+        """Estoque de um inventory no Full: {available, chegando, total}.
+        available = liberado p/ venda; chegando = em trânsito/processo (não liberado)."""
+        s = self._get(f"/inventories/{inventory_id}/stock/fulfillment")
+        if not s:
+            return None
+        chegando = sum(int(d.get("quantity") or 0)
+                       for d in (s.get("not_available_detail") or [])
+                       if d.get("status") in self.CHEGANDO_STATUS)
+        return {
+            "available": int(s.get("available_quantity") or 0),
+            "chegando": chegando,
+            "total": int(s.get("total") or 0),
+        }
 
     def _request_json(self, method: str, path: str, body: Optional[Dict] = None, params: Optional[Dict] = None) -> Optional[Any]:
         token = self.get_access_token()
@@ -639,6 +710,9 @@ class MLIntegration:
         row.attributes_json = self._json_dump(body.get("attributes") or [])
         row.pictures_json = self._json_dump(body.get("pictures") or [])
         row.raw_item_json = self._json_dump(body)
+        inv_ids = self._inventory_ids_do_body(body)
+        if inv_ids:
+            row.inventory_ids_json = self._json_dump(inv_ids)
         row.ml_last_updated = self._parse_dt_iso(body.get("last_updated"))
         if body.get("date_created"):
             row.date_created = self._parse_dt_iso(body.get("date_created"))
@@ -1906,6 +1980,245 @@ class MLIntegration:
                     "domain_name": c.get("domain_name"),
                 })
         return {"categorias": cats}
+
+    # Palavras irrelevantes para a nuvem de termos (PT + unidades comuns)
+    _GARIMPO_STOPWORDS = {
+        "de", "da", "do", "com", "para", "por", "em", "e", "a", "o", "os", "as",
+        "um", "uma", "no", "na", "nos", "nas", "sem", "kit", "un", "cm", "mm",
+        "ml", "pc", "pcs", "und", "pça", "pçs", "the", "and", "of",
+    }
+    _GARIMPO_ATTRS_DIST = ("Marca", "Modelo", "Cor", "Material", "Tipo", "Formato")
+    # Métricas agregadas do Garimpador (orçamento de chamadas p/ não estourar ~15s):
+    # busca até N produtos, sonda no máx. MAX_CALLS deles em /products/{id}/items,
+    # e para cedo ao juntar ALVO produtos com ofertas reais.
+    _GARIMPO_PRODUTOS_BUSCA = 40   # limit do /products/search (muitos dão 404 nas ofertas)
+    _GARIMPO_MAX_CALLS = 20        # teto de chamadas /products/{id}/items (~10s p/ ficar sob 15s)
+    _GARIMPO_ALVO_PRODUTOS = 18    # produtos com oferta suficientes -> para
+    _GARIMPO_PAGINAS = 2           # páginas do catálogo (offset) p/ um conjunto maior (não só a 1ª)
+    _GARIMPO_TOP_VENDEDORES = 8    # quantos vendedores resolver via /users (nome + reputação)
+    _GARIMPO_MAX_PRODUTOS_OUT = 60 # produtos devolvidos no grid (com preço primeiro)
+    _GARIMPO_OFERTAS_LIMIT = 12    # ofertas por produto (suficiente p/ preço/full/frete; menor = mais rápido)
+    _GARIMPO_WORKERS = 8           # paralelismo das sondagens (sob o limite do ML)
+
+    def garimpar(self, q: str) -> Dict:
+        """Garimpador de Categoria — analisa um termo de busca usando os endpoints
+        que o app TEM acesso (a busca de anúncios /sites/MLB/search dá 403 aqui).
+        Combina 3 fontes:
+          - domain_discovery  -> categoria/nicho do termo
+          - trends/MLB/{cat}  -> demanda: mais buscados na categoria
+          - products/search   -> catálogo: produtos, palavras e distribuição de atributos
+        Métricas por-anúncio (total real, %Full, frete, preço) não entram: 403 do ML."""
+        termo = (q or "").strip()
+        if not termo:
+            return {"ok": False, "status_code": 400, "erro": "informe ?q="}
+
+        avisos: List[str] = []
+
+        # 1) Categoria (domain_discovery) — descobre o nicho
+        categoria = None
+        dd = self._get("/sites/MLB/domain_discovery/search", {"q": termo, "limit": 1})
+        if isinstance(dd, list) and dd:
+            c = dd[0]
+            categoria = {
+                "id": c.get("category_id"),
+                "nome": c.get("category_name"),
+                "dominio": c.get("domain_name"),
+            }
+
+        # 2) Mais buscados na categoria (trends) — o card estrela do Garimpador
+        mais_buscados: List[str] = []
+        if categoria and categoria.get("id"):
+            tr = self._get(f"/trends/MLB/{categoria['id']}")
+            if isinstance(tr, list):
+                mais_buscados = [t.get("keyword") for t in tr if t.get("keyword")][:20]
+        if not mais_buscados:
+            tr = self._get("/trends/MLB")  # fallback: tendências gerais do site
+            if isinstance(tr, list) and tr:
+                mais_buscados = [t.get("keyword") for t in tr if t.get("keyword")][:20]
+                avisos.append("Categoria sem tendências próprias — mostrando tendências gerais do ML.")
+
+        # 3) Catálogo (products/search) — produtos, palavras e atributos.
+        # Pede um lote maior porque muitos catalog products retornam 404
+        # ("No winners found") em /products/{id}/items; assim sobram candidatos
+        # com ofertas reais para as métricas agregadas.
+        produtos: List[Dict] = []
+        palavras: Counter = Counter()
+        attr_dist: Dict[str, Counter] = {}
+        total_nominal = None
+        vistos_ids: set = set()
+        # Pagina o catálogo (offset) para um conjunto MAIOR — não só a 1ª página.
+        for pagina in range(self._GARIMPO_PAGINAS):
+            offset = pagina * self._GARIMPO_PRODUTOS_BUSCA
+            ps = self._get("/products/search", {
+                "status": "active", "site_id": "MLB", "q": termo,
+                "limit": self._GARIMPO_PRODUTOS_BUSCA, "offset": offset,
+            })
+            if not isinstance(ps, dict):
+                break
+            if total_nominal is None:
+                total_nominal = (ps.get("paging") or {}).get("total")
+            lote = ps.get("results") or []
+            if not lote:
+                break
+            for it in lote:
+                pid = it.get("id")
+                if not pid or pid in vistos_ids:
+                    continue
+                vistos_ids.add(pid)
+                nome = it.get("name") or ""
+                pics = it.get("pictures") or []
+                thumb = None
+                if pics:
+                    thumb = pics[0].get("url") or pics[0].get("secure_url")
+                attrs: Dict[str, str] = {}
+                for a in (it.get("attributes") or []):
+                    an, av = a.get("name"), a.get("value_name")
+                    if an and av:
+                        attrs[an] = av
+                        if an in self._GARIMPO_ATTRS_DIST:
+                            attr_dist.setdefault(an, Counter())[av] += 1
+                produtos.append({
+                    "id": pid,
+                    "nome": nome,
+                    "marca": attrs.get("Marca"),
+                    "thumbnail": thumb,
+                    "dominio": it.get("domain_id"),
+                    "atributos": attrs,
+                    # URL clicável da página de catálogo (PDP) do produto
+                    "permalink": it.get("permalink") or (f"https://www.mercadolivre.com.br/p/{pid}" if pid else None),
+                    "preco": None,  # preenchido abaixo pela melhor oferta (buy box), se houver
+                })
+                for w in re.findall(r"[a-zà-ÿ0-9]{3,}", nome.lower()):
+                    if w not in self._GARIMPO_STOPWORDS:
+                        palavras[w] += 1
+
+        palavras_frequentes = [{"palavra": w, "n": n} for w, n in palavras.most_common(25)]
+        atributos_populares = {
+            nome: [{"valor": v, "n": n} for v, n in cnt.most_common(8)]
+            for nome, cnt in attr_dist.items()
+        }
+
+        # 4) Métricas + vendedores via /products/{id}/items (ofertas reais por produto
+        # de catálogo). A busca pública de anúncios dá 403 aqui, então aproximamos
+        # agregando as ofertas do TOPO do catálogo. Sondagem em PARALELO (pool pequeno)
+        # porque muitos produtos dão 404 e o custo serial estoura o tempo (~25s → ~6s).
+        metricas = None
+        precos: List[float] = []
+        qtd_full = 0
+        qtd_free = 0
+        qtd_oficiais = 0
+        produtos_com_oferta = 0
+        vendedores: Dict[int, Dict] = {}  # seller_id -> {ofertas, oficial}
+
+        token = self.get_access_token()
+        candidatos = [p for p in produtos if p.get("id")][: self._GARIMPO_MAX_CALLS]
+
+        def _fetch_ofertas(prod):
+            return prod, self._get_raw(f"/products/{prod['id']}/items", {"limit": self._GARIMPO_OFERTAS_LIMIT}, token)
+
+        if candidatos and token:
+            with ThreadPoolExecutor(max_workers=self._GARIMPO_WORKERS) as ex:
+                for prod, resp in ex.map(_fetch_ofertas, candidatos):
+                    ofertas = (resp or {}).get("results") if isinstance(resp, dict) else None
+                    if not ofertas:
+                        continue  # 404 "No winners found" / sem oferta: pula gracioso
+                    produtos_com_oferta += 1
+                    preco_produto = None
+                    for of in ofertas:
+                        pr = of.get("price")
+                        if isinstance(pr, (int, float)):
+                            precos.append(float(pr))
+                            if preco_produto is None:
+                                preco_produto = float(pr)  # 1ª oferta = buy box winner
+                        sh = of.get("shipping") or {}
+                        if sh.get("logistic_type") == "fulfillment":
+                            qtd_full += 1
+                        if sh.get("free_shipping"):
+                            qtd_free += 1
+                        if of.get("official_store_id") is not None:
+                            qtd_oficiais += 1
+                        # Vendedor da oferta (público mesmo com a busca de anúncios em 403)
+                        sid = of.get("seller_id")
+                        if sid:
+                            info = vendedores.setdefault(sid, {"ofertas": 0, "oficial": False})
+                            info["ofertas"] += 1
+                            if of.get("official_store_id") is not None:
+                                info["oficial"] = True
+                    if preco_produto is not None:
+                        prod["preco"] = preco_produto
+
+        amostra = len(precos)
+        if amostra:
+            metricas = {
+                "total_anuncios": amostra,
+                "preco_medio": round(sum(precos) / amostra, 2),
+                "preco_min": round(min(precos), 2),
+                "preco_max": round(max(precos), 2),
+                "qtd_full": qtd_full,
+                "pct_full": round(100.0 * qtd_full / amostra, 1),
+                "pct_frete_gratis": round(100.0 * qtd_free / amostra, 1),
+                "qtd_lojas_oficiais": qtd_oficiais,
+                "amostra": amostra,
+                "fonte": f"agregado de {produtos_com_oferta} produtos do catálogo (topo) via /products/{{id}}/items",
+            }
+            avisos.append(
+                "Métricas são uma AMOSTRA das ofertas dos produtos do topo do catálogo "
+                "(a busca pública de anúncios dá 403 para este app), não o universo da categoria."
+            )
+        else:
+            avisos.append(
+                "Sem métricas de anúncios: nenhum produto do topo do catálogo tinha "
+                "oferta ativa (a busca pública de anúncios dá 403 para este app)."
+            )
+
+        # 5) Top lojas/vendedores do nicho — os que mais vencem a buy box nas ofertas
+        # amostradas. Resolve nome + reputação em PARALELO via /users/{id} (o vendedor
+        # de cada oferta é público, mesmo com a busca de anúncios em 403).
+        top_vendedores: List[Dict] = []
+        ranking = sorted(vendedores.items(), key=lambda kv: kv[1]["ofertas"], reverse=True)[: self._GARIMPO_TOP_VENDEDORES]
+
+        def _fetch_user(item):
+            sid, info = item
+            return info, self._get_raw(f"/users/{sid}", None, token)
+
+        if ranking and token:
+            with ThreadPoolExecutor(max_workers=self._GARIMPO_WORKERS) as ex:
+                for info, u in ex.map(_fetch_user, ranking):
+                    if not isinstance(u, dict):
+                        continue
+                    nick = u.get("nickname")
+                    if not nick:
+                        continue
+                    rep = u.get("seller_reputation") or {}
+                    trans = rep.get("transactions") or {}
+                    top_vendedores.append({
+                        "nome": nick,
+                        "oficial": bool(info.get("oficial")),
+                        "ofertas": info.get("ofertas", 0),
+                        "reputacao": rep.get("level_id"),
+                        "vendas": trans.get("total"),
+                        "link": f"https://www.mercadolivre.com.br/perfil/{urllib.parse.quote(nick)}",
+                    })
+            top_vendedores.sort(key=lambda v: v["ofertas"], reverse=True)
+
+        # Segmentação: produtos COM oferta/preço real vêm primeiro (mais relevantes);
+        # devolve um teto para não pesar o grid.
+        produtos.sort(key=lambda p: 0 if p.get("preco") is not None else 1)
+        produtos = produtos[: self._GARIMPO_MAX_PRODUTOS_OUT]
+
+        return {
+            "ok": True,
+            "query": termo,
+            "categoria": categoria,
+            "mais_buscados": mais_buscados,
+            "palavras_frequentes": palavras_frequentes,
+            "produtos": produtos,
+            "atributos_populares": atributos_populares,
+            "total_catalogo_nominal": total_nominal,
+            "metricas": metricas,
+            "top_vendedores": top_vendedores,
+            "avisos": avisos,
+        }
 
     def duplicar_anuncio(self, item_id: str, category_id: str = None, novo_titulo: str = None) -> Dict:
         """Duplica um anúncio criando um NOVO item no ML, já PAUSADO.

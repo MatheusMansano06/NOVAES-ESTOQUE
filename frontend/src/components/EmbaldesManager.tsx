@@ -29,6 +29,7 @@ interface Inbound {
   qtd_items: number
   qtd_validados: number
   qtd_baixados?: number
+  qtd_baixados_apos_encerramento?: number
   total_lido?: number
   total_planejado_full?: number
   total_baixado_full?: number
@@ -1146,13 +1147,33 @@ export function EmbaldesManager({ modoSeparacao = false }: { modoSeparacao?: boo
                   )}
                 </div>
 
-                {/* Vinculados */}
-                <div style={{ flex: '0 1 110px', textAlign: 'center' }}>
-                  <div style={{ fontSize: '1.1rem', fontWeight: 'bold', color: inb.qtd_validados === inb.qtd_items ? '#2e7d32' : '#ef6c00' }}>
-                    {inb.qtd_validados}/{inb.qtd_items}
+                {/* Vinculados ou Feito */}
+                {inb.status === 'encerrado' ? (
+                  <div style={{ flex: '0 1 110px', textAlign: 'center' }}>
+                    {(() => {
+                      const total = inb.qtd_items || 0
+                      const processados = inb.qtd_baixados_apos_encerramento || 0
+                      const percentual = total > 0 ? Math.round((processados / total) * 100) : 0
+                      return (
+                        <>
+                          <div style={{ fontSize: '1.1rem', fontWeight: 'bold', color: percentual === 100 ? '#2e7d32' : percentual >= 50 ? '#ef6c00' : '#c62828' }}>
+                            {percentual}%
+                          </div>
+                          <div style={{ fontSize: '0.78rem', color: '#666' }}>
+                            {processados}/{total} feito
+                          </div>
+                        </>
+                      )
+                    })()}
                   </div>
-                  <div style={{ fontSize: '0.78rem', color: '#666' }}>vinculados</div>
-                </div>
+                ) : (
+                  <div style={{ flex: '0 1 110px', textAlign: 'center' }}>
+                    <div style={{ fontSize: '1.1rem', fontWeight: 'bold', color: inb.qtd_validados === inb.qtd_items ? '#2e7d32' : '#ef6c00' }}>
+                      {inb.qtd_validados}/{inb.qtd_items}
+                    </div>
+                    <div style={{ fontSize: '0.78rem', color: '#666' }}>vinculados</div>
+                  </div>
+                )}
 
                 {/* Ação */}
                 <div onClick={(e) => e.stopPropagation()} style={{ display: 'flex', gap: '0.5rem', flexDirection: 'column', flex: '0 1 130px' }}>

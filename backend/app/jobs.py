@@ -206,6 +206,20 @@ def sincronizar_anuncios_ml():
     except Exception as e:
         logger.error(f"[JOB][ML] erro inesperado: {e}")
 
+    # Baixa automática de embalagens conforme o crescimento de vendas (nunca derruba o sync).
+    try:
+        from app.utils.embalagens import processar_baixas_embalagem
+        from database import SessionLocal
+        db = SessionLocal()
+        try:
+            resumo = processar_baixas_embalagem(db)
+            if resumo.get("processados"):
+                logger.info(f"[JOB][EMB] baixas: {resumo}")
+        finally:
+            db.close()
+    except Exception as e:
+        logger.error(f"[JOB][EMB] baixa de embalagens falhou: {e}")
+
 
 def iniciar_scheduler():
     """
