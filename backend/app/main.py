@@ -2239,6 +2239,7 @@ async def listar_embaldes(request: Request):
                     "qtd_items": len(e.itens),
                     "qtd_validados": sum(1 for i in e.itens if i.validado == 1),
                     "qtd_baixados": sum(1 for i in e.itens if _progresso_item_full(i)[1] >= _progresso_item_full(i)[0] and _progresso_item_full(i)[0] > 0),
+                    "qtd_baixados_apos_encerramento": sum(1 for i in e.itens if i.baixa_aplicada == 1 and i.data_baixa and e.data_encerramento and i.data_baixa > e.data_encerramento),
                     "qtd_em_espera": sum(1 for i in e.itens if (i.em_espera or 0) == 1),
                     "total_lido": sum(i.quantidade_separada or 0 for i in e.itens),
                     "revisao_salva_em": e.revisao_salva_em.isoformat() if e.revisao_salva_em else None,
