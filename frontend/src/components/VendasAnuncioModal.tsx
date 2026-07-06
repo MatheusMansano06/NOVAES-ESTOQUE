@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo, useCallback, useRef } from 'react'
 
 const API_BASE = import.meta.env.VITE_API_URL ?? 'http://127.0.0.1:8000'
 
-const brl = (v?: number | null) => v == null ? '--' : 'R$ ' + Number(v).toFixed(2).replace('.', ',')
+const brl = (v?: number | null) => v == null ? '--' : Number(v).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
 const pct = (v?: number | null) => v == null ? '--' : Number(v).toFixed(2).replace('.', ',') + '%'
 
 function dataHora(iso?: string | null): string {
@@ -63,6 +63,7 @@ interface Resultado {
   vendidos_total?: number | null
   disponivel_atual: number
   full: boolean
+  catalogo?: boolean | null
   atualizado_em?: string | null
   total_vendas: number
   envio_localizados?: number
@@ -349,7 +350,15 @@ export function VendasAnuncioModal({ itemId, titulo, onClose }: { itemId: string
         <div style={{ padding: '1rem 1.25rem', background: '#fff', borderBottom: '1px solid #eaecf0', display: 'flex', gap: 14, alignItems: 'center' }}>
           {dados?.thumbnail && <img src={dados.thumbnail} alt="" style={{ width: 48, height: 48, borderRadius: 8, objectFit: 'cover', flexShrink: 0 }} />}
           <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ fontWeight: 800, fontSize: '1.02rem', color: '#101828' }}>🔎 Vendas do anúncio</div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+              <span style={{ fontWeight: 800, fontSize: '1.02rem', color: '#101828' }}>🔎 Vendas do anúncio</span>
+              {dados?.catalogo === true && (
+                <span style={{ background: '#ece4ff', color: '#5925dc', fontWeight: 700, fontSize: '.7rem', padding: '2px 9px', borderRadius: 20 }}>📗 Catálogo</span>
+              )}
+              {dados?.catalogo === false && (
+                <span style={{ background: '#eaecf0', color: '#475467', fontWeight: 700, fontSize: '.7rem', padding: '2px 9px', borderRadius: 20 }}>Anúncio próprio</span>
+              )}
+            </div>
             <div style={{ fontSize: '.8rem', color: '#667085', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{dados?.titulo || titulo || itemId}</div>
           </div>
           {dados && (

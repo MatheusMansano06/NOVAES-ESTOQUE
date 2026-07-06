@@ -93,7 +93,7 @@ def _garantir_colunas_sqlite():
 
             # Tarifa de venda do ML guardada no cache (margem sem chamada ao vivo)
             colunas_ml = {row[1] for row in conn.exec_driver_sql("PRAGMA table_info(ml_item_cache)").fetchall()}
-            for nome, tipo in [("tarifa_valor", "FLOAT"), ("tarifa_pct", "FLOAT"), ("tarifa_fixo", "FLOAT"), ("date_created", "DATETIME"), ("inventory_ids_json", "TEXT"), ("embalagem_baixa_vendidos", "INTEGER")]:
+            for nome, tipo in [("tarifa_valor", "FLOAT"), ("tarifa_pct", "FLOAT"), ("tarifa_fixo", "FLOAT"), ("date_created", "DATETIME"), ("inventory_ids_json", "TEXT"), ("embalagem_baixa_vendidos", "INTEGER"), ("catalog_listing", "INTEGER")]:
                 if colunas_ml and nome not in colunas_ml:
                     conn.exec_driver_sql(f"ALTER TABLE ml_item_cache ADD COLUMN {nome} {tipo}")
                     print(f"[DB] Coluna ml_item_cache.{nome} criada")

@@ -725,6 +725,19 @@ class MLIntegration:
                 elif cache.flex:
                     item_logistic = "self_service"
 
+            # Catálogo: guarda no cache na 1ª vez (evita bater na API a cada abertura).
+            catalogo = None
+            if cache is not None:
+                if cache.catalog_listing is None:
+                    info = self._get(f"/items/{item_id}", {"attributes": "catalog_listing"})
+                    if info is not None:
+                        cache.catalog_listing = 1 if info.get("catalog_listing") else 0
+                        try:
+                            db.commit()
+                        except Exception:
+                            db.rollback()
+                catalogo = bool(cache.catalog_listing) if cache.catalog_listing is not None else None
+
             vendas = []
             acumulado_posterior = 0
             total_receita = total_lucro = total_qtd = 0.0
@@ -802,6 +815,7 @@ class MLIntegration:
                 "disponivel_atual": disponivel_atual,
                 "custo_unitario": custo_unit,
                 "full": full,
+                "catalogo": catalogo,
                 "atualizado_em": estado.synced_at.isoformat() if (estado and estado.synced_at) else None,
                 "total_vendas": len(vendas),
                 "envio_localizados": sum(1 for r in rows if r.receiver_state),

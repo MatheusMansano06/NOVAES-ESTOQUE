@@ -387,6 +387,7 @@ class MercadoLivreItemCache(Base):
     logistic_type = Column(String(80), nullable=True)
     flex = Column(Integer, default=0)
     full = Column(Integer, default=0)
+    catalog_listing = Column(Integer, nullable=True)  # 1 = anúncio de catálogo
     imagens_total = Column(Integer, default=0)
     imagem_principal = Column(Text, nullable=True)
     thumbnail = Column(Text, nullable=True)
