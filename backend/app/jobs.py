@@ -249,6 +249,15 @@ def sincronizar_vendas_ml():
     except Exception as e:
         logger.error(f"[JOB][VENDAS] erro inesperado: {e}")
 
+    # Enriquece os envios pendentes aos poucos (CEP/logística/prazo), pra alimentar
+    # o gráfico de modalidade de envio ao longo do dia sem estourar o limite da API.
+    try:
+        enr = ml.enriquecer_shipments_pendentes(limite=int(os.getenv("ML_VENDAS_ENRICH_LIMIT", "800")))
+        if enr.get("pendentes_processados"):
+            logger.info(f"[JOB][VENDAS] envios enriquecidos: {enr}")
+    except Exception as e:
+        logger.error(f"[JOB][VENDAS] enriquecimento de envios falhou: {e}")
+
 
 def iniciar_scheduler():
     """

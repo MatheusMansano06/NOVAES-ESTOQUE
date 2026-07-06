@@ -108,6 +108,74 @@ function Copiavel({ texto, prefixo }: { texto?: string | null; prefixo?: string 
   )
 }
 
+// ---- Agrupadores para os gráficos de pizza ----
+function grupoPagamento(p: Pagamento): { key: string; label: string; cor: string } {
+  const m = (p.metodo || '').toLowerCase()
+  const t = (p.tipo || '').toLowerCase()
+  if (m.includes('pix')) return { key: 'pix', label: 'Pix', cor: '#0a7d6e' }
+  if (t === 'credit_card') return { key: 'credit_card', label: 'Crédito', cor: '#7a3ffa' }
+  if (t === 'debit_card') return { key: 'debit_card', label: 'Débito', cor: '#1668dc' }
+  if (t.startsWith('consumer_credit') || m.includes('consumer_credit')) return { key: 'consumer_credit', label: 'Mercado Crédito', cor: '#0958d9' }
+  if (t === 'account_money') return { key: 'account_money', label: 'Saldo Mercado Pago', cor: '#b45309' }
+  if (t === 'ticket') return { key: 'ticket', label: 'Boleto', cor: '#475467' }
+  return { key: 'outros', label: 'Outros', cor: '#98a2b3' }
+}
+function grupoEnvio(e: Envio): { key: string; label: string; cor: string } {
+  const lt = (e.logistic_type || '').toLowerCase()
+  if (lt === 'fulfillment') return { key: 'fulfillment', label: 'FULL', cor: '#2e7d32' }
+  if (lt === 'self_service') return { key: 'self_service', label: 'Flex', cor: '#ef6c00' }
+  if (lt === 'cross_docking') return { key: 'cross_docking', label: 'Mercado Envios (coleta)', cor: '#0958d9' }
+  if (lt === 'drop_off' || lt === 'xd_drop_off') return { key: 'drop_off', label: 'Mercado Envios (agência)', cor: '#7a3ffa' }
+  if (lt) return { key: 'outros', label: 'Mercado Envios', cor: '#1668dc' }
+  return { key: 'sem_dados', label: 'Sem dados de envio', cor: '#d0d5dd' }
+}
+
+interface Fatia { label: string; value: number; cor: string }
+
+function PieChart({ titulo, segmentos, vazio }: { titulo: string; segmentos: Fatia[]; vazio?: string }) {
+  const dados = segmentos.filter(s => s.value > 0)
+  const total = dados.reduce((s, x) => s + x.value, 0)
+  const r = 46, cx = 60, cy = 60, stroke = 18, circ = 2 * Math.PI * r
+  let acc = 0
+  return (
+    <div style={{ flex: 1, minWidth: 240, background: '#fff', border: '1px solid #eaecf0', borderRadius: 12, padding: '0.85rem' }}>
+      <div style={{ fontSize: '.8rem', fontWeight: 800, color: '#101828', marginBottom: 8 }}>{titulo}</div>
+      {total === 0 ? (
+        <div style={{ fontSize: '.78rem', color: '#98a2b3', padding: '1.5rem 0', textAlign: 'center' }}>{vazio || 'Sem dados'}</div>
+      ) : (
+        <div style={{ display: 'flex', gap: 14, alignItems: 'center' }}>
+          <svg width={120} height={120} viewBox="0 0 120 120" style={{ flexShrink: 0, transform: 'rotate(-90deg)' }}>
+            <circle cx={cx} cy={cy} r={r} fill="none" stroke="#f2f4f7" strokeWidth={stroke} />
+            {dados.map((s, i) => {
+              const frac = s.value / total
+              const dash = frac * circ
+              const el = (
+                <circle key={i} cx={cx} cy={cy} r={r} fill="none" stroke={s.cor} strokeWidth={stroke}
+                  strokeDasharray={`${dash} ${circ - dash}`} strokeDashoffset={-acc * circ} />
+              )
+              acc += frac
+              return el
+            })}
+          </svg>
+          <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 4 }}>
+            {dados.map((s, i) => {
+              const p = (s.value / total) * 100
+              return (
+                <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 7, fontSize: '.76rem' }}>
+                  <span style={{ width: 10, height: 10, borderRadius: 3, background: s.cor, flexShrink: 0 }} />
+                  <span style={{ flex: 1, color: '#475467', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{s.label}</span>
+                  <span style={{ fontWeight: 700, color: '#101828', whiteSpace: 'nowrap' }}>{p.toFixed(1).replace('.', ',')}%</span>
+                  <span style={{ color: '#98a2b3', minWidth: 34, textAlign: 'right' }}>{s.value}</span>
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
 function CardVenda({ v }: { v: Venda }) {
   const pv = pagVisual(v.pagamento)
   const fin = v.financeiro
@@ -199,6 +267,23 @@ export function VendasAnuncioModal({ itemId, titulo, onClose }: { itemId: string
 
   useEffect(() => { carregar(false) }, [carregar])
 
+  // Distribuições p/ os gráficos de pizza (só vendas válidas, histórico inteiro do item)
+  const { fatiasPagamento, fatiasEnvio } = useMemo(() => {
+    const pag = new Map<string, Fatia>()
+    const env = new Map<string, Fatia>()
+    for (const v of dados?.vendas || []) {
+      if (v.cancelada) continue
+      const gp = grupoPagamento(v.pagamento)
+      const ep = grupoEnvio(v.envio)
+      const ap = pag.get(gp.key) || { label: gp.label, cor: gp.cor, value: 0 }
+      ap.value += 1; pag.set(gp.key, ap)
+      const ae = env.get(ep.key) || { label: ep.label, cor: ep.cor, value: 0 }
+      ae.value += 1; env.set(ep.key, ae)
+    }
+    const ord = (m: Map<string, Fatia>) => [...m.values()].sort((a, b) => b.value - a.value)
+    return { fatiasPagamento: ord(pag), fatiasEnvio: ord(env) }
+  }, [dados])
+
   const vendasFiltradas = useMemo(() => {
     if (!dados) return []
     const q = busca.trim().toLowerCase()
@@ -247,6 +332,14 @@ export function VendasAnuncioModal({ itemId, titulo, onClose }: { itemId: string
             <Kpi label="Lucro" valor={brl(dados.resumo.lucro)} tom={dados.resumo.lucro >= 0 ? '#0a7d6e' : '#d92d20'} sub={dados.resumo.margem_pct != null ? pct(dados.resumo.margem_pct) : undefined} />
             <Kpi label="Disponível hoje" valor={String(dados.disponivel_atual)} />
             {dados.vendidos_total != null && <Kpi label="Vendidos (ML)" valor={String(dados.vendidos_total)} />}
+          </div>
+        )}
+
+        {/* Gráficos de distribuição — pagamento e envio */}
+        {dados && dados.total_vendas > 0 && (
+          <div style={{ display: 'flex', gap: 12, padding: '0.85rem 1.25rem', background: '#f9fafb', borderBottom: '1px solid #f0f0f0', flexWrap: 'wrap' }}>
+            <PieChart titulo="💳 Métodos de pagamento" segmentos={fatiasPagamento} />
+            <PieChart titulo="🚚 Modalidade de envio" segmentos={fatiasEnvio} vazio="Envios ainda não sincronizados" />
           </div>
         )}
 

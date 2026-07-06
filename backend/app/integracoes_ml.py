@@ -623,6 +623,24 @@ class MLIntegration:
             db.rollback()
             print(f"[ML] _enriquecer_shipments erro: {e}")
 
+    def enriquecer_shipments_pendentes(self, limite: int = 800) -> Dict[str, Any]:
+        """Enriquece em lote os envios (CEP/logística/prazo) das vendas que ainda
+        não têm dados de shipment. Usado pelo job agendado para ir cobrindo todo o
+        histórico aos poucos, sem estourar o limite da API de uma vez."""
+        db = self._db()
+        try:
+            pend = (db.query(MercadoLivreVendaCache)
+                    .filter(MercadoLivreVendaCache.shipment_synced == 0,
+                            MercadoLivreVendaCache.shipment_id.isnot(None))
+                    .order_by(MercadoLivreVendaCache.date_created.desc().nullslast())
+                    .limit(limite).all())
+            antes = len(pend)
+            if pend:
+                self._enriquecer_shipments(db, pend, limite=limite)
+            return {"pendentes_processados": antes}
+        finally:
+            db.close()
+
     def _custo_oficial(self, db: Session, sku: Optional[str]) -> Optional[float]:
         if not sku:
             return None
@@ -633,7 +651,7 @@ class MLIntegration:
             return None
 
     def vendas_do_anuncio(self, item_id: str, sync: bool = True, enrich: bool = True,
-                          limite_enriquecer: int = 80) -> Dict[str, Any]:
+                          limite_enriquecer: int = 200) -> Dict[str, Any]:
         """Histórico de vendas de um anúncio, com pagamento, envio e financeiro."""
         item_id = str(item_id).strip()
         db = self._db()
