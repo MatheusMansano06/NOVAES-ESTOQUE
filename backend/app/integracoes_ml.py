@@ -164,6 +164,8 @@ class MLIntegration:
         self._lock = threading.Lock()
         self._catalog_sync_lock = threading.Lock()
         self._token_lock = threading.Lock()
+        self._enrich_lock = threading.Lock()
+        self._itens_enriquecendo: set = set()  # item_ids com enriquecimento em background
         self._ultima_req = 0.0
         self._intervalo_min = 60.0 / 240.0  # margem sob o limite do ML
 
@@ -641,6 +643,38 @@ class MLIntegration:
         finally:
             db.close()
 
+    def enriquecer_item_async(self, item_id: str, limite: int = 1500) -> None:
+        """Enriquece em BACKGROUND (thread daemon) os envios pendentes de um item
+        específico — pra alimentar o gráfico de estados sem travar a abertura.
+        Deduplica: se já há uma thread enriquecendo este item, não abre outra."""
+        item_id = str(item_id).strip()
+        with self._enrich_lock:
+            if item_id in self._itens_enriquecendo:
+                return
+            self._itens_enriquecendo.add(item_id)
+
+        def _run():
+            db = self._db()
+            try:
+                pend = (db.query(MercadoLivreVendaCache)
+                        .filter(MercadoLivreVendaCache.item_id == item_id,
+                                MercadoLivreVendaCache.shipment_synced == 0,
+                                MercadoLivreVendaCache.shipment_id.isnot(None))
+                        .order_by(MercadoLivreVendaCache.date_created.desc().nullslast())
+                        .limit(limite).all())
+                # Processa em lotes com commit parcial: o gráfico de estados cresce
+                # ao vivo conforme a tela dá refresh, em vez de aparecer só no fim.
+                for i in range(0, len(pend), 100):
+                    self._enriquecer_shipments(db, pend[i:i + 100], limite=100)
+            except Exception as e:
+                print(f"[ML] enriquecer_item_async {item_id} erro: {e}")
+            finally:
+                db.close()
+                with self._enrich_lock:
+                    self._itens_enriquecendo.discard(item_id)
+
+        threading.Thread(target=_run, name=f"enrich-{item_id}", daemon=True).start()
+
     def _custo_oficial(self, db: Session, sku: Optional[str]) -> Optional[float]:
         if not sku:
             return None
@@ -670,7 +704,10 @@ class MLIntegration:
                     .all())
 
             if enrich:
-                self._enriquecer_shipments(db, rows, limite=limite_enriquecer)
+                # Enriquecimento 100% em background pra abertura ficar instantânea.
+                # A modalidade de envio já vem do cache do anúncio; o gráfico de
+                # estados preenche ao vivo via auto-refresh conforme localiza.
+                self.enriquecer_item_async(item_id)
 
             cache = self._cache_query(db, item_id)
             disponivel_atual = int(cache.estoque_disponivel or 0) if cache else 0
@@ -678,6 +715,15 @@ class MLIntegration:
             custo_unit = self._custo_oficial(db, sku)
             frete_cache = float(cache.frete_custo) if (cache and cache.frete_custo) else 0.0
             full = bool(cache.full) if cache else False
+            # Modalidade de envio é propriedade do anúncio (item FULL vende tudo
+            # FULL). Derivamos do cache pra o gráfico "pegar" sem depender do
+            # enriquecimento por venda; onde a venda já tem shipment, usa o real.
+            item_logistic = (cache.logistic_type if cache and cache.logistic_type else None)
+            if not item_logistic and cache:
+                if cache.full:
+                    item_logistic = "fulfillment"
+                elif cache.flex:
+                    item_logistic = "self_service"
 
             vendas = []
             acumulado_posterior = 0
@@ -724,11 +770,11 @@ class MLIntegration:
                         "rotulo": self._rotulo_pagamento(r.payment_type, r.payment_method_id, r.installments),
                         "total_pago": r.total_paid,
                     },
-                    # envio
+                    # envio (logistic com fallback pra modalidade do anúncio)
                     "envio": {
                         "shipment_id": r.shipment_id,
-                        "logistic_type": r.logistic_type,
-                        "rotulo": self._rotulo_logistica(r.logistic_type, r.shipping_mode),
+                        "logistic_type": r.logistic_type or item_logistic,
+                        "rotulo": self._rotulo_logistica(r.logistic_type or item_logistic, r.shipping_mode),
                         "cep": r.receiver_zip,
                         "cidade": r.receiver_city,
                         "uf": r.receiver_state,
@@ -758,6 +804,7 @@ class MLIntegration:
                 "full": full,
                 "atualizado_em": estado.synced_at.isoformat() if (estado and estado.synced_at) else None,
                 "total_vendas": len(vendas),
+                "envio_localizados": sum(1 for r in rows if r.receiver_state),
                 "resumo": {
                     "unidades": int(total_qtd),
                     "receita": round(total_receita, 2),

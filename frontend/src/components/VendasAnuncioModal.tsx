@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useCallback } from 'react'
+import { useState, useEffect, useMemo, useCallback, useRef } from 'react'
 
 const API_BASE = import.meta.env.VITE_API_URL ?? 'http://127.0.0.1:8000'
 
@@ -65,6 +65,7 @@ interface Resultado {
   full: boolean
   atualizado_em?: string | null
   total_vendas: number
+  envio_localizados?: number
   resumo: { unidades: number; receita: number; lucro: number; margem_pct?: number | null }
   vendas: Venda[]
   erro?: string
@@ -130,15 +131,23 @@ function grupoEnvio(e: Envio): { key: string; label: string; cor: string } {
   return { key: 'sem_dados', label: 'Sem dados de envio', cor: '#d0d5dd' }
 }
 
+// UF vem como "BR-SP" ou "SP" — normaliza pra sigla de 2 letras
+function ufSigla(uf?: string | null): string | null {
+  if (!uf) return null
+  const m = String(uf).toUpperCase().match(/[A-Z]{2}$/)
+  return m ? m[0] : null
+}
+const PALETA_UF = ['#3538cd', '#0a7d6e', '#ef6c00', '#7a3ffa', '#1668dc', '#b45309', '#d92d20', '#0958d9', '#2e7d32', '#c11574']
+
 interface Fatia { label: string; value: number; cor: string }
 
-function PieChart({ titulo, segmentos, vazio }: { titulo: string; segmentos: Fatia[]; vazio?: string }) {
+function PieChart({ titulo, segmentos, vazio, rodape }: { titulo: string; segmentos: Fatia[]; vazio?: string; rodape?: string }) {
   const dados = segmentos.filter(s => s.value > 0)
   const total = dados.reduce((s, x) => s + x.value, 0)
   const r = 46, cx = 60, cy = 60, stroke = 18, circ = 2 * Math.PI * r
   let acc = 0
   return (
-    <div style={{ flex: 1, minWidth: 240, background: '#fff', border: '1px solid #eaecf0', borderRadius: 12, padding: '0.85rem' }}>
+    <div style={{ flex: 1, minWidth: 240, background: '#fff', border: '1px solid #eaecf0', borderRadius: 12, padding: '0.85rem', display: 'flex', flexDirection: 'column' }}>
       <div style={{ fontSize: '.8rem', fontWeight: 800, color: '#101828', marginBottom: 8 }}>{titulo}</div>
       {total === 0 ? (
         <div style={{ fontSize: '.78rem', color: '#98a2b3', padding: '1.5rem 0', textAlign: 'center' }}>{vazio || 'Sem dados'}</div>
@@ -172,6 +181,7 @@ function PieChart({ titulo, segmentos, vazio }: { titulo: string; segmentos: Fat
           </div>
         </div>
       )}
+      {rodape && <div style={{ marginTop: 'auto', paddingTop: 8, fontSize: '.68rem', color: '#98a2b3' }}>{rodape}</div>}
     </div>
   )
 }
@@ -267,10 +277,33 @@ export function VendasAnuncioModal({ itemId, titulo, onClose }: { itemId: string
 
   useEffect(() => { carregar(false) }, [carregar])
 
+  // Auto-refresh silencioso enquanto o enriquecimento de envios (em background)
+  // ainda está localizando vendas — os gráficos de envio/estados crescem ao vivo.
+  // Para quando cobre tudo, quando estagna (pedidos sem envio) ou após o teto.
+  const pollRef = useRef({ tentativas: 0, ultimo: -1 })
+  useEffect(() => {
+    if (!dados) return
+    const loc = dados.envio_localizados ?? 0
+    if (loc >= dados.total_vendas) return
+    const t = setInterval(async () => {
+      const p = pollRef.current
+      if (p.tentativas >= 30 || (p.ultimo === loc && p.tentativas >= 3)) { clearInterval(t); return }
+      p.tentativas += 1; p.ultimo = loc
+      try {
+        const r = await fetch(`${API_BASE}/api/ml/anuncios/${encodeURIComponent(itemId)}/vendas?sync=0`, { cache: 'no-store' })
+        const j: Resultado = await r.json()
+        if (r.ok && !j.erro) setDados(j)
+      } catch { /* silencioso */ }
+    }, 5000)
+    return () => clearInterval(t)
+  }, [dados, itemId])
+
   // Distribuições p/ os gráficos de pizza (só vendas válidas, histórico inteiro do item)
-  const { fatiasPagamento, fatiasEnvio } = useMemo(() => {
+  const { fatiasPagamento, fatiasEnvio, fatiasEstados, ufTotal } = useMemo(() => {
     const pag = new Map<string, Fatia>()
     const env = new Map<string, Fatia>()
+    const uf = new Map<string, number>()
+    let ufTot = 0
     for (const v of dados?.vendas || []) {
       if (v.cancelada) continue
       const gp = grupoPagamento(v.pagamento)
@@ -279,9 +312,17 @@ export function VendasAnuncioModal({ itemId, titulo, onClose }: { itemId: string
       ap.value += 1; pag.set(gp.key, ap)
       const ae = env.get(ep.key) || { label: ep.label, cor: ep.cor, value: 0 }
       ae.value += 1; env.set(ep.key, ae)
+      const sig = ufSigla(v.envio.uf)
+      if (sig) { uf.set(sig, (uf.get(sig) || 0) + 1); ufTot++ }
     }
     const ord = (m: Map<string, Fatia>) => [...m.values()].sort((a, b) => b.value - a.value)
-    return { fatiasPagamento: ord(pag), fatiasEnvio: ord(env) }
+    // Estados: top 9 + "Outros" agrupado, cores da paleta
+    const ufOrd = [...uf.entries()].sort((a, b) => b[1] - a[1])
+    const topN = ufOrd.slice(0, 9)
+    const resto = ufOrd.slice(9).reduce((s, [, n]) => s + n, 0)
+    const fEstados: Fatia[] = topN.map(([sig, n], i) => ({ label: sig, value: n, cor: PALETA_UF[i % PALETA_UF.length] }))
+    if (resto > 0) fEstados.push({ label: 'Outros', value: resto, cor: '#98a2b3' })
+    return { fatiasPagamento: ord(pag), fatiasEnvio: ord(env), fatiasEstados: fEstados, ufTotal: ufTot }
   }, [dados])
 
   const vendasFiltradas = useMemo(() => {
@@ -335,11 +376,19 @@ export function VendasAnuncioModal({ itemId, titulo, onClose }: { itemId: string
           </div>
         )}
 
-        {/* Gráficos de distribuição — pagamento e envio */}
+        {/* Gráficos de distribuição — pagamento, envio e estados */}
         {dados && dados.total_vendas > 0 && (
           <div style={{ display: 'flex', gap: 12, padding: '0.85rem 1.25rem', background: '#f9fafb', borderBottom: '1px solid #f0f0f0', flexWrap: 'wrap' }}>
             <PieChart titulo="💳 Métodos de pagamento" segmentos={fatiasPagamento} />
-            <PieChart titulo="🚚 Modalidade de envio" segmentos={fatiasEnvio} vazio="Envios ainda não sincronizados" />
+            <PieChart titulo="🚚 Modalidade de envio" segmentos={fatiasEnvio} />
+            <PieChart
+              titulo="📍 Estados (de onde vêm)"
+              segmentos={fatiasEstados}
+              vazio="Localizando vendas…"
+              rodape={ufTotal < dados.total_vendas
+                ? `📍 ${ufTotal} de ${dados.total_vendas} vendas localizadas${(dados.envio_localizados ?? 0) < dados.total_vendas ? ' · sincronizando o resto em segundo plano' : ''}`
+                : `📍 todas as ${ufTotal} vendas localizadas`}
+            />
           </div>
         )}
 
