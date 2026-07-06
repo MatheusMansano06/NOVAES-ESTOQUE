@@ -593,10 +593,18 @@ class MLIntegration:
             return
 
         def buscar(r: MercadoLivreVendaCache):
-            return r, self._get_raw(f"/shipments/{r.shipment_id}", None, token)
+            # 1 retry curto: sob paralelismo alto o ML pode devolver 429/timeout
+            for tent in range(2):
+                ship = self._get_raw(f"/shipments/{r.shipment_id}", None, token)
+                if ship:
+                    return r, ship
+                if tent == 0:
+                    time.sleep(0.4)
+            return r, None
 
         try:
-            with ThreadPoolExecutor(max_workers=6) as ex:
+            workers = max(6, min(int(os.getenv("ML_ENRICH_WORKERS", "16")), 32))
+            with ThreadPoolExecutor(max_workers=workers) as ex:
                 for r, ship in ex.map(buscar, pend):
                     if not ship:
                         continue
@@ -662,10 +670,12 @@ class MLIntegration:
                                 MercadoLivreVendaCache.shipment_id.isnot(None))
                         .order_by(MercadoLivreVendaCache.date_created.desc().nullslast())
                         .limit(limite).all())
-                # Processa em lotes com commit parcial: o gráfico de estados cresce
-                # ao vivo conforme a tela dá refresh, em vez de aparecer só no fim.
-                for i in range(0, len(pend), 100):
-                    self._enriquecer_shipments(db, pend[i:i + 100], limite=100)
+                # Processa em lotes pequenos com commit parcial: o gráfico de
+                # estados aparece em segundos e cresce ao vivo, em vez de esperar
+                # tudo. Lote pequeno + muitos workers = primeiras fatias rápidas.
+                lote = max(20, min(int(os.getenv("ML_ENRICH_BATCH", "48")), 200))
+                for i in range(0, len(pend), lote):
+                    self._enriquecer_shipments(db, pend[i:i + lote], limite=lote)
             except Exception as e:
                 print(f"[ML] enriquecer_item_async {item_id} erro: {e}")
             finally:

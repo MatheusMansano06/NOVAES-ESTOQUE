@@ -288,14 +288,14 @@ export function VendasAnuncioModal({ itemId, titulo, onClose }: { itemId: string
     if (loc >= dados.total_vendas) return
     const t = setInterval(async () => {
       const p = pollRef.current
-      if (p.tentativas >= 30 || (p.ultimo === loc && p.tentativas >= 3)) { clearInterval(t); return }
+      if (p.tentativas >= 60 || (p.ultimo === loc && p.tentativas >= 5)) { clearInterval(t); return }
       p.tentativas += 1; p.ultimo = loc
       try {
         const r = await fetch(`${API_BASE}/api/ml/anuncios/${encodeURIComponent(itemId)}/vendas?sync=0`, { cache: 'no-store' })
         const j: Resultado = await r.json()
         if (r.ok && !j.erro) setDados(j)
       } catch { /* silencioso */ }
-    }, 5000)
+    }, 2500)
     return () => clearInterval(t)
   }, [dados, itemId])
 
