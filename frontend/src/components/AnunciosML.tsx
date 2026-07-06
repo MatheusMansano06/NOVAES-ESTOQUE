@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, type CSSProperties } from 'react'
 import { Precificador, type PricingSnapshot, loadPricingSummaryMap, loadPriceHistory } from './Precificador'
 import { MLAnuncioEditorModal } from './MLAnuncioEditorModal'
+import { VendasAnuncioModal } from './VendasAnuncioModal'
 
 const API_BASE = import.meta.env.VITE_API_URL ?? 'http://127.0.0.1:8000'
 const PAGE_SIZE_OPTIONS = [10, 20, 30, 40, 50] as const
@@ -179,6 +180,7 @@ export function AnunciosML({ onVoltar }: Props) {
   const [acaoMsg, setAcaoMsg] = useState<{ tipo: 'ok' | 'erro'; texto: string } | null>(null)
   const [dupCategoria, setDupCategoria] = useState<Anuncio | null>(null)
   const [centralPromo, setCentralPromo] = useState(false)
+  const [vendasAnuncio, setVendasAnuncio] = useState<Anuncio | null>(null)
 
   const avisar = (tipo: 'ok' | 'erro', texto: string) => {
     setAcaoMsg({ tipo, texto })
@@ -356,7 +358,14 @@ export function AnunciosML({ onVoltar }: Props) {
                     <StockEditor anuncio={a} onSaved={carregar} onMsg={avisar} />
                     <div style={{ textAlign: 'center', minWidth: '70px' }}>
                       <div style={{ fontSize: '0.7rem', color: '#999' }}>Vendidos</div>
-                      <div style={{ fontWeight: 700, color: '#1a1a1a' }}>{a.vendidos}</div>
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5 }}>
+                        <span style={{ fontWeight: 700, color: '#1a1a1a' }}>{a.vendidos}</span>
+                        <button
+                          onClick={() => setVendasAnuncio(a)}
+                          title="Ver todas as vendas deste anúncio"
+                          style={{ width: 24, height: 24, borderRadius: 6, border: '1px solid #d0d5dd', background: '#fff', color: '#3483fa', cursor: 'pointer', fontSize: '.82rem', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 0 }}
+                        >🔎</button>
+                      </div>
                     </div>
                     <PriceBubble anuncio={a} resumo={resumo} custoOficial={custosOficiais[a.sku]} statusCor={corStatus(a.status)} statusLabel={labelStatus(a.status)} onPriceChanged={carregar} />
                   </div>
@@ -475,6 +484,13 @@ export function AnunciosML({ onVoltar }: Props) {
         <CentralPromocaoPanel
           onClose={() => setCentralPromo(false)}
           onMsg={avisar}
+        />
+      )}
+      {vendasAnuncio && (
+        <VendasAnuncioModal
+          itemId={vendasAnuncio.id}
+          titulo={vendasAnuncio.titulo}
+          onClose={() => setVendasAnuncio(null)}
         />
       )}
     </div>

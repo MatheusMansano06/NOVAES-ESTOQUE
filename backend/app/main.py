@@ -4305,6 +4305,32 @@ async def ml_anuncios(request: Request):
     return JSONResponse(resultado, status_code=code, headers={"Cache-Control": "no-store"})
 
 
+async def ml_anuncio_vendas(request: Request):
+    """GET /api/ml/anuncios/{item_id}/vendas — histórico de vendas do anúncio
+    (cliente, IDs, CEP, data, pagamento crédito/débito/pix e financeiro por venda)."""
+    item_id = request.path_params["item_id"]
+    sync = request.query_params.get("sync", "1").strip().lower() not in {"0", "false", "nao", "no"}
+    try:
+        resultado = ml.vendas_do_anuncio(item_id, sync=sync)
+    except Exception as e:
+        return JSONResponse({"erro": str(e)}, status_code=502, headers={"Cache-Control": "no-store"})
+    code = 200 if not resultado.get("erro") else 502
+    return JSONResponse(resultado, status_code=code, headers={"Cache-Control": "no-store"})
+
+
+async def ml_vendas_sync(request: Request):
+    """POST /api/ml/vendas/sync — força atualização do espelho de pedidos.
+    Body opcional: {"full": true} para varrer todo o histórico."""
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    incremental = not bool(body.get("full"))
+    resultado = ml.sync_vendas(incremental=incremental)
+    code = 200 if not resultado.get("erro") else 502
+    return JSONResponse(resultado, status_code=code, headers={"Cache-Control": "no-store"})
+
+
 async def ml_promocoes(request: Request):
     """GET /api/ml/promocoes — promoções/campanhas ativas da Central de Promoções do ML."""
     resultado = ml.listar_promocoes()
@@ -5406,6 +5432,8 @@ routes = [
     Route("/api/ml/promocoes", ml_promocoes, methods=["GET"]),
     Route("/api/ml/promocoes/itens/{item_id:str}/inscrever", ml_promocao_inscrever, methods=["POST"]),
     Route("/api/ml/promocoes/{promotion_id:str}/candidatos", ml_promocao_candidatos, methods=["GET"]),
+    Route("/api/ml/anuncios/{item_id:str}/vendas", ml_anuncio_vendas, methods=["GET"]),
+    Route("/api/ml/vendas/sync", ml_vendas_sync, methods=["POST"]),
     Route("/api/ml/anuncios/{item_id:str}", ml_anuncio_detalhes, methods=["GET"]),
     Route("/api/ml/anuncios/{item_id:str}/description", ml_anuncio_descricao, methods=["POST"]),
     Route("/api/ml/anuncios/{item_id:str}/attributes", ml_anuncio_atributos, methods=["POST"]),

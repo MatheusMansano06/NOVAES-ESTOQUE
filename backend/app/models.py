@@ -434,6 +434,57 @@ class MercadoLivreSyncState(Base):
     last_error = Column(Text, nullable=True)
 
 
+class MercadoLivreVendaCache(Base):
+    """
+    Espelho local de cada VENDA (order_item) do Mercado Livre.
+    Um registro por (order_id, item_id). Alimenta a tela de "Detalhe de Vendas"
+    (lupa ao lado de Vendidos) sem bater na Orders API toda vez, já que a API
+    não filtra pedidos por anúncio — o histórico completo fica espelhado aqui e
+    é atualizado por sync incremental (por data).
+    """
+    __tablename__ = "ml_venda_cache"
+
+    id = Column(Integer, primary_key=True)
+    order_id = Column(String(40), index=True)
+    item_id = Column(String(50), index=True)
+    variation_id = Column(String(50), nullable=True)
+    pack_id = Column(String(40), nullable=True)          # "carrinho"
+    # Comprador
+    buyer_id = Column(String(40), nullable=True)
+    buyer_nickname = Column(String(120), nullable=True)
+    buyer_nome = Column(String(180), nullable=True)
+    # Venda
+    status = Column(String(40), index=True, nullable=True)  # paid, cancelled...
+    date_created = Column(DateTime, index=True, nullable=True)
+    date_closed = Column(DateTime, nullable=True)
+    quantity = Column(Integer, default=0)
+    unit_price = Column(Float, nullable=True)
+    item_title = Column(String(255), nullable=True)
+    sku = Column(String(120), index=True, nullable=True)
+    sale_fee = Column(Float, nullable=True)               # tarifa por unidade (order_item.sale_fee)
+    currency = Column(String(10), nullable=True)
+    total_paid = Column(Float, nullable=True)             # total pago pelo comprador no pedido
+    # Pagamento
+    payment_type = Column(String(40), nullable=True)      # credit_card/debit_card/account_money/ticket/bank_transfer
+    payment_method_id = Column(String(60), nullable=True) # visa/master/pix/...
+    installments = Column(Integer, nullable=True)
+    payments_json = Column(Text, nullable=True)
+    # Envio (enriquecido via /shipments/{id})
+    shipment_id = Column(String(40), nullable=True)
+    logistic_type = Column(String(60), nullable=True)     # fulfillment/self_service/cross_docking/drop_off...
+    shipping_mode = Column(String(40), nullable=True)
+    free_shipping = Column(Integer, default=0)
+    shipping_cost = Column(Float, nullable=True)          # custo do frete pro vendedor
+    receiver_zip = Column(String(20), nullable=True)
+    receiver_city = Column(String(120), nullable=True)
+    receiver_state = Column(String(20), nullable=True)
+    receiver_name = Column(String(180), nullable=True)
+    lead_time_date = Column(DateTime, nullable=True)      # estimativa de entrega
+    shipment_synced = Column(Integer, default=0)          # 1 quando shipment já foi enriquecido
+    tags_json = Column(Text, nullable=True)
+    synced_at = Column(DateTime, default=datetime.utcnow, index=True)
+
+
 class SkuVendasSnapshot(Base):
     """
     Foto diária do total de vendas (sold_quantity) de cada anúncio do ML.

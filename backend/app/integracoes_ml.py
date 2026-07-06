@@ -30,7 +30,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import or_, func
 
 from database import SessionLocal
-from app.models import MercadoLivreItemCache, MercadoLivreSyncState
+from app.models import MercadoLivreItemCache, MercadoLivreSyncState, MercadoLivreVendaCache, CustoProduto
 
 load_dotenv()
 
@@ -419,6 +419,368 @@ class MLIntegration:
             "chegando": chegando,
             "total": int(s.get("total") or 0),
         }
+
+    # ======================================================================
+    # VENDAS (Orders API) — espelho local + detalhe por anúncio
+    # A Orders API do ML NÃO filtra pedidos por anúncio, então espelhamos os
+    # pedidos do vendedor em ml_venda_cache (sync incremental por data) e
+    # consultamos o histórico completo de um item localmente.
+    # ======================================================================
+    VENDAS_SYNC_SCOPE = "orders"
+    VENDAS_SYNC_TTL_SECONDS = int(os.getenv("ML_VENDAS_TTL_SECONDS", "300"))
+    _ORDERS_PAGE = 51
+    _ORDERS_MAX_OFFSET = 9000  # ML limita o offset; acima disso avançamos por janela de data
+
+    @staticmethod
+    def _iso_ml(dt: datetime) -> str:
+        """Formato de data aceito pelo filtro da Orders API (UTC)."""
+        return dt.strftime("%Y-%m-%dT%H:%M:%S.000-00:00")
+
+    def _sync_state_venda(self, db: Session) -> Optional[MercadoLivreSyncState]:
+        return self._sync_state_query(db, self.VENDAS_SYNC_SCOPE)
+
+    def _pagamento_resumo(self, payments: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """Extrai meio de pagamento principal de um pedido (crédito/débito/pix)."""
+        pay = payments[0] if payments else {}
+        ptype = pay.get("payment_type") or None
+        method = pay.get("payment_method_id") or None
+        parcelas = pay.get("installments")
+        total_paid = 0.0
+        for p in payments or []:
+            try:
+                total_paid += float(p.get("total_paid_amount") or 0)
+            except (TypeError, ValueError):
+                pass
+        return {
+            "payment_type": ptype,
+            "payment_method_id": method,
+            "installments": int(parcelas) if parcelas else None,
+            "total_paid": total_paid or None,
+        }
+
+    def _upsert_venda(self, db: Session, order: Dict[str, Any]) -> int:
+        """Grava/atualiza as linhas (order_item) de um pedido. Retorna nº de linhas novas."""
+        oid = str(order.get("id") or "").strip()
+        if not oid:
+            return 0
+        pack_id = order.get("pack_id")
+        buyer = order.get("buyer") or {}
+        buyer_nome = " ".join(x for x in [buyer.get("first_name"), buyer.get("last_name")] if x).strip() or None
+        pay = self._pagamento_resumo(order.get("payments") or [])
+        dt_created = self._parse_dt_iso(order.get("date_created"))
+        dt_closed = self._parse_dt_iso(order.get("date_closed"))
+        status = order.get("status")
+        tags = order.get("tags")
+        shipping_id = (order.get("shipping") or {}).get("id")
+        novos = 0
+        for it in order.get("order_items") or []:
+            item = it.get("item") or {}
+            iid = str(item.get("id") or "").strip()
+            if not iid:
+                continue
+            row = (db.query(MercadoLivreVendaCache)
+                   .filter(MercadoLivreVendaCache.order_id == oid,
+                           MercadoLivreVendaCache.item_id == iid).first())
+            if row is None:
+                row = MercadoLivreVendaCache(order_id=oid, item_id=iid)
+                db.add(row)
+                novos += 1
+            row.variation_id = str(item.get("variation_id")) if item.get("variation_id") else None
+            row.pack_id = str(pack_id) if pack_id else None
+            row.buyer_id = str(buyer.get("id")) if buyer.get("id") else None
+            row.buyer_nickname = buyer.get("nickname")
+            row.buyer_nome = buyer_nome
+            row.status = status
+            row.date_created = dt_created
+            row.date_closed = dt_closed
+            row.quantity = int(it.get("quantity") or 0)
+            row.unit_price = it.get("unit_price")
+            row.item_title = item.get("title")
+            row.sku = item.get("seller_sku") or item.get("seller_custom_field")
+            row.sale_fee = it.get("sale_fee")
+            row.currency = order.get("currency_id")
+            row.total_paid = pay["total_paid"]
+            row.payment_type = pay["payment_type"]
+            row.payment_method_id = pay["payment_method_id"]
+            row.installments = pay["installments"]
+            row.payments_json = self._json_dump(order.get("payments"))
+            row.shipment_id = str(shipping_id) if shipping_id else None
+            row.tags_json = self._json_dump(tags)
+            row.synced_at = self._utcnow()
+        return novos
+
+    def sync_vendas(self, incremental: bool = True, max_orders: Optional[int] = None) -> Dict[str, Any]:
+        """Espelha os pedidos do vendedor em ml_venda_cache.
+        incremental=True: só puxa pedidos recentes (a partir do último sync, com 1
+        dia de sobreposição). Full: percorre todo o histórico (janela por data)."""
+        if not self.user_id:
+            return {"erro": "ML_USER_ID nao configurado", "novos": 0}
+        db = self._db()
+        novos = 0
+        vistos = 0
+        try:
+            estado = self._sync_state_venda(db)
+            # Sync incremental muito recente? não precisa bater na API de novo.
+            if incremental and estado and self._is_fresh(estado.cache_expires_at):
+                return {"novos": 0, "vistos": 0, "cache": True}
+
+            date_from = None
+            if incremental and estado and estado.synced_at:
+                date_from = estado.synced_at - timedelta(days=1)
+
+            base = {"seller": self.user_id, "sort": "date_desc", "limit": self._ORDERS_PAGE}
+            if date_from:
+                base["order.date_created.from"] = self._iso_ml(date_from)
+
+            offset = 0
+            date_to_cursor: Optional[datetime] = None
+            while True:
+                params = dict(base)
+                params["offset"] = offset
+                if date_to_cursor:
+                    params["order.date_created.to"] = self._iso_ml(date_to_cursor)
+                resp = self._get("/orders/search", params)
+                results = (resp or {}).get("results") or []
+                if not results:
+                    break
+                for order in results:
+                    novos += self._upsert_venda(db, order)
+                vistos += len(results)
+                try:
+                    db.commit()
+                except Exception:
+                    db.rollback()
+                if max_orders and vistos >= max_orders:
+                    break
+                if len(results) < self._ORDERS_PAGE:
+                    break
+                offset += self._ORDERS_PAGE
+                if offset >= self._ORDERS_MAX_OFFSET:
+                    # estourou o teto de offset do ML: reabre janela a partir do último pedido
+                    ultima = self._parse_dt_iso(results[-1].get("date_created"))
+                    if not ultima:
+                        break
+                    date_to_cursor = ultima
+                    offset = 0
+
+            if estado is None:
+                estado = MercadoLivreSyncState(scope=self.VENDAS_SYNC_SCOPE, resource="orders")
+                db.add(estado)
+            estado.synced_at = self._utcnow()
+            estado.cache_expires_at = self._utcnow() + timedelta(seconds=self.VENDAS_SYNC_TTL_SECONDS)
+            estado.status = "ok"
+            estado.last_error = None
+            db.commit()
+            return {"novos": novos, "vistos": vistos, "cache": False}
+        except Exception as e:
+            db.rollback()
+            print(f"[ML] sync_vendas erro: {e}")
+            return {"erro": str(e), "novos": novos, "vistos": vistos}
+        finally:
+            db.close()
+
+    def _enriquecer_shipments(self, db: Session, rows: List[MercadoLivreVendaCache], limite: int = 80) -> None:
+        """Enriquece CEP / logística / prazo de entrega via /shipments/{id} em
+        paralelo (bounded). Só processa quem ainda não foi enriquecido; o limite
+        evita rajada gigante — o resto completa nas próximas aberturas."""
+        pend = [r for r in rows if not r.shipment_synced and r.shipment_id][:limite]
+        if not pend:
+            return
+        token = self.get_access_token()
+        if not token:
+            return
+
+        def buscar(r: MercadoLivreVendaCache):
+            return r, self._get_raw(f"/shipments/{r.shipment_id}", None, token)
+
+        try:
+            with ThreadPoolExecutor(max_workers=6) as ex:
+                for r, ship in ex.map(buscar, pend):
+                    if not ship:
+                        continue
+                    addr = ship.get("receiver_address") or {}
+                    cidade = addr.get("city") or {}
+                    estado_uf = addr.get("state") or {}
+                    lead = ship.get("lead_time") or {}
+                    edt = (lead.get("estimated_delivery_time") or {}).get("date") \
+                        or (lead.get("estimated_delivery_final") or {}).get("date")
+                    r.logistic_type = ship.get("logistic_type")
+                    r.shipping_mode = ship.get("mode")
+                    r.receiver_zip = addr.get("zip_code")
+                    r.receiver_city = cidade.get("name")
+                    r.receiver_state = estado_uf.get("id") or estado_uf.get("name")
+                    r.receiver_name = addr.get("receiver_name")
+                    r.lead_time_date = self._parse_dt_iso(edt)
+                    try:
+                        cost = (ship.get("shipping_option") or {}).get("cost")
+                        if cost is not None:
+                            r.shipping_cost = float(cost)
+                    except (TypeError, ValueError):
+                        pass
+                    r.shipment_synced = 1
+            db.commit()
+        except Exception as e:
+            db.rollback()
+            print(f"[ML] _enriquecer_shipments erro: {e}")
+
+    def _custo_oficial(self, db: Session, sku: Optional[str]) -> Optional[float]:
+        if not sku:
+            return None
+        row = db.query(CustoProduto).filter(CustoProduto.produto_chave == sku).first()
+        try:
+            return float(row.custo) if row and row.custo else None
+        except (TypeError, ValueError):
+            return None
+
+    def vendas_do_anuncio(self, item_id: str, sync: bool = True, enrich: bool = True,
+                          limite_enriquecer: int = 80) -> Dict[str, Any]:
+        """Histórico de vendas de um anúncio, com pagamento, envio e financeiro."""
+        item_id = str(item_id).strip()
+        db = self._db()
+        try:
+            if sync:
+                self.sync_vendas(incremental=True)
+
+            rows = (db.query(MercadoLivreVendaCache)
+                    .filter(MercadoLivreVendaCache.item_id == item_id)
+                    .order_by(MercadoLivreVendaCache.date_created.desc().nullslast())
+                    .all())
+
+            if enrich:
+                self._enriquecer_shipments(db, rows, limite=limite_enriquecer)
+
+            cache = self._cache_query(db, item_id)
+            disponivel_atual = int(cache.estoque_disponivel or 0) if cache else 0
+            sku = (cache.sku if cache else None) or (rows[0].sku if rows else None)
+            custo_unit = self._custo_oficial(db, sku)
+            frete_cache = float(cache.frete_custo) if (cache and cache.frete_custo) else 0.0
+            full = bool(cache.full) if cache else False
+
+            vendas = []
+            acumulado_posterior = 0
+            total_receita = total_lucro = total_qtd = 0.0
+            for r in rows:
+                qtd = int(r.quantity or 0)
+                preco = float(r.unit_price or 0)
+                receita = preco * qtd
+                # frete que o VENDEDOR paga (Full/frete grátis): shipment > cache
+                frete_vend = float(r.shipping_cost) if r.shipping_cost else (frete_cache if full else 0.0)
+                tarifa = float(r.sale_fee or 0) * (qtd if qtd else 1)
+                custo = (custo_unit or 0) * qtd
+                lucro = receita - tarifa - frete_vend - custo if receita else 0.0
+                margem = (lucro / receita * 100) if receita else None
+                disp_apos = disponivel_atual + acumulado_posterior
+                acumulado_posterior += qtd
+
+                cancelada = (r.status or "").lower() in {"cancelled", "invalid"}
+                if not cancelada:
+                    total_receita += receita
+                    total_lucro += lucro
+                    total_qtd += qtd
+
+                vendas.append({
+                    "order_id": r.order_id,
+                    "pack_id": r.pack_id,
+                    "cliente": r.buyer_nome or r.buyer_nickname,
+                    "cliente_nickname": r.buyer_nickname,
+                    "buyer_id": r.buyer_id,
+                    "data": r.date_created.isoformat() if r.date_created else None,
+                    "status": r.status,
+                    "cancelada": cancelada,
+                    "quantidade": qtd,
+                    "preco_unitario": preco,
+                    "titulo": r.item_title,
+                    "sku": r.sku,
+                    "variation_id": r.variation_id,
+                    "disponivel_apos": disp_apos,
+                    # pagamento
+                    "pagamento": {
+                        "tipo": r.payment_type,
+                        "metodo": r.payment_method_id,
+                        "parcelas": r.installments,
+                        "rotulo": self._rotulo_pagamento(r.payment_type, r.payment_method_id, r.installments),
+                        "total_pago": r.total_paid,
+                    },
+                    # envio
+                    "envio": {
+                        "shipment_id": r.shipment_id,
+                        "logistic_type": r.logistic_type,
+                        "rotulo": self._rotulo_logistica(r.logistic_type, r.shipping_mode),
+                        "cep": r.receiver_zip,
+                        "cidade": r.receiver_city,
+                        "uf": r.receiver_state,
+                        "destinatario": r.receiver_name,
+                        "entrega_estimada": r.lead_time_date.isoformat() if r.lead_time_date else None,
+                    },
+                    # financeiro
+                    "financeiro": {
+                        "receita": round(receita, 2),
+                        "tarifa": round(tarifa, 2),
+                        "frete": round(frete_vend, 2),
+                        "custo": round(custo, 2) if custo_unit is not None else None,
+                        "lucro": round(lucro, 2),
+                        "margem_pct": round(margem, 2) if margem is not None else None,
+                        "tem_custo": custo_unit is not None,
+                    },
+                })
+
+            return {
+                "item_id": item_id,
+                "sku": sku,
+                "titulo": cache.titulo if cache else (rows[0].item_title if rows else None),
+                "thumbnail": (cache.imagem_principal or cache.thumbnail) if cache else None,
+                "vendidos_total": int(cache.vendidos or 0) if cache else None,
+                "disponivel_atual": disponivel_atual,
+                "custo_unitario": custo_unit,
+                "full": full,
+                "total_vendas": len(vendas),
+                "resumo": {
+                    "unidades": int(total_qtd),
+                    "receita": round(total_receita, 2),
+                    "lucro": round(total_lucro, 2),
+                    "margem_pct": round(total_lucro / total_receita * 100, 2) if total_receita else None,
+                },
+                "vendas": vendas,
+            }
+        finally:
+            db.close()
+
+    @staticmethod
+    def _rotulo_pagamento(ptype: Optional[str], method: Optional[str], parcelas: Optional[int]) -> str:
+        m = (method or "").lower()
+        t = (ptype or "").lower()
+        if m == "pix" or "pix" in m:
+            return "Pix"
+        if t == "credit_card":
+            base = "Cartão de crédito"
+            return f"{base} · {parcelas}x" if parcelas and parcelas > 1 else base
+        if t == "debit_card":
+            return "Cartão de débito"
+        if t == "account_money":
+            return "Saldo Mercado Pago"
+        if t.startswith("consumer_credit") or "consumer_credit" in m or "mercadopago_cc" in m:
+            base = "Mercado Crédito"
+            return f"{base} · {parcelas}x" if parcelas and parcelas > 1 else base
+        if t == "ticket" or m in {"bolbradesco", "pec"}:
+            return "Boleto"
+        if t == "bank_transfer":
+            return "Transferência"
+        if m:
+            return method
+        return "—"
+
+    @staticmethod
+    def _rotulo_logistica(logistic_type: Optional[str], mode: Optional[str]) -> str:
+        lt = (logistic_type or "").lower()
+        mapa = {
+            "fulfillment": "FULL (Mercado Envios)",
+            "self_service": "Flex (envio próprio)",
+            "cross_docking": "Mercado Envios (coleta)",
+            "drop_off": "Mercado Envios (agência)",
+            "xd_drop_off": "Mercado Envios (agência)",
+            "default": "Mercado Envios",
+        }
+        return mapa.get(lt, mode or "Mercado Envios")
 
     def _request_json(self, method: str, path: str, body: Optional[Dict] = None, params: Optional[Dict] = None) -> Optional[Any]:
         token = self.get_access_token()
