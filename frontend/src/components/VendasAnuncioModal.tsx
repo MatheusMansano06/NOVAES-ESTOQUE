@@ -387,6 +387,9 @@ export function VendasAnuncioModal({ itemId, titulo, onClose }: { itemId: string
           <button onClick={onClose} aria-label="Fechar" style={{ flexShrink: 0, width: 30, height: 30, borderRadius: 8, border: '1px solid #e4e7ec', background: '#fff', color: '#667085', fontSize: '1.2rem', cursor: 'pointer' }}>×</button>
         </div>
 
+        {/* Corpo rolável — tudo abaixo do cabeçalho rola junto */}
+        <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+
         {/* Resumo */}
         {dados && (
           <div style={{ display: 'flex', gap: 10, padding: '0.75rem 1.25rem', background: '#fff', borderBottom: '1px solid #f0f0f0', flexWrap: 'wrap' }}>
@@ -426,7 +429,7 @@ export function VendasAnuncioModal({ itemId, titulo, onClose }: { itemId: string
         )}
 
         {/* Filtros */}
-        <div style={{ display: 'flex', gap: 8, padding: '0.65rem 1.25rem', background: '#fff', borderBottom: '1px solid #f0f0f0', flexWrap: 'wrap', alignItems: 'center' }}>
+        <div style={{ position: 'sticky', top: 0, zIndex: 2, display: 'flex', gap: 8, padding: '0.65rem 1.25rem', background: '#fff', borderBottom: '1px solid #f0f0f0', borderTop: '1px solid #f0f0f0', flexWrap: 'wrap', alignItems: 'center' }}>
           <input value={busca} onChange={e => setBusca(e.target.value)} placeholder="Buscar por cliente, venda, carrinho, CEP…"
             style={{ flex: 1, minWidth: 200, padding: '7px 11px', border: '1px solid #e4e7ec', borderRadius: 8, fontSize: '.82rem' }} />
           {[['todos', 'Todos'], ['pix', '⚡ Pix'], ['credit_card', '💳 Crédito'], ['debit_card', '🏦 Débito'], ['outros', 'Outros']].map(([id, lab]) => (
@@ -438,7 +441,7 @@ export function VendasAnuncioModal({ itemId, titulo, onClose }: { itemId: string
         </div>
 
         {/* Lista */}
-        <div style={{ flex: 1, overflowY: 'auto', padding: '1rem 1.25rem', display: 'flex', flexDirection: 'column', gap: 10 }}>
+        <div style={{ padding: '1rem 1.25rem', display: 'flex', flexDirection: 'column', gap: 10 }}>
           {carregando && <div style={{ textAlign: 'center', color: '#667085', padding: '2.5rem' }}>Carregando vendas do Mercado Livre…</div>}
           {!carregando && erro && (
             <div style={{ textAlign: 'center', color: '#b42318', padding: '2rem' }}>
@@ -450,6 +453,8 @@ export function VendasAnuncioModal({ itemId, titulo, onClose }: { itemId: string
           )}
           {!carregando && !erro && vendasFiltradas.map(v => <CardVenda key={`${v.order_id}-${v.sku || ''}`} v={v} />)}
         </div>
+
+        </div>{/* fim do corpo rolável */}
       </div>
     </div>
   )
