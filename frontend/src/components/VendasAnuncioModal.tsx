@@ -1,4 +1,6 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react'
+import { DifalPanel } from './DifalPanel'
+import type { UF, EntradaVenda } from './difal'
 
 const API_BASE = import.meta.env.VITE_API_URL ?? 'http://127.0.0.1:8000'
 
@@ -326,6 +328,18 @@ export function VendasAnuncioModal({ itemId, titulo, onClose }: { itemId: string
     return { fatiasPagamento: ord(pag), fatiasEnvio: ord(env), fatiasEstados: fEstados, ufTotal: ufTot }
   }, [dados])
 
+  // Entradas p/ o cálculo de DIFAL: vendas válidas com UF, base = valor da mercadoria
+  const entradasDifal = useMemo<EntradaVenda[]>(() => {
+    const out: EntradaVenda[] = []
+    for (const v of dados?.vendas || []) {
+      if (v.cancelada) continue
+      const sig = ufSigla(v.envio.uf)
+      if (!sig) continue
+      out.push({ uf: sig as UF, base: (v.preco_unitario || 0) * (v.quantidade || 0) })
+    }
+    return out
+  }, [dados])
+
   const vendasFiltradas = useMemo(() => {
     if (!dados) return []
     const q = busca.trim().toLowerCase()
@@ -399,6 +413,16 @@ export function VendasAnuncioModal({ itemId, titulo, onClose }: { itemId: string
                 : `📍 todas as ${ufTotal} vendas localizadas`}
             />
           </div>
+        )}
+
+        {/* Calculadora de DIFAL (usa a distribuição real por estado) */}
+        {dados && entradasDifal.length > 0 && (
+          <DifalPanel
+            entradas={entradasDifal}
+            receitaTotal={dados.resumo.receita}
+            vendasTotal={dados.total_vendas}
+            vendasLocalizadas={ufTotal}
+          />
         )}
 
         {/* Filtros */}
