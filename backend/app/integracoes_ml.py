@@ -638,8 +638,13 @@ class MLIntegration:
         item_id = str(item_id).strip()
         db = self._db()
         try:
-            if sync:
+            # Abertura normal lê do banco (instantâneo). Só sincroniza quando o
+            # usuário pede refresh (sync=True) OU quando o espelho nunca foi
+            # populado — daí faz a 1ª carga. O dia a dia fica com o job agendado.
+            estado = self._sync_state_venda(db)
+            if sync or estado is None:
                 self.sync_vendas(incremental=True)
+                estado = self._sync_state_venda(db)
 
             rows = (db.query(MercadoLivreVendaCache)
                     .filter(MercadoLivreVendaCache.item_id == item_id)
@@ -733,6 +738,7 @@ class MLIntegration:
                 "disponivel_atual": disponivel_atual,
                 "custo_unitario": custo_unit,
                 "full": full,
+                "atualizado_em": estado.synced_at.isoformat() if (estado and estado.synced_at) else None,
                 "total_vendas": len(vendas),
                 "resumo": {
                     "unidades": int(total_qtd),

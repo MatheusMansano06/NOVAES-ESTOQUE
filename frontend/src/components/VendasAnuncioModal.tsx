@@ -22,6 +22,18 @@ function cep(v?: string | null): string {
   const s = String(v).replace(/\D/g, '')
   return s.length === 8 ? `${s.slice(0, 5)}-${s.slice(5)}` : v
 }
+function tempoRelativo(iso?: string | null): string {
+  if (!iso) return 'nunca'
+  const d = new Date(iso)
+  if (isNaN(d.getTime())) return '--'
+  const seg = Math.max(0, (Date.now() - d.getTime()) / 1000)
+  if (seg < 90) return 'agora'
+  const min = seg / 60
+  if (min < 60) return `há ${Math.round(min)} min`
+  const h = min / 60
+  if (h < 24) return `há ${Math.round(h)}h`
+  return `há ${Math.round(h / 24)}d`
+}
 
 interface Pagamento { tipo?: string | null; metodo?: string | null; parcelas?: number | null; rotulo?: string; total_pago?: number | null }
 interface Envio { logistic_type?: string | null; rotulo?: string; cep?: string | null; cidade?: string | null; uf?: string | null; destinatario?: string | null; entrega_estimada?: string | null }
@@ -51,6 +63,7 @@ interface Resultado {
   vendidos_total?: number | null
   disponivel_atual: number
   full: boolean
+  atualizado_em?: string | null
   total_vendas: number
   resumo: { unidades: number; receita: number; lucro: number; margem_pct?: number | null }
   vendas: Venda[]
@@ -164,25 +177,27 @@ function CardVenda({ v }: { v: Venda }) {
 export function VendasAnuncioModal({ itemId, titulo, onClose }: { itemId: string; titulo?: string; onClose: () => void }) {
   const [dados, setDados] = useState<Resultado | null>(null)
   const [carregando, setCarregando] = useState(true)
+  const [atualizando, setAtualizando] = useState(false)
   const [erro, setErro] = useState('')
   const [busca, setBusca] = useState('')
   const [pagFiltro, setPagFiltro] = useState<string>('todos')
 
-  const carregar = useCallback(async () => {
-    setCarregando(true); setErro('')
+  const carregar = useCallback(async (forcar = false) => {
+    if (forcar) setAtualizando(true); else setCarregando(true)
+    setErro('')
     try {
-      const r = await fetch(`${API_BASE}/api/ml/anuncios/${encodeURIComponent(itemId)}/vendas`, { cache: 'no-store' })
+      const r = await fetch(`${API_BASE}/api/ml/anuncios/${encodeURIComponent(itemId)}/vendas?sync=${forcar ? 1 : 0}`, { cache: 'no-store' })
       const j: Resultado = await r.json()
       if (!r.ok || j.erro) throw new Error(j.erro || 'Falha ao carregar vendas')
       setDados(j)
     } catch (e: any) {
       setErro(e?.message || 'Erro ao carregar vendas')
     } finally {
-      setCarregando(false)
+      setCarregando(false); setAtualizando(false)
     }
   }, [itemId])
 
-  useEffect(() => { carregar() }, [carregar])
+  useEffect(() => { carregar(false) }, [carregar])
 
   const vendasFiltradas = useMemo(() => {
     if (!dados) return []
@@ -211,6 +226,15 @@ export function VendasAnuncioModal({ itemId, titulo, onClose }: { itemId: string
             <div style={{ fontWeight: 800, fontSize: '1.02rem', color: '#101828' }}>🔎 Vendas do anúncio</div>
             <div style={{ fontSize: '.8rem', color: '#667085', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{dados?.titulo || titulo || itemId}</div>
           </div>
+          {dados && (
+            <div style={{ flexShrink: 0, fontSize: '.72rem', color: '#98a2b3', textAlign: 'right' }}>atualizado<br />{tempoRelativo(dados.atualizado_em)}</div>
+          )}
+          <button
+            onClick={() => carregar(true)}
+            disabled={atualizando || carregando}
+            title="Buscar vendas novas no Mercado Livre agora"
+            style={{ flexShrink: 0, height: 32, padding: '0 12px', borderRadius: 8, border: '1px solid #d0d5dd', background: atualizando ? '#f2f4f7' : '#fff', color: '#3538cd', fontSize: '.8rem', fontWeight: 600, cursor: atualizando || carregando ? 'default' : 'pointer' }}
+          >{atualizando ? '⏳ Atualizando…' : '🔄 Atualizar'}</button>
           <button onClick={onClose} aria-label="Fechar" style={{ flexShrink: 0, width: 30, height: 30, borderRadius: 8, border: '1px solid #e4e7ec', background: '#fff', color: '#667085', fontSize: '1.2rem', cursor: 'pointer' }}>×</button>
         </div>
 
@@ -243,7 +267,7 @@ export function VendasAnuncioModal({ itemId, titulo, onClose }: { itemId: string
           {carregando && <div style={{ textAlign: 'center', color: '#667085', padding: '2.5rem' }}>Carregando vendas do Mercado Livre…</div>}
           {!carregando && erro && (
             <div style={{ textAlign: 'center', color: '#b42318', padding: '2rem' }}>
-              {erro}<br /><button onClick={carregar} style={{ marginTop: 10, padding: '7px 16px', borderRadius: 8, border: '1px solid #e4e7ec', background: '#fff', cursor: 'pointer' }}>Tentar de novo</button>
+              {erro}<br /><button onClick={() => carregar(false)} style={{ marginTop: 10, padding: '7px 16px', borderRadius: 8, border: '1px solid #e4e7ec', background: '#fff', cursor: 'pointer' }}>Tentar de novo</button>
             </div>
           )}
           {!carregando && !erro && vendasFiltradas.length === 0 && (

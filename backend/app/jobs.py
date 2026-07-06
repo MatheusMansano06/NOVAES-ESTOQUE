@@ -221,6 +221,35 @@ def sincronizar_anuncios_ml():
         logger.error(f"[JOB][EMB] baixa de embalagens falhou: {e}")
 
 
+def sincronizar_vendas_ml():
+    """
+    Atualiza o espelho de vendas do Mercado Livre (ml_venda_cache) de forma
+    incremental — puxa os pedidos novos desde o último sync. Roda nos horários
+    fixos do dia (03/08/12/17/22h). A tela de "Vendas do anúncio" lê do banco,
+    então só depende deste job para ficar em dia (abertura instantânea).
+    """
+    try:
+        from app.integracoes_ml import ml
+    except Exception as e:
+        logger.error(f"[JOB][VENDAS] import falhou: {e}")
+        return
+
+    if not ml.user_id or not ml.get_access_token():
+        return
+
+    try:
+        resultado = ml.sync_vendas(incremental=True)
+        if resultado.get("erro"):
+            logger.error(f"[JOB][VENDAS] sync falhou: {resultado.get('erro')}")
+        else:
+            logger.info(
+                f"[JOB][VENDAS] vendas sincronizadas: novos={resultado.get('novos')} "
+                f"vistos={resultado.get('vistos')}"
+            )
+    except Exception as e:
+        logger.error(f"[JOB][VENDAS] erro inesperado: {e}")
+
+
 def iniciar_scheduler():
     """
     Inicia o scheduler com a tarefa diária às 8am
@@ -259,11 +288,37 @@ def iniciar_scheduler():
             coalesce=True,
             misfire_grace_time=3600,
         )
+        # Sincronização de vendas do ML nos horários fixos (fuso de São Paulo).
+        # Sem timezone explícito rodaria no fuso do servidor (UTC no Railway).
+        tz_vendas = os.getenv("ML_VENDAS_TZ", "America/Sao_Paulo")
+        try:
+            scheduler.add_job(
+                sincronizar_vendas_ml,
+                'cron',
+                hour='3,8,12,17,22',
+                minute=0,
+                timezone=tz_vendas,
+                id='ml_sync_vendas',
+                name='Sincronização de vendas do Mercado Livre (03/08/12/17/22h)',
+                max_instances=1,
+                coalesce=True,
+                misfire_grace_time=3600,
+            )
+        except Exception as e:
+            # Fallback sem timezone caso o fuso não esteja disponível no ambiente.
+            logger.error(f"[SCHEDULER] Timezone '{tz_vendas}' indisponível ({e}); usando fuso do servidor")
+            scheduler.add_job(
+                sincronizar_vendas_ml, 'cron', hour='3,8,12,17,22', minute=0,
+                id='ml_sync_vendas', name='Sincronização de vendas do Mercado Livre',
+                max_instances=1, coalesce=True, misfire_grace_time=3600,
+            )
+
         scheduler.start()
         logger.info("[SCHEDULER] Agendador iniciado com sucesso")
         logger.info("[SCHEDULER] Job 'check_estoque_minimo' agendado para 08:00 todos os dias")
         logger.info("[SCHEDULER] Job 'encerrar_inbounds_vencidos' agendado a cada 1 hora")
         logger.info(f"[SCHEDULER] Job 'ml_sync_catalogo' agendado a cada {ml_intervalo} min")
+        logger.info(f"[SCHEDULER] Job 'ml_sync_vendas' agendado para 03/08/12/17/22h ({tz_vendas})")
 
         # Aquece o cache logo no boot, sem depender de next_run_time (que sofre
         # misfire) e sem bloquear o startup: dispara o sync numa thread daemon.
@@ -273,3 +328,34 @@ def iniciar_scheduler():
             logger.info("[SCHEDULER] Sync inicial de anúncios ML disparado em background")
         except Exception as e:
             logger.error(f"[SCHEDULER] Falha ao disparar sync inicial ML: {e}")
+
+        # Aquece o espelho de vendas no boot SE estiver vazio (1ª carga = histórico
+        # completo). Em background daemon, sem bloquear o startup. Depois, o job
+        # agendado mantém em dia e a tela abre instantânea lendo do banco.
+        try:
+            import threading
+            from app.models import MercadoLivreSyncState
+
+            def _warm_vendas():
+                try:
+                    from app.integracoes_ml import ml as _ml
+                    if not _ml.user_id or not _ml.get_access_token():
+                        return
+                    db = SessionLocal()
+                    try:
+                        ja = db.query(MercadoLivreSyncState).filter(
+                            MercadoLivreSyncState.scope == _ml.VENDAS_SYNC_SCOPE
+                        ).first()
+                    finally:
+                        db.close()
+                    if ja is not None:
+                        return  # já foi populado alguma vez; deixa pro job agendado
+                    logger.info("[SCHEDULER] Espelho de vendas vazio — 1ª carga (histórico) em background")
+                    r = _ml.sync_vendas(incremental=True)
+                    logger.info(f"[SCHEDULER] 1ª carga de vendas concluída: {r}")
+                except Exception as e:
+                    logger.error(f"[SCHEDULER] Falha na 1ª carga de vendas: {e}")
+
+            threading.Thread(target=_warm_vendas, name="warm-vendas", daemon=True).start()
+        except Exception as e:
+            logger.error(f"[SCHEDULER] Falha ao disparar 1ª carga de vendas: {e}")

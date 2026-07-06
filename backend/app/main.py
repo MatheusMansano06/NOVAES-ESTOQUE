@@ -4309,7 +4309,9 @@ async def ml_anuncio_vendas(request: Request):
     """GET /api/ml/anuncios/{item_id}/vendas — histórico de vendas do anúncio
     (cliente, IDs, CEP, data, pagamento crédito/débito/pix e financeiro por venda)."""
     item_id = request.path_params["item_id"]
-    sync = request.query_params.get("sync", "1").strip().lower() not in {"0", "false", "nao", "no"}
+    # Por padrão NÃO sincroniza (lê do banco = instantâneo). O ?sync=1 força
+    # a atualização (botão Atualizar). O job agendado mantém o espelho em dia.
+    sync = request.query_params.get("sync", "0").strip().lower() in {"1", "true", "sim", "yes"}
     try:
         resultado = ml.vendas_do_anuncio(item_id, sync=sync)
     except Exception as e:

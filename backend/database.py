@@ -1,4 +1,4 @@
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, event
 from sqlalchemy.orm import declarative_base, sessionmaker
 from dotenv import load_dotenv
 import os
@@ -25,6 +25,21 @@ engine = create_engine(
     DATABASE_URL,
     connect_args={"check_same_thread": False} if "sqlite" in DATABASE_URL else {}
 )
+
+# WAL + busy_timeout: em SQLite o modo padrão (rollback journal) faz uma escrita
+# longa BLOQUEAR todas as leituras. Com a sincronização de vendas do ML (que
+# grava milhares de linhas), isso congelaria o app. WAL permite ler enquanto
+# escreve; busy_timeout faz o writer aguardar em vez de dar "database is locked".
+if "sqlite" in DATABASE_URL:
+    @event.listens_for(engine, "connect")
+    def _set_sqlite_pragma(dbapi_conn, _record):
+        cur = dbapi_conn.cursor()
+        try:
+            cur.execute("PRAGMA journal_mode=WAL")
+            cur.execute("PRAGMA busy_timeout=10000")
+            cur.execute("PRAGMA synchronous=NORMAL")
+        finally:
+            cur.close()
 
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
