@@ -761,7 +761,9 @@ function ResumoTooltip({ anuncio, resumo, editavel = false, modal = false, onSav
   const [live, setLive] = useState<LivePriceSummary | null>(null)
   const [breakdown, setBreakdown] = useState<LivePriceBreakdown | null>(null)
   const [novoPreco, setNovoPreco] = useState('')
+  const [novoCusto, setNovoCusto] = useState('')
   const [salvando, setSalvando] = useState(false)
+  const [salvandoCusto, setSalvandoCusto] = useState(false)
   const [msg, setMsg] = useState<{ tipo: 'ok' | 'erro'; texto: string } | null>(null)
   const historico = resumo ? loadPriceHistory(anuncio.id) : []
 
@@ -816,6 +818,29 @@ function ResumoTooltip({ anuncio, resumo, editavel = false, modal = false, onSav
       setMsg({ tipo: 'erro', texto: String(e instanceof Error ? e.message : e) })
     } finally {
       setSalvando(false)
+    }
+  }
+
+  const salvarCusto = async () => {
+    const v = Number(String(novoCusto).replace(',', '.'))
+    if (!v || v < 0) { setMsg({ tipo: 'erro', texto: 'Informe um custo válido' }); return }
+    if (!window.confirm(`Alterar o custo para ${brl(v)}?\n\nIsso vai recalcular a margem do anúncio.`)) return
+    setSalvandoCusto(true); setMsg(null)
+    try {
+      const r = await fetch(`${API_BASE}/api/custos`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sku: anuncio.sku, custo: v }),
+      })
+      const d = await r.json()
+      if (!r.ok || d.erro) throw new Error(d.erro || 'Falha ao atualizar custo')
+      setMsg({ tipo: 'ok', texto: `Custo atualizado: ${brl(v)}` })
+      setNovoCusto('')
+      onSaved?.()
+    } catch (e) {
+      setMsg({ tipo: 'erro', texto: String(e instanceof Error ? e.message : e) })
+    } finally {
+      setSalvandoCusto(false)
     }
   }
 
@@ -894,6 +919,30 @@ function ResumoTooltip({ anuncio, resumo, editavel = false, modal = false, onSav
           {msg && (
             <div style={{ marginTop: '.4rem', fontSize: '.72rem', fontWeight: 700, color: msg.tipo === 'ok' ? '#067647' : '#b42318' }}>{msg.texto}</div>
           )}
+        </div>
+      )}
+      {editavel && (
+        <div style={{ marginTop: '.6rem', paddingTop: '.55rem', borderTop: '1px solid #e9eef7' }}>
+          <div style={{ fontSize: '.68rem', color: '#98a2b3', textTransform: 'uppercase', letterSpacing: '.03em', marginBottom: '.4rem' }}>Editar custo</div>
+          <div style={{ display: 'flex', gap: '.4rem', alignItems: 'center' }}>
+            <span style={{ fontSize: '.85rem', color: '#475467', fontWeight: 700 }}>R$</span>
+            <input
+              type="text"
+              inputMode="decimal"
+              value={novoCusto}
+              onChange={e => setNovoCusto(e.target.value)}
+              onClick={e => e.stopPropagation()}
+              placeholder={resumoMargem.custo != null ? String(resumoMargem.custo) : '0,00'}
+              style={{ flex: 1, minWidth: 0, padding: '.45rem .6rem', border: '1px solid #cfd8dc', borderRadius: 6, fontSize: '.9rem', fontWeight: 700, boxSizing: 'border-box' }}
+            />
+            <button
+              onClick={(e) => { e.stopPropagation(); salvarCusto() }}
+              disabled={salvandoCusto}
+              style={{ padding: '.45rem .8rem', background: '#5b3cc4', color: '#fff', border: 'none', borderRadius: 6, fontWeight: 700, cursor: salvandoCusto ? 'wait' : 'pointer', whiteSpace: 'nowrap' }}
+            >
+              {salvandoCusto ? '...' : 'Salvar'}
+            </button>
+          </div>
         </div>
       )}
       {!modal && <div style={{ position: 'absolute', top: -7, right: 32, width: 14, height: 14, background: '#ffffff', borderLeft: '1px solid #cfe0ff', borderTop: '1px solid #cfe0ff', transform: 'rotate(45deg)' }} />}
