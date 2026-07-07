@@ -4325,6 +4325,18 @@ async def ml_anuncio_vendas(request: Request):
     return JSONResponse(resultado, status_code=code, headers={"Cache-Control": "no-store"})
 
 
+async def ml_vendas_por_mes(request: Request):
+    """GET /api/ml/anuncios/{item_id}/vendas-por-mes — histórico agrupado por mês com DIFAL."""
+    item_id = request.path_params["item_id"]
+    sync = request.query_params.get("sync", "0").strip().lower() in {"1", "true", "sim", "yes"}
+    try:
+        resultado = ml.vendas_por_mes(item_id, sync=sync)
+    except Exception as e:
+        return JSONResponse({"erro": str(e)}, status_code=502, headers={"Cache-Control": "no-store"})
+    code = 200 if not resultado.get("erro") else 502
+    return JSONResponse(resultado, status_code=code, headers={"Cache-Control": "no-store"})
+
+
 async def ml_vendas_sync(request: Request):
     """POST /api/ml/vendas/sync — força atualização do espelho de pedidos.
     Body opcional: {"full": true} para varrer todo o histórico."""
@@ -5440,6 +5452,7 @@ routes = [
     Route("/api/ml/promocoes/itens/{item_id:str}/inscrever", ml_promocao_inscrever, methods=["POST"]),
     Route("/api/ml/promocoes/{promotion_id:str}/candidatos", ml_promocao_candidatos, methods=["GET"]),
     Route("/api/ml/anuncios/{item_id:str}/vendas", ml_anuncio_vendas, methods=["GET"]),
+    Route("/api/ml/anuncios/{item_id:str}/vendas-por-mes", ml_vendas_por_mes, methods=["GET"]),
     Route("/api/ml/vendas/sync", ml_vendas_sync, methods=["POST"]),
     Route("/api/ml/anuncios/{item_id:str}", ml_anuncio_detalhes, methods=["GET"]),
     Route("/api/ml/anuncios/{item_id:str}/description", ml_anuncio_descricao, methods=["POST"]),

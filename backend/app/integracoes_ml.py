@@ -851,6 +851,124 @@ class MLIntegration:
         finally:
             db.close()
 
+    def vendas_por_mes(self, item_id: str, sync: bool = True) -> Dict[str, Any]:
+        """Histórico de vendas por mês com DIFAL calculado por mês."""
+        from collections import defaultdict
+        from datetime import datetime as dt_class
+        item_id = str(item_id).strip()
+        db = self._db()
+        try:
+            estado = self._sync_state_venda(db)
+            if sync or estado is None:
+                self.sync_vendas(incremental=True)
+                estado = self._sync_state_venda(db)
+
+            # Trazer TODAS as vendas (sem paginação)
+            all_rows = (db.query(MercadoLivreVendaCache)
+                        .filter(MercadoLivreVendaCache.item_id == item_id)
+                        .order_by(MercadoLivreVendaCache.date_created.desc().nullslast())
+                        .all())
+
+            cache = self._cache_query(db, item_id)
+            sku = (cache.sku if cache else None) or (all_rows[0].sku if all_rows else None)
+            custo_unit = self._custo_oficial(db, sku)
+            frete_cache = float(cache.frete_custo) if (cache and cache.frete_custo) else 0.0
+            full = bool(cache.full) if cache else False
+            disponivel_atual = int(cache.estoque_disponivel or 0) if cache else 0
+            catalogo = None
+            if cache is not None:
+                if cache.catalog_listing is None:
+                    info = self._get(f"/items/{item_id}", {"attributes": "catalog_listing"})
+                    if info is not None:
+                        cache.catalog_listing = 1 if info.get("catalog_listing") else 0
+                        try:
+                            db.commit()
+                        except Exception:
+                            db.rollback()
+                catalogo = bool(cache.catalog_listing) if cache.catalog_listing is not None else None
+
+            # Agrupar por mês (YYYY-MM)
+            meses_dict = defaultdict(list)
+            for r in all_rows:
+                if r.date_created:
+                    mes = r.date_created.strftime("%Y-%m")
+                    meses_dict[mes].append(r)
+
+            # Calcular DIFAL por mês
+            meses_resultado = []
+            for mes in sorted(meses_dict.keys(), reverse=True):  # mais recentes primeiro
+                rows_mes = meses_dict[mes]
+                total_receita_mes = total_lucro_mes = total_qtd_mes = 0.0
+                vendas_mes = []
+                acumulado_posterior = 0
+
+                for r in rows_mes:
+                    qtd = int(r.quantity or 0)
+                    preco = float(r.unit_price or 0)
+                    receita = preco * qtd
+                    frete_vend = float(r.shipping_cost) if r.shipping_cost else (frete_cache if full else 0.0)
+                    tarifa = float(r.sale_fee or 0) * (qtd if qtd else 1)
+                    custo = (custo_unit or 0) * qtd
+                    lucro = receita - tarifa - frete_vend - custo if receita else 0.0
+
+                    cancelada = (r.status or "").lower() in {"cancelled", "invalid"}
+                    if not cancelada:
+                        total_receita_mes += receita
+                        total_lucro_mes += lucro
+                        total_qtd_mes += qtd
+
+                    disp_apos = disponivel_atual + acumulado_posterior
+                    acumulado_posterior += qtd
+
+                    vendas_mes.append({
+                        "order_id": r.order_id,
+                        "data": r.date_created.isoformat() if r.date_created else None,
+                        "quantidade": qtd,
+                        "preco_unitario": preco,
+                        "cancelada": cancelada,
+                        "pagamento": {
+                            "tipo": r.payment_type,
+                            "metodo": r.payment_method_id,
+                            "rotulo": self._rotulo_pagamento(r.payment_type, r.payment_method_id, r.installments),
+                        },
+                        "envio": {
+                            "logistic_type": r.logistic_type,
+                            "rotulo": self._rotulo_logistica(r.logistic_type, r.shipping_mode),
+                            "uf": r.receiver_state,
+                        },
+                        "financeiro": {
+                            "receita": round(receita, 2),
+                            "tarifa": round(tarifa, 2),
+                            "frete": round(frete_vend, 2),
+                            "custo": round(custo, 2) if custo_unit is not None else None,
+                            "lucro": round(lucro, 2),
+                        },
+                    })
+
+                meses_resultado.append({
+                    "mes": mes,
+                    "total_vendas": len(rows_mes),
+                    "resumo": {
+                        "unidades": int(total_qtd_mes),
+                        "receita": round(total_receita_mes, 2),
+                        "lucro": round(total_lucro_mes, 2),
+                        "margem_pct": round(total_lucro_mes / total_receita_mes * 100, 2) if total_receita_mes else None,
+                    },
+                    "vendas": vendas_mes,
+                })
+
+            return {
+                "item_id": item_id,
+                "sku": sku,
+                "titulo": cache.titulo if cache else (all_rows[0].item_title if all_rows else None),
+                "thumbnail": (cache.imagem_principal or cache.thumbnail) if cache else None,
+                "catalogo": catalogo,
+                "atualizado_em": estado.synced_at.isoformat() if (estado and estado.synced_at) else None,
+                "meses": meses_resultado,
+            }
+        finally:
+            db.close()
+
     @staticmethod
     def _rotulo_pagamento(ptype: Optional[str], method: Optional[str], parcelas: Optional[int]) -> str:
         m = (method or "").lower()
