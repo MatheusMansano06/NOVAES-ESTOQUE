@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, type CSSProperties } from 'react'
 import { Precificador, type PricingSnapshot, loadPricingSummaryMap, loadPriceHistory } from './Precificador'
 import { MLAnuncioEditorModal } from './MLAnuncioEditorModal'
+import { VendasAnuncioModal } from './VendasAnuncioModal'
 
 const API_BASE = import.meta.env.VITE_API_URL ?? 'http://127.0.0.1:8000'
 const PAGE_SIZE_OPTIONS = [10, 20, 30, 40, 50] as const
@@ -100,6 +101,7 @@ interface LivePriceBreakdown {
   frete: number | null
   tarifa: number | null
   tarifaPct: number | null
+  descontoTarifa?: number | null
 }
 
 interface MarginViewModel {
@@ -109,6 +111,7 @@ interface MarginViewModel {
   frete: number | null
   tarifa: number | null
   tarifaPct: number | null
+  descontoTarifa: number | null
   custo: number | null
   impostoPct: number
   imposto: number | null
@@ -137,12 +140,17 @@ function montarResumoMargem(anuncio: Anuncio, resumo?: PricingSnapshot, live?: L
   // MC sem depender do hover que busca o detalhe ao vivo.
   const tarifa = resumo?.tarifa ?? breakdown?.tarifa ?? anuncio.tarifa ?? null
   const tarifaPct = resumo?.tarifaPct ?? breakdown?.tarifaPct ?? anuncio.tarifa_pct ?? null
+  // Bônus de tarifa: quando o item está numa promoção ativa (ex.: "Aumente suas vendas"),
+  // o ML banca parte do desconto (meli_percentage). Volta a favor da margem.
+  const descontoTarifa = breakdown?.descontoTarifa ?? null
   // Custo oficial (planilha/banco) tem prioridade sobre o snapshot do Precificador.
   const custo = custoOficial?.custo ?? resumo?.custo ?? null
   const impostoPct = custoOficial?.imposto_pct ?? resumo?.impostoPct ?? carregarImpostoAtual()
   const imposto = precoPromocional > 0 ? (precoPromocional * impostoPct) / 100 : null
-  const margem = frete != null && tarifa != null && custo != null && imposto != null
-    ? precoPromocional - frete - tarifa - custo - imposto
+  // A tarifa efetiva paga ao ML já desconta o bônus da promoção.
+  const tarifaEfetiva = tarifa != null && descontoTarifa != null ? tarifa - descontoTarifa : tarifa
+  const margem = frete != null && tarifaEfetiva != null && custo != null && imposto != null
+    ? precoPromocional - frete - tarifaEfetiva - custo - imposto
     : null
   const margemPct = margem != null && precoPromocional > 0 ? (margem / precoPromocional) * 100 : null
 
@@ -153,6 +161,7 @@ function montarResumoMargem(anuncio: Anuncio, resumo?: PricingSnapshot, live?: L
     frete,
     tarifa,
     tarifaPct,
+    descontoTarifa,
     custo,
     impostoPct,
     imposto,
@@ -179,6 +188,7 @@ export function AnunciosML({ onVoltar }: Props) {
   const [acaoMsg, setAcaoMsg] = useState<{ tipo: 'ok' | 'erro'; texto: string } | null>(null)
   const [dupCategoria, setDupCategoria] = useState<Anuncio | null>(null)
   const [centralPromo, setCentralPromo] = useState(false)
+  const [vendasAnuncio, setVendasAnuncio] = useState<Anuncio | null>(null)
 
   const avisar = (tipo: 'ok' | 'erro', texto: string) => {
     setAcaoMsg({ tipo, texto })
@@ -191,12 +201,14 @@ export function AnunciosML({ onVoltar }: Props) {
   }, [])
 
   // Custo oficial por SKU (planilha/banco) — fonte de verdade da margem.
-  useEffect(() => {
+  const carregarCustos = useCallback(() => {
     fetch(`${API_BASE}/api/custos`, { cache: 'no-store' })
       .then(r => r.json())
       .then(d => { if (d && d.custos) setCustosOficiais(d.custos as CustosOficiais) })
       .catch(() => { /* mantém vazio */ })
   }, [])
+
+  useEffect(() => { carregarCustos() }, [carregarCustos])
 
   // Debounce: só dispara a busca 350ms depois da última tecla (evita 1 request por caractere).
   useEffect(() => {
@@ -356,9 +368,16 @@ export function AnunciosML({ onVoltar }: Props) {
                     <StockEditor anuncio={a} onSaved={carregar} onMsg={avisar} />
                     <div style={{ textAlign: 'center', minWidth: '70px' }}>
                       <div style={{ fontSize: '0.7rem', color: '#999' }}>Vendidos</div>
-                      <div style={{ fontWeight: 700, color: '#1a1a1a' }}>{a.vendidos}</div>
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5 }}>
+                        <span style={{ fontWeight: 700, color: '#1a1a1a' }}>{a.vendidos}</span>
+                        <button
+                          onClick={() => setVendasAnuncio(a)}
+                          title="Ver todas as vendas deste anúncio"
+                          style={{ width: 24, height: 24, borderRadius: 6, border: '1px solid #d0d5dd', background: '#fff', color: '#3483fa', cursor: 'pointer', fontSize: '.82rem', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 0 }}
+                        >🔎</button>
+                      </div>
                     </div>
-                    <PriceBubble anuncio={a} resumo={resumo} custoOficial={custosOficiais[a.sku]} statusCor={corStatus(a.status)} statusLabel={labelStatus(a.status)} onPriceChanged={carregar} />
+                    <PriceBubble anuncio={a} resumo={resumo} custoOficial={custosOficiais[a.sku]} statusCor={corStatus(a.status)} statusLabel={labelStatus(a.status)} onPriceChanged={carregar} onCustoChanged={carregarCustos} />
                   </div>
 
                   <div style={{ marginTop: '0.9rem', paddingTop: '0.9rem', borderTop: '1px solid #f0f0f0', display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))', gap: '0.6rem' }}>
@@ -475,6 +494,13 @@ export function AnunciosML({ onVoltar }: Props) {
         <CentralPromocaoPanel
           onClose={() => setCentralPromo(false)}
           onMsg={avisar}
+        />
+      )}
+      {vendasAnuncio && (
+        <VendasAnuncioModal
+          itemId={vendasAnuncio.id}
+          titulo={vendasAnuncio.titulo}
+          onClose={() => setVendasAnuncio(null)}
         />
       )}
     </div>
@@ -741,11 +767,13 @@ function CandidatoCard({ candidato, promocao, onMsg, onInscrito }: { candidato: 
   )
 }
 
-function ResumoTooltip({ anuncio, resumo, editavel = false, modal = false, onSaved, onClose, custoOficial }: { anuncio: Anuncio; resumo?: PricingSnapshot; editavel?: boolean; modal?: boolean; onSaved?: () => void; onClose?: () => void; custoOficial?: CustoOficial | null }) {
+function ResumoTooltip({ anuncio, resumo, editavel = false, modal = false, onSaved, onCustoChanged, onClose, custoOficial }: { anuncio: Anuncio; resumo?: PricingSnapshot; editavel?: boolean; modal?: boolean; onSaved?: () => void; onCustoChanged?: () => void; onClose?: () => void; custoOficial?: CustoOficial | null }) {
   const [live, setLive] = useState<LivePriceSummary | null>(null)
   const [breakdown, setBreakdown] = useState<LivePriceBreakdown | null>(null)
   const [novoPreco, setNovoPreco] = useState('')
+  const [novoCusto, setNovoCusto] = useState('')
   const [salvando, setSalvando] = useState(false)
+  const [salvandoCusto, setSalvandoCusto] = useState(false)
   const [msg, setMsg] = useState<{ tipo: 'ok' | 'erro'; texto: string } | null>(null)
   const historico = resumo ? loadPriceHistory(anuncio.id) : []
 
@@ -764,6 +792,7 @@ function ResumoTooltip({ anuncio, resumo, editavel = false, modal = false, onSav
           frete: detailData?.shipping_fee?.list_cost ?? detailData?.item?.frete_custo ?? null,
           tarifa: detailData?.tarifa_atual?.tarifa ?? null,
           tarifaPct: detailData?.tarifa_atual?.percentual ?? null,
+          descontoTarifa: precoData && !precoData.erro ? (precoData.desconto_tarifa ?? null) : null,
         })
       }
     }).catch(() => { /* mantem fallback */ })
@@ -803,6 +832,35 @@ function ResumoTooltip({ anuncio, resumo, editavel = false, modal = false, onSav
     }
   }
 
+  const salvarCusto = async () => {
+    const v = Number(String(novoCusto).replace(',', '.'))
+    if (!v || v < 0) { setMsg({ tipo: 'erro', texto: 'Informe um custo válido' }); return }
+    if (!anuncio.sku) { setMsg({ tipo: 'erro', texto: 'Anúncio sem SKU — não é possível salvar o custo' }); return }
+    if (!window.confirm(`Alterar o custo para ${brl(v)}?\n\nIsso vai recalcular a margem do anúncio.`)) return
+    setSalvandoCusto(true); setMsg(null)
+    try {
+      const payload: { sku: string; custo: number; imposto_pct?: number } = { sku: anuncio.sku, custo: v }
+      // Preserva o imposto já cadastrado (o backend reseta pra 9% se não enviar).
+      if (custoOficial?.imposto_pct != null) payload.imposto_pct = custoOficial.imposto_pct
+      const r = await fetch(`${API_BASE}/api/custos`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      })
+      const d = await r.json()
+      if (!r.ok || d.erro) throw new Error(d.erro || 'Falha ao atualizar custo')
+      if (!d.salvos) throw new Error('Custo não foi salvo — verifique o SKU do anúncio')
+      setMsg({ tipo: 'ok', texto: `Custo atualizado: ${brl(v)}` })
+      setNovoCusto('')
+      onCustoChanged?.()
+      onSaved?.()
+    } catch (e) {
+      setMsg({ tipo: 'erro', texto: String(e instanceof Error ? e.message : e) })
+    } finally {
+      setSalvandoCusto(false)
+    }
+  }
+
   const rootStyle: CSSProperties = modal
     ? { position: 'relative', width: '100%', background: '#ffffff', color: '#1d2939', border: '1px solid #cfe0ff', borderRadius: '14px', padding: '1.1rem 1.25rem', boxShadow: '0 24px 60px rgba(16,24,40,.28)', textAlign: 'left' }
     : { position: 'absolute', right: 0, top: 'calc(100% + 10px)', width: '304px', background: '#ffffff', color: '#1d2939', border: '1px solid #cfe0ff', borderRadius: '12px', padding: '.9rem 1rem', boxShadow: '0 14px 30px rgba(16,24,40,.14)', zIndex: 30, textAlign: 'left' }
@@ -826,6 +884,9 @@ function ResumoTooltip({ anuncio, resumo, editavel = false, modal = false, onSav
         </div>
       )}
       <LinhaResumo label="Tarifa de venda" valor={resumoMargem.tarifa != null ? `-${brl(resumoMargem.tarifa)}` : '--'} extra={resumoMargem.tarifaPct != null ? `${resumoMargem.tarifaPct.toFixed(2)}%` : undefined} cor="#b42318" />
+      {resumoMargem.descontoTarifa != null && resumoMargem.descontoTarifa > 0 && (
+        <LinhaResumo label="Desconto de tarifa" valor={`+${brl(resumoMargem.descontoTarifa)}`} extra={resumoMargem.tarifa != null && resumoMargem.tarifa > 0 ? `${((resumoMargem.descontoTarifa / resumoMargem.tarifa) * 100).toFixed(1)}%` : undefined} cor="#067647" />
+      )}
       <LinhaResumo label="Custo" valor={resumoMargem.custo != null ? `-${brl(resumoMargem.custo)}` : '--'} cor="#b42318" />
       <LinhaResumo label="Imposto" valor={resumoMargem.imposto != null ? `-${brl(resumoMargem.imposto)}` : '--'} extra={resumoMargem.impostoPct ? `${resumoMargem.impostoPct.toFixed(2)}%` : undefined} cor="#b42318" />
       <div style={{ height: 1, background: '#e9eef7', margin: '.55rem 0' }} />
@@ -880,16 +941,41 @@ function ResumoTooltip({ anuncio, resumo, editavel = false, modal = false, onSav
           )}
         </div>
       )}
+      {editavel && (
+        <div style={{ marginTop: '.6rem', paddingTop: '.55rem', borderTop: '1px solid #e9eef7' }}>
+          <div style={{ fontSize: '.68rem', color: '#98a2b3', textTransform: 'uppercase', letterSpacing: '.03em', marginBottom: '.4rem' }}>Editar custo</div>
+          <div style={{ display: 'flex', gap: '.4rem', alignItems: 'center' }}>
+            <span style={{ fontSize: '.85rem', color: '#475467', fontWeight: 700 }}>R$</span>
+            <input
+              type="text"
+              inputMode="decimal"
+              value={novoCusto}
+              onChange={e => setNovoCusto(e.target.value)}
+              onClick={e => e.stopPropagation()}
+              placeholder={resumoMargem.custo != null ? String(resumoMargem.custo) : '0,00'}
+              style={{ flex: 1, minWidth: 0, padding: '.45rem .6rem', border: '1px solid #cfd8dc', borderRadius: 6, fontSize: '.9rem', fontWeight: 700, boxSizing: 'border-box' }}
+            />
+            <button
+              onClick={(e) => { e.stopPropagation(); salvarCusto() }}
+              disabled={salvandoCusto}
+              style={{ padding: '.45rem .8rem', background: '#5b3cc4', color: '#fff', border: 'none', borderRadius: 6, fontWeight: 700, cursor: salvandoCusto ? 'wait' : 'pointer', whiteSpace: 'nowrap' }}
+            >
+              {salvandoCusto ? '...' : 'Salvar'}
+            </button>
+          </div>
+        </div>
+      )}
       {!modal && <div style={{ position: 'absolute', top: -7, right: 32, width: 14, height: 14, background: '#ffffff', borderLeft: '1px solid #cfe0ff', borderTop: '1px solid #cfe0ff', transform: 'rotate(45deg)' }} />}
     </div>
   )
 }
 
-function PriceBubble({ anuncio, resumo, statusCor, statusLabel, onPriceChanged, custoOficial }: { anuncio: Anuncio; resumo?: PricingSnapshot; statusCor: string; statusLabel: string; onPriceChanged?: () => void; custoOficial?: CustoOficial | null }) {
+function PriceBubble({ anuncio, resumo, statusCor, statusLabel, onPriceChanged, onCustoChanged, custoOficial }: { anuncio: Anuncio; resumo?: PricingSnapshot; statusCor: string; statusLabel: string; onPriceChanged?: () => void; onCustoChanged?: () => void; custoOficial?: CustoOficial | null }) {
   const [hovered, setHovered] = useState(false)
   const [aberto, setAberto] = useState(false)
   const [live, setLive] = useState<LivePriceSummary | null>(null)
   const [breakdown, setBreakdown] = useState<LivePriceBreakdown | null>(null)
+  const [descTarifa, setDescTarifa] = useState<number | null>(null)
   const [loadingBreakdown, setLoadingBreakdown] = useState(false)
 
   useEffect(() => {
@@ -899,6 +985,7 @@ function PriceBubble({ anuncio, resumo, statusCor, statusLabel, onPriceChanged, 
       .then(d => {
         if (!ativo || d.erro) return
         setLive({ cheio: d.cheio ?? null, promocional: d.promocional ?? null })
+        setDescTarifa(d.desconto_tarifa ?? null)
       })
       .catch(() => { /* fallback para os valores da lista */ })
     return () => { ativo = false }
@@ -916,6 +1003,7 @@ function PriceBubble({ anuncio, resumo, statusCor, statusLabel, onPriceChanged, 
           frete: d?.shipping_fee?.list_cost ?? d?.item?.frete_custo ?? null,
           tarifa: d?.tarifa_atual?.tarifa ?? null,
           tarifaPct: d?.tarifa_atual?.percentual ?? null,
+          descontoTarifa: descTarifa,
         })
       })
       .catch(() => { /* fallback silencioso */ })
@@ -923,7 +1011,7 @@ function PriceBubble({ anuncio, resumo, statusCor, statusLabel, onPriceChanged, 
         if (ativo) setLoadingBreakdown(false)
       })
     return () => { ativo = false }
-  }, [hovered, resumo, breakdown, loadingBreakdown, anuncio.id])
+  }, [hovered, resumo, breakdown, loadingBreakdown, anuncio.id, descTarifa])
 
   const resumoMargem = montarResumoMargem(anuncio, resumo, live, breakdown, custoOficial)
 
@@ -935,7 +1023,7 @@ function PriceBubble({ anuncio, resumo, statusCor, statusLabel, onPriceChanged, 
         style={{ position: 'fixed', inset: 0, background: 'rgba(16,24,40,.45)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '1rem' }}
       >
         <div onClick={e => e.stopPropagation()} style={{ width: '100%', maxWidth: 380 }}>
-          <ResumoTooltip anuncio={anuncio} resumo={resumo} custoOficial={custoOficial} editavel modal onSaved={onPriceChanged} onClose={() => setAberto(false)} />
+          <ResumoTooltip anuncio={anuncio} resumo={resumo} custoOficial={custoOficial} editavel modal onSaved={onPriceChanged} onCustoChanged={onCustoChanged} onClose={() => setAberto(false)} />
         </div>
       </div>
     )}

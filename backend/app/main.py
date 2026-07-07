@@ -93,7 +93,7 @@ def _garantir_colunas_sqlite():
 
             # Tarifa de venda do ML guardada no cache (margem sem chamada ao vivo)
             colunas_ml = {row[1] for row in conn.exec_driver_sql("PRAGMA table_info(ml_item_cache)").fetchall()}
-            for nome, tipo in [("tarifa_valor", "FLOAT"), ("tarifa_pct", "FLOAT"), ("tarifa_fixo", "FLOAT"), ("date_created", "DATETIME"), ("inventory_ids_json", "TEXT"), ("embalagem_baixa_vendidos", "INTEGER")]:
+            for nome, tipo in [("tarifa_valor", "FLOAT"), ("tarifa_pct", "FLOAT"), ("tarifa_fixo", "FLOAT"), ("date_created", "DATETIME"), ("inventory_ids_json", "TEXT"), ("embalagem_baixa_vendidos", "INTEGER"), ("catalog_listing", "INTEGER")]:
                 if colunas_ml and nome not in colunas_ml:
                     conn.exec_driver_sql(f"ALTER TABLE ml_item_cache ADD COLUMN {nome} {tipo}")
                     print(f"[DB] Coluna ml_item_cache.{nome} criada")
@@ -4305,6 +4305,51 @@ async def ml_anuncios(request: Request):
     return JSONResponse(resultado, status_code=code, headers={"Cache-Control": "no-store"})
 
 
+async def ml_anuncio_vendas(request: Request):
+    """GET /api/ml/anuncios/{item_id}/vendas — histórico de vendas do anúncio
+    (cliente, IDs, CEP, data, pagamento crédito/débito/pix e financeiro por venda).
+    Paginação: ?offset=0&limit=20"""
+    item_id = request.path_params["item_id"]
+    # Por padrão NÃO sincroniza (lê do banco = instantâneo). O ?sync=1 força
+    # a atualização (botão Atualizar). O job agendado mantém o espelho em dia.
+    sync = request.query_params.get("sync", "0").strip().lower() in {"1", "true", "sim", "yes"}
+    offset = int(request.query_params.get("offset", "0")) if request.query_params.get("offset", "").isdigit() else 0
+    limit = int(request.query_params.get("limit", "20")) if request.query_params.get("limit", "").isdigit() else 20
+    offset = max(0, offset)
+    limit = max(1, min(limit, 100))  # clamp entre 1 e 100
+    try:
+        resultado = ml.vendas_do_anuncio(item_id, sync=sync, offset=offset, limit=limit)
+    except Exception as e:
+        return JSONResponse({"erro": str(e)}, status_code=502, headers={"Cache-Control": "no-store"})
+    code = 200 if not resultado.get("erro") else 502
+    return JSONResponse(resultado, status_code=code, headers={"Cache-Control": "no-store"})
+
+
+async def ml_vendas_por_mes(request: Request):
+    """GET /api/ml/anuncios/{item_id}/vendas-por-mes — histórico agrupado por mês com DIFAL."""
+    item_id = request.path_params["item_id"]
+    sync = request.query_params.get("sync", "0").strip().lower() in {"1", "true", "sim", "yes"}
+    try:
+        resultado = ml.vendas_por_mes(item_id, sync=sync)
+    except Exception as e:
+        return JSONResponse({"erro": str(e)}, status_code=502, headers={"Cache-Control": "no-store"})
+    code = 200 if not resultado.get("erro") else 502
+    return JSONResponse(resultado, status_code=code, headers={"Cache-Control": "no-store"})
+
+
+async def ml_vendas_sync(request: Request):
+    """POST /api/ml/vendas/sync — força atualização do espelho de pedidos.
+    Body opcional: {"full": true} para varrer todo o histórico."""
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    incremental = not bool(body.get("full"))
+    resultado = ml.sync_vendas(incremental=incremental)
+    code = 200 if not resultado.get("erro") else 502
+    return JSONResponse(resultado, status_code=code, headers={"Cache-Control": "no-store"})
+
+
 async def ml_promocoes(request: Request):
     """GET /api/ml/promocoes — promoções/campanhas ativas da Central de Promoções do ML."""
     resultado = ml.listar_promocoes()
@@ -5406,6 +5451,9 @@ routes = [
     Route("/api/ml/promocoes", ml_promocoes, methods=["GET"]),
     Route("/api/ml/promocoes/itens/{item_id:str}/inscrever", ml_promocao_inscrever, methods=["POST"]),
     Route("/api/ml/promocoes/{promotion_id:str}/candidatos", ml_promocao_candidatos, methods=["GET"]),
+    Route("/api/ml/anuncios/{item_id:str}/vendas", ml_anuncio_vendas, methods=["GET"]),
+    Route("/api/ml/anuncios/{item_id:str}/vendas-por-mes", ml_vendas_por_mes, methods=["GET"]),
+    Route("/api/ml/vendas/sync", ml_vendas_sync, methods=["POST"]),
     Route("/api/ml/anuncios/{item_id:str}", ml_anuncio_detalhes, methods=["GET"]),
     Route("/api/ml/anuncios/{item_id:str}/description", ml_anuncio_descricao, methods=["POST"]),
     Route("/api/ml/anuncios/{item_id:str}/attributes", ml_anuncio_atributos, methods=["POST"]),
