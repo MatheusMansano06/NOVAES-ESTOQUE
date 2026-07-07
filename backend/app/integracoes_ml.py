@@ -2086,7 +2086,7 @@ class MLIntegration:
 
     # ---------- preço de venda (cheio + promocional) ----------
     def resumo_preco(self, item_id: str, force_refresh: bool = False) -> Dict:
-        """Valor cheio (preço base) + valor promocional efetivo (o que o consumidor paga)."""
+        """Valor cheio (preço base) + valor promocional efetivo (o que o consumidor paga) + desconto de tarifa."""
         detail = self.sync_item(item_id, force=force_refresh)
         if detail.get("erro"):
             return detail
@@ -2097,6 +2097,12 @@ class MLIntegration:
         if promocional is None:
             promocional = cheio
         tem_promocao = (cheio is not None and promocional is not None and float(promocional) < float(cheio) - 0.01)
+        # Desconto de tarifa: diferença entre tarifa normal e tarifa com desconto (quando ML aplica acordo/promoção)
+        tarifa_normal = float(item.get("sale_fee") or 0) if item.get("sale_fee") else None
+        tarifa_com_desconto = float(sale_price.get("cost") or 0) if isinstance(sale_price, dict) and sale_price.get("cost") else None
+        desconto_tarifa = None
+        if tarifa_normal is not None and tarifa_com_desconto is not None and tarifa_com_desconto < tarifa_normal:
+            desconto_tarifa = round(tarifa_normal - tarifa_com_desconto, 2)
         return {
             "cheio": cheio,
             "promocional": promocional,
@@ -2104,6 +2110,7 @@ class MLIntegration:
             "catalogo": False,
             "status": item.get("status"),
             "cache": detail.get("cache"),
+            "desconto_tarifa": desconto_tarifa,
         }
         body = self._get(f"/items/{item_id}", {"attributes": "id,price,base_price,catalog_listing,status"})
         if not body:
