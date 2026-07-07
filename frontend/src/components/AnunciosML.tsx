@@ -201,12 +201,14 @@ export function AnunciosML({ onVoltar }: Props) {
   }, [])
 
   // Custo oficial por SKU (planilha/banco) — fonte de verdade da margem.
-  useEffect(() => {
+  const carregarCustos = useCallback(() => {
     fetch(`${API_BASE}/api/custos`, { cache: 'no-store' })
       .then(r => r.json())
       .then(d => { if (d && d.custos) setCustosOficiais(d.custos as CustosOficiais) })
       .catch(() => { /* mantém vazio */ })
   }, [])
+
+  useEffect(() => { carregarCustos() }, [carregarCustos])
 
   // Debounce: só dispara a busca 350ms depois da última tecla (evita 1 request por caractere).
   useEffect(() => {
@@ -375,7 +377,7 @@ export function AnunciosML({ onVoltar }: Props) {
                         >🔎</button>
                       </div>
                     </div>
-                    <PriceBubble anuncio={a} resumo={resumo} custoOficial={custosOficiais[a.sku]} statusCor={corStatus(a.status)} statusLabel={labelStatus(a.status)} onPriceChanged={carregar} />
+                    <PriceBubble anuncio={a} resumo={resumo} custoOficial={custosOficiais[a.sku]} statusCor={corStatus(a.status)} statusLabel={labelStatus(a.status)} onPriceChanged={carregar} onCustoChanged={carregarCustos} />
                   </div>
 
                   <div style={{ marginTop: '0.9rem', paddingTop: '0.9rem', borderTop: '1px solid #f0f0f0', display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))', gap: '0.6rem' }}>
@@ -765,7 +767,7 @@ function CandidatoCard({ candidato, promocao, onMsg, onInscrito }: { candidato: 
   )
 }
 
-function ResumoTooltip({ anuncio, resumo, editavel = false, modal = false, onSaved, onClose, custoOficial }: { anuncio: Anuncio; resumo?: PricingSnapshot; editavel?: boolean; modal?: boolean; onSaved?: () => void; onClose?: () => void; custoOficial?: CustoOficial | null }) {
+function ResumoTooltip({ anuncio, resumo, editavel = false, modal = false, onSaved, onCustoChanged, onClose, custoOficial }: { anuncio: Anuncio; resumo?: PricingSnapshot; editavel?: boolean; modal?: boolean; onSaved?: () => void; onCustoChanged?: () => void; onClose?: () => void; custoOficial?: CustoOficial | null }) {
   const [live, setLive] = useState<LivePriceSummary | null>(null)
   const [breakdown, setBreakdown] = useState<LivePriceBreakdown | null>(null)
   const [novoPreco, setNovoPreco] = useState('')
@@ -833,18 +835,24 @@ function ResumoTooltip({ anuncio, resumo, editavel = false, modal = false, onSav
   const salvarCusto = async () => {
     const v = Number(String(novoCusto).replace(',', '.'))
     if (!v || v < 0) { setMsg({ tipo: 'erro', texto: 'Informe um custo válido' }); return }
+    if (!anuncio.sku) { setMsg({ tipo: 'erro', texto: 'Anúncio sem SKU — não é possível salvar o custo' }); return }
     if (!window.confirm(`Alterar o custo para ${brl(v)}?\n\nIsso vai recalcular a margem do anúncio.`)) return
     setSalvandoCusto(true); setMsg(null)
     try {
+      const payload: { sku: string; custo: number; imposto_pct?: number } = { sku: anuncio.sku, custo: v }
+      // Preserva o imposto já cadastrado (o backend reseta pra 9% se não enviar).
+      if (custoOficial?.imposto_pct != null) payload.imposto_pct = custoOficial.imposto_pct
       const r = await fetch(`${API_BASE}/api/custos`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ sku: anuncio.sku, custo: v }),
+        body: JSON.stringify(payload),
       })
       const d = await r.json()
       if (!r.ok || d.erro) throw new Error(d.erro || 'Falha ao atualizar custo')
+      if (!d.salvos) throw new Error('Custo não foi salvo — verifique o SKU do anúncio')
       setMsg({ tipo: 'ok', texto: `Custo atualizado: ${brl(v)}` })
       setNovoCusto('')
+      onCustoChanged?.()
       onSaved?.()
     } catch (e) {
       setMsg({ tipo: 'erro', texto: String(e instanceof Error ? e.message : e) })
@@ -962,7 +970,7 @@ function ResumoTooltip({ anuncio, resumo, editavel = false, modal = false, onSav
   )
 }
 
-function PriceBubble({ anuncio, resumo, statusCor, statusLabel, onPriceChanged, custoOficial }: { anuncio: Anuncio; resumo?: PricingSnapshot; statusCor: string; statusLabel: string; onPriceChanged?: () => void; custoOficial?: CustoOficial | null }) {
+function PriceBubble({ anuncio, resumo, statusCor, statusLabel, onPriceChanged, onCustoChanged, custoOficial }: { anuncio: Anuncio; resumo?: PricingSnapshot; statusCor: string; statusLabel: string; onPriceChanged?: () => void; onCustoChanged?: () => void; custoOficial?: CustoOficial | null }) {
   const [hovered, setHovered] = useState(false)
   const [aberto, setAberto] = useState(false)
   const [live, setLive] = useState<LivePriceSummary | null>(null)
@@ -1015,7 +1023,7 @@ function PriceBubble({ anuncio, resumo, statusCor, statusLabel, onPriceChanged, 
         style={{ position: 'fixed', inset: 0, background: 'rgba(16,24,40,.45)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '1rem' }}
       >
         <div onClick={e => e.stopPropagation()} style={{ width: '100%', maxWidth: 380 }}>
-          <ResumoTooltip anuncio={anuncio} resumo={resumo} custoOficial={custoOficial} editavel modal onSaved={onPriceChanged} onClose={() => setAberto(false)} />
+          <ResumoTooltip anuncio={anuncio} resumo={resumo} custoOficial={custoOficial} editavel modal onSaved={onPriceChanged} onCustoChanged={onCustoChanged} onClose={() => setAberto(false)} />
         </div>
       </div>
     )}
