@@ -267,6 +267,9 @@ export function VendasAnuncioModal({ itemId, titulo, onClose }: { itemId: string
   const [pagFiltro, setPagFiltro] = useState<string>('todos')
   const [paginaAtual, setPaginaAtual] = useState(0)
   const [difalExpandido, setDifalExpandido] = useState(false)
+  const [abaAtiva, setAbaAtiva] = useState<'vendas' | 'difal-mes'>('vendas')
+  const [meses, setMeses] = useState<any[]>([])
+  const [mesCarregando, setMesCarregando] = useState(false)
   const ITENS_POR_PAGINA = 20
 
   const carregar = useCallback(async (forcar = false, offset = 0) => {
@@ -285,7 +288,27 @@ export function VendasAnuncioModal({ itemId, titulo, onClose }: { itemId: string
     }
   }, [itemId])
 
+  const carregarMeses = useCallback(async () => {
+    setMesCarregando(true)
+    try {
+      const r = await fetch(`${API_BASE}/api/ml/anuncios/${encodeURIComponent(itemId)}/vendas-por-mes?sync=0`, { cache: 'no-store' })
+      const j = await r.json()
+      if (!r.ok || j.erro) throw new Error(j.erro || 'Falha ao carregar meses')
+      setMeses(j.meses || [])
+    } catch (e: any) {
+      setMeses([])
+    } finally {
+      setMesCarregando(false)
+    }
+  }, [itemId])
+
   useEffect(() => { carregar(false) }, [carregar])
+
+  useEffect(() => {
+    if (abaAtiva === 'difal-mes' && meses.length === 0) {
+      carregarMeses()
+    }
+  }, [abaAtiva, meses.length, carregarMeses])
 
   // Auto-refresh silencioso enquanto o enriquecimento de envios (em background)
   // ainda está localizando vendas — os gráficos de envio/estados crescem ao vivo.
@@ -394,8 +417,27 @@ export function VendasAnuncioModal({ itemId, titulo, onClose }: { itemId: string
           <button onClick={onClose} aria-label="Fechar" style={{ flexShrink: 0, width: 30, height: 30, borderRadius: 8, border: '1px solid #e4e7ec', background: '#fff', color: '#667085', fontSize: '1.2rem', cursor: 'pointer' }}>×</button>
         </div>
 
-        {/* Corpo rolável — tudo abaixo do cabeçalho rola junto */}
+        {/* Abas */}
+        <div style={{ display: 'flex', gap: 0, background: '#fff', borderBottom: '1px solid #eaecf0' }}>
+          {['vendas', 'difal-mes'].map(aba => (
+            <button key={aba}
+              onClick={() => setAbaAtiva(aba as any)}
+              style={{
+                flex: 1, padding: '0.65rem 1rem', borderBottom: abaAtiva === aba ? '2px solid #7a3ffa' : '2px solid transparent',
+                background: abaAtiva === aba ? '#f9fafb' : '#fff', color: abaAtiva === aba ? '#7a3ffa' : '#667085',
+                fontSize: '.82rem', fontWeight: 600, cursor: 'pointer', transition: 'all 0.2s', textAlign: 'center'
+              }}>
+              {aba === 'vendas' ? '📋 Vendas' : '📊 DIFAL por Mês'}
+            </button>
+          ))}
+        </div>
+
+        {/* Corpo rolável — tudo abaixo rola junto */}
         <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+
+        {/* ABA: Vendas */}
+        {abaAtiva === 'vendas' && (
+          <>
 
         {/* Resumo */}
         {dados && (
@@ -478,6 +520,42 @@ export function VendasAnuncioModal({ itemId, titulo, onClose }: { itemId: string
           )}
           {!carregando && !erro && vendasFiltradas.map(v => <CardVenda key={`${v.order_id}-${v.sku || ''}`} v={v} />)}
         </div>
+
+          </>
+        )}
+
+        {/* ABA: DIFAL por Mês */}
+        {abaAtiva === 'difal-mes' && (
+          <div style={{ padding: '1rem 1.25rem', display: 'flex', flexDirection: 'column', gap: 10 }}>
+            {mesCarregando && <div style={{ textAlign: 'center', color: '#667085', padding: '2.5rem' }}>Carregando dados por mês…</div>}
+            {!mesCarregando && meses.length === 0 && <div style={{ textAlign: 'center', color: '#667085', padding: '2.5rem' }}>Sem vendas ou dados não disponíveis.</div>}
+            {!mesCarregando && meses.length > 0 && meses.map(mes => (
+              <div key={mes.mes} style={{ background: '#fff', border: '1px solid #eaecf0', borderRadius: 12, padding: '1rem', marginBottom: '0.5rem' }}>
+                <div style={{ fontWeight: 800, fontSize: '.95rem', color: '#101828', marginBottom: '0.75rem' }}>
+                  📅 {new Date(mes.mes + '-01').toLocaleString('pt-BR', { month: 'long', year: 'numeric' })}
+                  <span style={{ fontSize: '.78rem', color: '#667085', marginLeft: '0.5rem' }}>({mes.total_vendas} vendas)</span>
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 8, marginBottom: '0.5rem' }}>
+                  <div style={{ background: '#f9fafb', padding: '0.6rem', borderRadius: 8 }}>
+                    <div style={{ fontSize: '.68rem', color: '#98a2b3', textTransform: 'uppercase' }}>Receita</div>
+                    <div style={{ fontWeight: 800, color: '#0a7d6e', fontSize: '.95rem' }}>{brl(mes.resumo.receita)}</div>
+                  </div>
+                  <div style={{ background: '#fef3f2', padding: '0.6rem', borderRadius: 8 }}>
+                    <div style={{ fontSize: '.68rem', color: '#b42318', textTransform: 'uppercase' }}>Lucro</div>
+                    <div style={{ fontWeight: 800, color: '#b42318', fontSize: '.95rem' }}>{brl(mes.resumo.lucro)}</div>
+                  </div>
+                  <div style={{ background: '#f9fafb', padding: '0.6rem', borderRadius: 8 }}>
+                    <div style={{ fontSize: '.68rem', color: '#667085', textTransform: 'uppercase' }}>Margem</div>
+                    <div style={{ fontWeight: 800, color: '#475467', fontSize: '.95rem' }}>{pct(mes.resumo.margem_pct)}</div>
+                  </div>
+                </div>
+                <div style={{ fontSize: '.78rem', color: '#667085' }}>
+                  {mes.resumo.unidades} unidades · {mes.total_vendas} pedido{mes.total_vendas !== 1 ? 's' : ''}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
 
         </div>{/* fim do corpo rolável */}
       </div>
