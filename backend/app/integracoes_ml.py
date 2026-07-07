@@ -695,8 +695,9 @@ class MLIntegration:
             return None
 
     def vendas_do_anuncio(self, item_id: str, sync: bool = True, enrich: bool = True,
-                          limite_enriquecer: int = 200) -> Dict[str, Any]:
-        """Histórico de vendas de um anúncio, com pagamento, envio e financeiro."""
+                          limite_enriquecer: int = 200, offset: int = 0, limit: int = 20) -> Dict[str, Any]:
+        """Histórico de vendas de um anúncio, com pagamento, envio e financeiro.
+        offset/limit para paginação (padrão: 0/20)."""
         item_id = str(item_id).strip()
         db = self._db()
         try:
@@ -708,9 +709,16 @@ class MLIntegration:
                 self.sync_vendas(incremental=True)
                 estado = self._sync_state_venda(db)
 
+            # Query total pra conhecer o tamanho
+            total_count = db.query(MercadoLivreVendaCache).filter(
+                MercadoLivreVendaCache.item_id == item_id
+            ).count()
+
             rows = (db.query(MercadoLivreVendaCache)
                     .filter(MercadoLivreVendaCache.item_id == item_id)
                     .order_by(MercadoLivreVendaCache.date_created.desc().nullslast())
+                    .offset(offset)
+                    .limit(limit)
                     .all())
 
             if enrich:
@@ -827,7 +835,10 @@ class MLIntegration:
                 "full": full,
                 "catalogo": catalogo,
                 "atualizado_em": estado.synced_at.isoformat() if (estado and estado.synced_at) else None,
-                "total_vendas": len(vendas),
+                "total_vendas": total_count,  # total no banco
+                "vendas_pagina": len(vendas),  # nesta página
+                "offset": offset,
+                "limit": limit,
                 "envio_localizados": sum(1 for r in rows if r.receiver_state),
                 "resumo": {
                     "unidades": int(total_qtd),

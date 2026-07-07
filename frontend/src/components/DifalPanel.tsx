@@ -7,16 +7,20 @@ import {
 const brl = (v: number) => Number(v).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
 const pc = (v: number) => Number(v).toFixed(1).replace('.', ',') + '%'
 
-export function DifalPanel({ entradas, receitaTotal, vendasTotal, vendasLocalizadas }: {
+export function DifalPanel({ entradas, receitaTotal, vendasTotal, vendasLocalizadas, expandido: expandidoInicialmente = false, onToggleExpandido }: {
   entradas: EntradaVenda[]
   receitaTotal: number
   vendasTotal: number
   vendasLocalizadas: number
+  expandido?: boolean
+  onToggleExpandido?: (expandido: boolean) => void
 }) {
   const [config, setConfig] = useState<DifalConfig>(() => carregarConfig())
   const [abrirConfig, setAbrirConfig] = useState(false)
+  const [expandido, setExpandido] = useState(expandidoInicialmente)
 
   const atualizar = (novo: DifalConfig) => { setConfig(novo); salvarConfig(novo) }
+  const toggle = (novoExpandido: boolean) => { setExpandido(novoExpandido); onToggleExpandido?.(novoExpandido) }
 
   const res = useMemo(() => calcularDifal(entradas, config), [entradas, config])
   const cobertura = vendasTotal > 0 ? vendasLocalizadas / vendasTotal : 0
@@ -34,9 +38,9 @@ export function DifalPanel({ entradas, receitaTotal, vendasTotal, vendasLocaliza
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
         <span style={{ fontSize: '.85rem', fontWeight: 800, color: '#101828' }}>🧾 DIFAL estimado</span>
         <span style={{ fontSize: '.7rem', color: '#98a2b3' }}>origem {config.origem} · Lucro Presumido{config.importado ? ' · importado 4%' : ''}</span>
-        <button onClick={() => setAbrirConfig(v => !v)}
+        <button onClick={() => toggle(!expandido)}
           style={{ marginLeft: 'auto', padding: '5px 11px', borderRadius: 8, border: '1px solid #d0d5dd', background: '#fff', color: '#3538cd', fontSize: '.76rem', fontWeight: 600, cursor: 'pointer' }}>
-          ⚙️ {abrirConfig ? 'Fechar' : 'Alíquotas'}
+          {expandido ? '▼' : '▶'} {expandido ? 'Ocultar' : 'Mostrar'} detalhes
         </button>
       </div>
 
@@ -56,42 +60,52 @@ export function DifalPanel({ entradas, receitaTotal, vendasTotal, vendasLocaliza
         )}
       </div>
 
-      {/* Config de alíquotas */}
-      {abrirConfig && (
-        <div style={{ marginTop: 12, padding: '0.85rem', background: '#f9fafb', border: '1px solid #eaecf0', borderRadius: 10 }}>
-          <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', alignItems: 'center', marginBottom: 10 }}>
-            <label style={{ fontSize: '.78rem', color: '#475467', display: 'flex', alignItems: 'center', gap: 6 }}>
-              Origem:
-              <select value={config.origem} onChange={e => atualizar({ ...config, origem: e.target.value as UF })}
-                style={{ padding: '4px 8px', border: '1px solid #d0d5dd', borderRadius: 6, fontSize: '.78rem' }}>
-                {UFS.map(u => <option key={u} value={u}>{u} — {NOME_UF[u]}</option>)}
-              </select>
-            </label>
-            <label style={{ fontSize: '.78rem', color: '#475467', display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
-              <input type="checkbox" checked={config.importado} onChange={e => atualizar({ ...config, importado: e.target.checked })} />
-              Produto importado (interestadual 4%)
-            </label>
-            <button onClick={() => atualizar(configPadrao(config.origem))}
-              style={{ padding: '4px 10px', borderRadius: 6, border: '1px solid #d0d5dd', background: '#fff', color: '#667085', fontSize: '.74rem', cursor: 'pointer' }}>
-              Restaurar padrão
+      {/* Config de alíquotas (dentro de expandido) */}
+      {expandido && (
+        <>
+          <div style={{ marginTop: 10 }}>
+            <button onClick={() => setAbrirConfig(v => !v)}
+              style={{ padding: '5px 11px', borderRadius: 8, border: '1px solid #d0d5dd', background: '#fff', color: '#667085', fontSize: '.76rem', fontWeight: 600, cursor: 'pointer' }}>
+              ⚙️ {abrirConfig ? 'Fechar' : 'Editar'} alíquotas
             </button>
           </div>
-          <div style={{ fontSize: '.72rem', color: '#667085', marginBottom: 6 }}>Alíquota interna (%) por estado de destino — ajuste conforme cada UF:</div>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(88px, 1fr))', gap: 6 }}>
-            {(ufsPresentes.length ? ufsPresentes : UFS).map(uf => (
-              <label key={uf} style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: '.74rem', color: '#475467' }}>
-                <span style={{ fontWeight: 700, minWidth: 22 }}>{uf}</span>
-                <input type="number" step="0.5" value={config.internas[uf] ?? INTERNAS_PADRAO[uf]}
-                  onChange={e => atualizar({ ...config, internas: { ...config.internas, [uf]: parseFloat(e.target.value) || 0 } })}
-                  style={{ width: 52, padding: '3px 5px', border: '1px solid #d0d5dd', borderRadius: 5, fontSize: '.74rem' }} />
-              </label>
-            ))}
-          </div>
-        </div>
+          {abrirConfig && (
+            <div style={{ marginTop: 12, padding: '0.85rem', background: '#f9fafb', border: '1px solid #eaecf0', borderRadius: 10 }}>
+              <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', alignItems: 'center', marginBottom: 10 }}>
+                <label style={{ fontSize: '.78rem', color: '#475467', display: 'flex', alignItems: 'center', gap: 6 }}>
+                  Origem:
+                  <select value={config.origem} onChange={e => atualizar({ ...config, origem: e.target.value as UF })}
+                    style={{ padding: '4px 8px', border: '1px solid #d0d5dd', borderRadius: 6, fontSize: '.78rem' }}>
+                    {UFS.map(u => <option key={u} value={u}>{u} — {NOME_UF[u]}</option>)}
+                  </select>
+                </label>
+                <label style={{ fontSize: '.78rem', color: '#475467', display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
+                  <input type="checkbox" checked={config.importado} onChange={e => atualizar({ ...config, importado: e.target.checked })} />
+                  Produto importado (interestadual 4%)
+                </label>
+                <button onClick={() => atualizar(configPadrao(config.origem))}
+                  style={{ padding: '4px 10px', borderRadius: 6, border: '1px solid #d0d5dd', background: '#fff', color: '#667085', fontSize: '.74rem', cursor: 'pointer' }}>
+                  Restaurar padrão
+                </button>
+              </div>
+              <div style={{ fontSize: '.72rem', color: '#667085', marginBottom: 6 }}>Alíquota interna (%) por estado de destino — ajuste conforme cada UF:</div>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(88px, 1fr))', gap: 6 }}>
+                {(ufsPresentes.length ? ufsPresentes : UFS).map(uf => (
+                  <label key={uf} style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: '.74rem', color: '#475467' }}>
+                    <span style={{ fontWeight: 700, minWidth: 22 }}>{uf}</span>
+                    <input type="number" step="0.5" value={config.internas[uf] ?? INTERNAS_PADRAO[uf]}
+                      onChange={e => atualizar({ ...config, internas: { ...config.internas, [uf]: parseFloat(e.target.value) || 0 } })}
+                      style={{ width: 52, padding: '3px 5px', border: '1px solid #d0d5dd', borderRadius: 5, fontSize: '.74rem' }} />
+                  </label>
+                ))}
+              </div>
+            </div>
+          )}
+        </>
       )}
 
-      {/* Tabela por estado */}
-      {res.linhas.length > 0 && (
+      {/* Tabela por estado (só quando expandido) */}
+      {expandido && res.linhas.length > 0 && (
         <div style={{ marginTop: 12, overflowX: 'auto' }}>
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '.76rem' }}>
             <thead>

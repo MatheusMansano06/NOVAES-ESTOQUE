@@ -68,6 +68,9 @@ interface Resultado {
   catalogo?: boolean | null
   atualizado_em?: string | null
   total_vendas: number
+  vendas_pagina?: number
+  offset?: number
+  limit?: number
   envio_localizados?: number
   resumo: { unidades: number; receita: number; lucro: number; margem_pct?: number | null }
   vendas: Venda[]
@@ -262,12 +265,16 @@ export function VendasAnuncioModal({ itemId, titulo, onClose }: { itemId: string
   const [erro, setErro] = useState('')
   const [busca, setBusca] = useState('')
   const [pagFiltro, setPagFiltro] = useState<string>('todos')
+  const [paginaAtual, setPaginaAtual] = useState(0)
+  const [difalExpandido, setDifalExpandido] = useState(false)
+  const ITENS_POR_PAGINA = 20
 
-  const carregar = useCallback(async (forcar = false) => {
+  const carregar = useCallback(async (forcar = false, offset = 0) => {
     if (forcar) setAtualizando(true); else setCarregando(true)
     setErro('')
+    setPaginaAtual(offset / ITENS_POR_PAGINA)
     try {
-      const r = await fetch(`${API_BASE}/api/ml/anuncios/${encodeURIComponent(itemId)}/vendas?sync=${forcar ? 1 : 0}`, { cache: 'no-store' })
+      const r = await fetch(`${API_BASE}/api/ml/anuncios/${encodeURIComponent(itemId)}/vendas?sync=${forcar ? 1 : 0}&offset=${offset}&limit=${ITENS_POR_PAGINA}`, { cache: 'no-store' })
       const j: Resultado = await r.json()
       if (!r.ok || j.erro) throw new Error(j.erro || 'Falha ao carregar vendas')
       setDados(j)
@@ -425,10 +432,12 @@ export function VendasAnuncioModal({ itemId, titulo, onClose }: { itemId: string
             receitaTotal={dados.resumo.receita}
             vendasTotal={dados.total_vendas}
             vendasLocalizadas={ufTotal}
+            expandido={difalExpandido}
+            onToggleExpandido={setDifalExpandido}
           />
         )}
 
-        {/* Filtros */}
+        {/* Filtros + Paginação */}
         <div style={{ position: 'sticky', top: 0, zIndex: 2, display: 'flex', gap: 8, padding: '0.65rem 1.25rem', background: '#fff', borderBottom: '1px solid #f0f0f0', borderTop: '1px solid #f0f0f0', flexWrap: 'wrap', alignItems: 'center' }}>
           <input value={busca} onChange={e => setBusca(e.target.value)} placeholder="Buscar por cliente, venda, carrinho, CEP…"
             style={{ flex: 1, minWidth: 200, padding: '7px 11px', border: '1px solid #e4e7ec', borderRadius: 8, fontSize: '.82rem' }} />
@@ -438,6 +447,22 @@ export function VendasAnuncioModal({ itemId, titulo, onClose }: { itemId: string
               {lab}
             </button>
           ))}
+          {/* Paginação */}
+          {dados && dados.total_vendas > 0 && (
+            <div style={{ marginLeft: 'auto', display: 'flex', gap: 6, alignItems: 'center', fontSize: '.78rem', color: '#667085' }}>
+              <button onClick={() => carregar(false, Math.max(0, (dados.offset ?? 0) - ITENS_POR_PAGINA))}
+                disabled={!dados.offset || (dados.offset ?? 0) === 0}
+                style={{ padding: '5px 10px', borderRadius: 6, border: '1px solid #d0d5dd', background: '#fff', color: '#667085', cursor: (dados.offset ?? 0) > 0 ? 'pointer' : 'not-allowed', opacity: (dados.offset ?? 0) > 0 ? 1 : 0.5, fontSize: '.75rem', fontWeight: 600 }}>
+                ← Anterior
+              </button>
+              <span>Pág {Math.floor((dados.offset ?? 0) / ITENS_POR_PAGINA) + 1} de {Math.ceil(dados.total_vendas / ITENS_POR_PAGINA)}</span>
+              <button onClick={() => carregar(false, (dados.offset ?? 0) + ITENS_POR_PAGINA)}
+                disabled={(dados.offset ?? 0) + ITENS_POR_PAGINA >= dados.total_vendas}
+                style={{ padding: '5px 10px', borderRadius: 6, border: '1px solid #d0d5dd', background: '#fff', color: '#667085', cursor: (dados.offset ?? 0) + ITENS_POR_PAGINA < dados.total_vendas ? 'pointer' : 'not-allowed', opacity: (dados.offset ?? 0) + ITENS_POR_PAGINA < dados.total_vendas ? 1 : 0.5, fontSize: '.75rem', fontWeight: 600 }}>
+                Próxima →
+              </button>
+            </div>
+          )}
         </div>
 
         {/* Lista */}
