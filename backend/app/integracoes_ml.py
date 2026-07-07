@@ -2105,22 +2105,6 @@ class MLIntegration:
             "status": item.get("status"),
             "cache": detail.get("cache"),
         }
-        body = self._get(f"/items/{item_id}", {"attributes": "id,price,base_price,catalog_listing,status"})
-        if not body:
-            return {"erro": "Anúncio não encontrado"}
-        cheio = body.get("price")
-        if cheio is None:
-            cheio = body.get("base_price")
-        sp = self._get(f"/items/{item_id}/sale_price", {"quantity": 1})
-        promocional = sp.get("amount") if isinstance(sp, dict) and sp.get("amount") is not None else cheio
-        tem_promocao = (cheio is not None and promocional is not None and float(promocional) < float(cheio) - 0.01)
-        return {
-            "cheio": cheio,
-            "promocional": promocional,
-            "tem_promocao": bool(tem_promocao),
-            "catalogo": bool(body.get("catalog_listing")),
-            "status": body.get("status"),
-        }
 
     def aplicar_preco(self, item_id: str, preco: float) -> Dict:
         """Aplica o preço base ao anúncio (PUT /items). Catálogo/fechado são bloqueados pelo ML.
@@ -2353,6 +2337,7 @@ class MLIntegration:
             "catalogo": False,
             "status": item.get("status"),
             "cache": detail.get("cache"),
+            "desconto_tarifa": self.beneficio_tarifa_item(item_id),
         }
 
     def atualizar_descricao(self, item_id: str, plain_text: str) -> Dict:
@@ -2937,6 +2922,38 @@ class MLIntegration:
     # ---------- Central de Promoções (seller-promotions) ----------
     # Tipos que exigem o vendedor definir um preço de oferta (deal_price).
     PROMO_TIPOS_COM_PRECO = {"DEAL", "PRICE_DISCOUNT", "DOD", "LIGHTNING", "PRE_NEGOTIATED"}
+
+    def beneficio_tarifa_item(self, item_id: str) -> Optional[float]:
+        """Bônus de tarifa que o ML concede quando o item está numa promoção ativa.
+
+        Em campanhas do tipo SMART ("Aumente suas vendas") o ML banca uma parte do
+        desconto (meli_percentage). Esse valor volta a favor da margem do vendedor —
+        é o "Desconto de Tarifa de Venda" que aparece no Mercado Turbo.
+
+        Retorna o valor em R$ por venda, ou None se não houver promoção ativa com bônus.
+        GET /seller-promotions/items/{item_id}?app_version=v2
+        """
+        try:
+            resp = self._get_json(f"/seller-promotions/items/{item_id}", {"app_version": "v2"})
+        except Exception:
+            return None
+        # A resposta pode vir como lista de promoções ou {results: [...]}
+        promocoes = resp if isinstance(resp, list) else (resp.get("results") if isinstance(resp, dict) else None)
+        if not isinstance(promocoes, list):
+            return None
+        for p in promocoes:
+            if not isinstance(p, dict):
+                continue
+            if (p.get("status") or "").lower() != "started":
+                continue
+            meli_pct = p.get("meli_percentage")
+            base = p.get("original_price")
+            if meli_pct and base:
+                try:
+                    return round(float(base) * float(meli_pct) / 100.0, 2)
+                except (TypeError, ValueError):
+                    continue
+        return None
 
     def listar_promocoes(self) -> Dict:
         """Lista as promoções/campanhas ativas da conta na Central de Promoções do ML.

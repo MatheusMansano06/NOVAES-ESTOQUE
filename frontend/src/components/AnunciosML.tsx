@@ -101,6 +101,7 @@ interface LivePriceBreakdown {
   frete: number | null
   tarifa: number | null
   tarifaPct: number | null
+  descontoTarifa?: number | null
 }
 
 interface MarginViewModel {
@@ -110,6 +111,7 @@ interface MarginViewModel {
   frete: number | null
   tarifa: number | null
   tarifaPct: number | null
+  descontoTarifa: number | null
   custo: number | null
   impostoPct: number
   imposto: number | null
@@ -138,12 +140,17 @@ function montarResumoMargem(anuncio: Anuncio, resumo?: PricingSnapshot, live?: L
   // MC sem depender do hover que busca o detalhe ao vivo.
   const tarifa = resumo?.tarifa ?? breakdown?.tarifa ?? anuncio.tarifa ?? null
   const tarifaPct = resumo?.tarifaPct ?? breakdown?.tarifaPct ?? anuncio.tarifa_pct ?? null
+  // Bônus de tarifa: quando o item está numa promoção ativa (ex.: "Aumente suas vendas"),
+  // o ML banca parte do desconto (meli_percentage). Volta a favor da margem.
+  const descontoTarifa = breakdown?.descontoTarifa ?? null
   // Custo oficial (planilha/banco) tem prioridade sobre o snapshot do Precificador.
   const custo = custoOficial?.custo ?? resumo?.custo ?? null
   const impostoPct = custoOficial?.imposto_pct ?? resumo?.impostoPct ?? carregarImpostoAtual()
   const imposto = precoPromocional > 0 ? (precoPromocional * impostoPct) / 100 : null
-  const margem = frete != null && tarifa != null && custo != null && imposto != null
-    ? precoPromocional - frete - tarifa - custo - imposto
+  // A tarifa efetiva paga ao ML já desconta o bônus da promoção.
+  const tarifaEfetiva = tarifa != null && descontoTarifa != null ? tarifa - descontoTarifa : tarifa
+  const margem = frete != null && tarifaEfetiva != null && custo != null && imposto != null
+    ? precoPromocional - frete - tarifaEfetiva - custo - imposto
     : null
   const margemPct = margem != null && precoPromocional > 0 ? (margem / precoPromocional) * 100 : null
 
@@ -154,6 +161,7 @@ function montarResumoMargem(anuncio: Anuncio, resumo?: PricingSnapshot, live?: L
     frete,
     tarifa,
     tarifaPct,
+    descontoTarifa,
     custo,
     impostoPct,
     imposto,
@@ -782,6 +790,7 @@ function ResumoTooltip({ anuncio, resumo, editavel = false, modal = false, onSav
           frete: detailData?.shipping_fee?.list_cost ?? detailData?.item?.frete_custo ?? null,
           tarifa: detailData?.tarifa_atual?.tarifa ?? null,
           tarifaPct: detailData?.tarifa_atual?.percentual ?? null,
+          descontoTarifa: precoData && !precoData.erro ? (precoData.desconto_tarifa ?? null) : null,
         })
       }
     }).catch(() => { /* mantem fallback */ })
@@ -867,6 +876,9 @@ function ResumoTooltip({ anuncio, resumo, editavel = false, modal = false, onSav
         </div>
       )}
       <LinhaResumo label="Tarifa de venda" valor={resumoMargem.tarifa != null ? `-${brl(resumoMargem.tarifa)}` : '--'} extra={resumoMargem.tarifaPct != null ? `${resumoMargem.tarifaPct.toFixed(2)}%` : undefined} cor="#b42318" />
+      {resumoMargem.descontoTarifa != null && resumoMargem.descontoTarifa > 0 && (
+        <LinhaResumo label="Desconto de tarifa" valor={`+${brl(resumoMargem.descontoTarifa)}`} extra={resumoMargem.tarifa != null && resumoMargem.tarifa > 0 ? `${((resumoMargem.descontoTarifa / resumoMargem.tarifa) * 100).toFixed(1)}%` : undefined} cor="#067647" />
+      )}
       <LinhaResumo label="Custo" valor={resumoMargem.custo != null ? `-${brl(resumoMargem.custo)}` : '--'} cor="#b42318" />
       <LinhaResumo label="Imposto" valor={resumoMargem.imposto != null ? `-${brl(resumoMargem.imposto)}` : '--'} extra={resumoMargem.impostoPct ? `${resumoMargem.impostoPct.toFixed(2)}%` : undefined} cor="#b42318" />
       <div style={{ height: 1, background: '#e9eef7', margin: '.55rem 0' }} />
@@ -955,6 +967,7 @@ function PriceBubble({ anuncio, resumo, statusCor, statusLabel, onPriceChanged, 
   const [aberto, setAberto] = useState(false)
   const [live, setLive] = useState<LivePriceSummary | null>(null)
   const [breakdown, setBreakdown] = useState<LivePriceBreakdown | null>(null)
+  const [descTarifa, setDescTarifa] = useState<number | null>(null)
   const [loadingBreakdown, setLoadingBreakdown] = useState(false)
 
   useEffect(() => {
@@ -964,6 +977,7 @@ function PriceBubble({ anuncio, resumo, statusCor, statusLabel, onPriceChanged, 
       .then(d => {
         if (!ativo || d.erro) return
         setLive({ cheio: d.cheio ?? null, promocional: d.promocional ?? null })
+        setDescTarifa(d.desconto_tarifa ?? null)
       })
       .catch(() => { /* fallback para os valores da lista */ })
     return () => { ativo = false }
@@ -981,6 +995,7 @@ function PriceBubble({ anuncio, resumo, statusCor, statusLabel, onPriceChanged, 
           frete: d?.shipping_fee?.list_cost ?? d?.item?.frete_custo ?? null,
           tarifa: d?.tarifa_atual?.tarifa ?? null,
           tarifaPct: d?.tarifa_atual?.percentual ?? null,
+          descontoTarifa: descTarifa,
         })
       })
       .catch(() => { /* fallback silencioso */ })
@@ -988,7 +1003,7 @@ function PriceBubble({ anuncio, resumo, statusCor, statusLabel, onPriceChanged, 
         if (ativo) setLoadingBreakdown(false)
       })
     return () => { ativo = false }
-  }, [hovered, resumo, breakdown, loadingBreakdown, anuncio.id])
+  }, [hovered, resumo, breakdown, loadingBreakdown, anuncio.id, descTarifa])
 
   const resumoMargem = montarResumoMargem(anuncio, resumo, live, breakdown, custoOficial)
 
