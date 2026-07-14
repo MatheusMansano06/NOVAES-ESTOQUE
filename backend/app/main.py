@@ -3361,12 +3361,21 @@ def _componentes_kit_olist(produto_id: str, qtd_full: float):
     """Lê os componentes de um produto kit da Olist usando o ID direto.
     A API v3 traz tipo=='K' e o array 'kit' com {produto:{id,sku,descricao}, quantidade}.
     Buscar por SKU (detectar_e_buscar_kit) pegava o produto errado — por isso usamos o id.
-    Retorna (eh_kit: bool, tipo: str, componentes: list, nome_kit, sku_kit).
+
+    Se o id vinculado NÃO for um kit (ex.: a Olist tem uma duplicata Simples/excluída
+    com o mesmo código do kit ativo), procuramos pelo código um kit ativo de verdade.
+    Retorna (eh_kit: bool, tipo: str, componentes: list, nome_kit, sku_kit, kit_id).
     """
     detalhe = olist.obter_detalhes_completo(str(produto_id)) or {}
     tipo = detalhe.get("tipo")
-    if tipo != "K":
-        return False, tipo, [], None, None
+    kit_id = str(produto_id)
+    if tipo != "K" or not (detalhe.get("kit") or []):
+        # Pode ser o gêmeo Simples/excluído. Tenta achar o kit ativo pelo código.
+        sku = detalhe.get("sku") or ""
+        alt, alt_id = olist.buscar_kit_por_codigo(sku, id_preferencial=produto_id) if sku else (None, None)
+        if not alt:
+            return False, tipo, [], None, None, kit_id
+        detalhe, tipo, kit_id = alt, "K", str(alt_id)
     componentes = []
     for c in (detalhe.get("kit") or []):
         p = c.get("produto") or {}
@@ -3385,7 +3394,7 @@ def _componentes_kit_olist(produto_id: str, qtd_full: float):
             "quantidade_no_kit": por_kit,
             "quantidade_sugerida": int(round(por_kit * qtd_full)),
         })
-    return True, tipo, componentes, detalhe.get("descricao"), detalhe.get("sku")
+    return True, tipo, componentes, detalhe.get("descricao"), detalhe.get("sku"), kit_id
 
 
 def _kit_equivalente_minimo(componentes: list, campo: str) -> float:
@@ -3429,9 +3438,15 @@ async def kit_componentes_embale(request: Request):
         if not pid:
             return JSONResponse({"eh_kit": False, "motivo": "Item sem produto Olist vinculado", "qtd_full": qtd_full})
 
-        eh_kit, tipo, componentes, nome_kit, sku_kit = _componentes_kit_olist(pid, qtd_full)
+        eh_kit, tipo, componentes, nome_kit, sku_kit, kit_id = _componentes_kit_olist(pid, qtd_full)
         if not eh_kit:
             return JSONResponse({"eh_kit": False, "tipo": tipo, "qtd_full": qtd_full})
+
+        # Se o kit real estava numa duplicata (id diferente do vinculado), corrige o
+        # vínculo para os próximos acessos apontarem direto ao kit ativo.
+        if kit_id and str(kit_id) != pid:
+            item.olist_produto_id = str(kit_id)
+            db.commit()
 
         return JSONResponse({
             "eh_kit": True,
