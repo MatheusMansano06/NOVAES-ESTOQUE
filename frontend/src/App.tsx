@@ -2119,7 +2119,6 @@ function App() {
       <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
           <section className="nvs-kpi-grid" style={{ marginBottom: '1.5rem' }}>
             {[
-              { tag: 'EH', cor: 'red', titulo: 'Envie HOJE', valor: radarHoje ?? '…', helper: radarHoje == null ? 'lendo estoque do Full…' : (radarHoje > 0 ? 'produtos no limite do prazo' : 'nada no limite hoje'), ir: 'radar-full' as Pagina },
               { tag: 'CU', cor: 'yellow', titulo: 'Compra urgente', valor: compraUrgente ?? '…', helper: compraUrgente == null ? 'calculando prioridade…' : (compraUrgente > 0 ? 'SKUs abaixo do mínimo' : 'estoque saudável'), ir: 'lista-compra' as Pagina },
               { tag: 'FN', cor: 'blue', titulo: 'Fornecedores', valor: estoque.length > 0 ? new Set(estoque.flatMap(e => e.notas_fiscais.map(n => n.fornecedor))).size : 0, helper: 'Fornecedores cadastrados', ir: 'fornecedores' as Pagina },
               { tag: 'IT', cor: 'green', titulo: 'Itens sincronizados', valor: itensSincronizados, helper: `${todosItens.length} itens no fluxo`, ir: 'anuncios' as Pagina },
