@@ -312,9 +312,18 @@ class MLIntegration:
                 pass
         return None
 
-    def get_access_token(self) -> Optional[str]:
+    def get_access_token(self, invalidar: Optional[str] = None) -> Optional[str]:
+        """
+        Devolve um access_token válido, renovando quando preciso.
+
+        `invalidar`: passe o token que acabou de tomar 401. O relógio pode dizer
+        que ele ainda é válido (o ML pode revogar antes de expirar), então sem
+        isso cairíamos em 401 infinito. Só força a renovação se o token guardado
+        ainda for o mesmo que falhou — se outra thread já renovou, aproveita o
+        novo em vez de renovar de novo (refresh_token é uso único).
+        """
         token = self._token_valido(self._carregar_token())
-        if token:
+        if token and token != invalidar:
             return token
         # Precisa renovar. O refresh_token do ML é uso único: se duas threads
         # renovarem ao mesmo tempo, uma invalida a outra e a cadeia morre. Por
@@ -322,7 +331,7 @@ class MLIntegration:
         with self._token_lock:
             dados = self._carregar_token()
             token = self._token_valido(dados)
-            if token:
+            if token and token != invalidar:
                 return token
             rt = dados.get("refresh_token") if dados else None
             return self._renovar_token(rt) if rt else None

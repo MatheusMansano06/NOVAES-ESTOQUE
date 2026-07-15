@@ -97,6 +97,32 @@ def _garantir_colunas_sqlite():
                 if colunas_ml and nome not in colunas_ml:
                     conn.exec_driver_sql(f"ALTER TABLE ml_item_cache ADD COLUMN {nome} {tipo}")
                     print(f"[DB] Coluna ml_item_cache.{nome} criada")
+
+            # --- Devoluções ML (portado de DEVOLUCOES-ML-main) ---
+            # As 10 tabelas nascem do create_all(). O que não dá para expressar no
+            # model é o índice ÚNICO PARCIAL de ml_claim_id: ele é o que torna o
+            # sync idempotente (sem ele, re-sincronizar duplica a devolução do
+            # mesmo claim). O filtro WHERE é obrigatório porque devoluções criadas
+            # à mão têm ml_claim_id NULL/'' e colidiriam entre si num índice único
+            # comum. Mantido igual ao original.
+            for nome_idx, ddl in [
+                ("idx_devolucoes_ml_claim_id",
+                 "CREATE UNIQUE INDEX IF NOT EXISTS idx_devolucoes_ml_claim_id "
+                 "ON devolucoes(ml_claim_id) WHERE ml_claim_id IS NOT NULL AND ml_claim_id != ''"),
+                ("idx_ml_raw_payloads_claim",
+                 "CREATE INDEX IF NOT EXISTS idx_ml_raw_payloads_claim "
+                 "ON ml_raw_payloads(claim_id, resource_type)"),
+                ("idx_ml_sync_runs_tipo_status",
+                 "CREATE INDEX IF NOT EXISTS idx_ml_sync_runs_tipo_status "
+                 "ON ml_sync_runs(tipo, status, iniciado_em)"),
+                ("idx_ml_trace_events_trace",
+                 "CREATE INDEX IF NOT EXISTS idx_ml_trace_events_trace "
+                 "ON ml_trace_events(trace_id, id)"),
+                ("idx_ml_claim_classifications_bucket",
+                 "CREATE INDEX IF NOT EXISTS idx_ml_claim_classifications_bucket "
+                 "ON ml_claim_classifications(active, bucket)"),
+            ]:
+                conn.exec_driver_sql(ddl)
     except Exception as e:
         print(f"[DB] Aviso ao garantir colunas SQLite: {e}")
 

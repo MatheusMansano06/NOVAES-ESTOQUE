@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Float, DateTime, Text, Enum, ForeignKey
+from sqlalchemy import Column, Integer, String, Float, DateTime, Text, Enum, ForeignKey, UniqueConstraint
 from sqlalchemy.orm import relationship
 from database import Base
 from datetime import datetime
@@ -584,3 +584,259 @@ class EmbalagemVinculo(Base):
     sku = Column(String(120), unique=True, index=True)
     embalagem_id = Column(Integer, ForeignKey("embalagens.id"), index=True)
     criado_em = Column(DateTime, default=datetime.utcnow)
+
+
+# ============================================================================
+# DEVOLUÇÕES ML (Post-Purchase API)
+# ----------------------------------------------------------------------------
+# Portado de DEVOLUCOES-ML-main (Flask + sqlite3 cru) em 15/07/2026.
+#
+# Datas ficam como String (ISO-8601), não DateTime, de propósito: a lógica de
+# classificação portada é CONGELADA (ver BIBLIA_POS_VENDA_ML.md) e compara datas
+# como string vinda da API do ML. Converter para DateTime exigiria tocar nessa
+# lógica, que é justamente o que não se pode fazer sem aprovação.
+# ============================================================================
+
+
+class Devolucao(Base):
+    """Devolução/reclamação do ML. Espelho local do claim da Post-Purchase API."""
+    __tablename__ = "devolucoes"
+
+    id = Column(Integer, primary_key=True)
+    marketplace = Column(String(50), nullable=False, default="mercadolivre")
+    pedido_id = Column(String(100), nullable=False, index=True)
+    cliente_nome = Column(String(255), nullable=False, default="")
+    produto_nome = Column(String(255), nullable=False, default="")
+    motivo_devolucao = Column(String(255), nullable=False, default="")
+    valor_produto = Column(Float, nullable=False, default=0)
+    status = Column(String(50), nullable=False, default="")
+    data_solicitacao = Column(String(40), nullable=True)
+    codigo_rastreio = Column(String(120), nullable=True)
+    valor_recuperado = Column(Float, default=0)
+    valor_perdido = Column(Float, default=0)
+    observacao_final = Column(Text, default="")
+
+    # --- Espelho do claim no ML ---
+    ml_claim_id = Column(String(50), nullable=True, index=True)
+    ml_status = Column(String(50), default="")
+    ml_stage = Column(String(50), default="")
+    ml_return_status = Column(String(50), default="")
+    ultima_sincronizacao_ml = Column(String(40), nullable=True)
+    ml_destino_devolucao = Column(String(50), default="")
+    ml_tipo_logistica = Column(String(50), default="")
+    ml_ativo = Column(Integer, default=1, index=True)
+
+    # --- Prazo / priorização ---
+    prazo_resolucao = Column(String(40), nullable=True)
+    prioridade_prazo = Column(String(20), default="")
+    requer_acao = Column(Integer, default=1)
+    acao_recomendada = Column(Text, default="")
+
+    # --- Conferência física da chegada ---
+    produto_imagem = Column(Text, default="")
+    chegada_status = Column(String(50), default="")
+    mediacao_mensagem = Column(Text, default="")
+    etapa_checklist_atual = Column(Integer, default=0)
+    conteudo_progresso_checklist = Column(Text, default="{}")
+
+    # --- Financeiro ---
+    ml_valor_pago = Column(Float, default=0)
+    ml_valor_reembolsado = Column(Float, default=0)
+    ml_taxa_venda = Column(Float, default=0)
+    ml_custo_envio = Column(Float, default=0)
+    ml_tarifa_devolucao = Column(Float, default=0)
+    ml_status_pagamento = Column(String(50), default="")
+    ml_status_money = Column(String(50), default="")
+    ml_refund_at = Column(String(40), default="")
+
+    # --- Return (v2) ---
+    ml_return_id = Column(String(50), default="")
+    ml_return_subtype = Column(String(50), default="")
+    ml_seller_status = Column(String(50), default="")
+    ml_seller_reason = Column(String(255), default="")
+    ml_product_condition = Column(String(50), default="")
+    ml_return_reviews = Column(Text, default="[]")
+
+    historico = relationship("DevolucaoHistoricoStatus", back_populates="devolucao",
+                             cascade="all, delete-orphan")
+    checklist = relationship("DevolucaoChecklist", back_populates="devolucao",
+                            uselist=False, cascade="all, delete-orphan")
+    evidencias = relationship("DevolucaoEvidencia", back_populates="devolucao",
+                              cascade="all, delete-orphan")
+    contestacoes = relationship("DevolucaoContestacao", back_populates="devolucao",
+                                cascade="all, delete-orphan")
+
+
+class DevolucaoHistoricoStatus(Base):
+    __tablename__ = "historico_status"
+
+    id = Column(Integer, primary_key=True)
+    devolucao_id = Column(Integer, ForeignKey("devolucoes.id"), nullable=False, index=True)
+    status_anterior = Column(String(50), nullable=False, default="")
+    status_novo = Column(String(50), nullable=False, default="")
+    data_alteracao = Column(String(40), nullable=False)
+
+    devolucao = relationship("Devolucao", back_populates="historico")
+
+
+class DevolucaoChecklist(Base):
+    """Conferência física do produto devolvido. 1:1 com a devolução."""
+    __tablename__ = "checklists"
+
+    id = Column(Integer, primary_key=True)
+    devolucao_id = Column(Integer, ForeignKey("devolucoes.id"), nullable=False, unique=True)
+    produto_confere = Column(Integer, nullable=True)
+    embalagem_integra = Column(Integer, nullable=True)
+    possui_sinais_de_uso = Column(Integer, nullable=True)
+    item_quebrado = Column(Integer, nullable=True)
+    faltando_pecas = Column(Integer, nullable=True)
+    motivo_confere = Column(Integer, nullable=True)
+    observacoes = Column(Text, default="")
+    data_checklist = Column(String(40), nullable=False)
+
+    # --- Avarias específicas ---
+    embalagem_rasgada = Column(Integer, default=0)
+    produto_amassado = Column(Integer, default=0)
+    produto_riscado = Column(Integer, default=0)
+    produto_quebrado = Column(Integer, default=0)
+    produto_sujo = Column(Integer, default=0)
+    faltando_acessorios = Column(Integer, default=0)
+    produto_errado = Column(Integer, default=0)
+    sem_embalagem_original = Column(Integer, default=0)
+
+    devolucao = relationship("Devolucao", back_populates="checklist")
+
+
+class DevolucaoEvidencia(Base):
+    """Foto/arquivo anexado à devolução. `arquivo` guarda o nome no volume /data."""
+    __tablename__ = "evidencias"
+
+    id = Column(Integer, primary_key=True)
+    devolucao_id = Column(Integer, ForeignKey("devolucoes.id"), nullable=False, index=True)
+    tipo = Column(String(50), nullable=False, default="")
+    arquivo = Column(String(255), nullable=False)
+    descricao = Column(Text, default="")
+    data_upload = Column(String(40), nullable=False)
+
+    devolucao = relationship("Devolucao", back_populates="evidencias")
+
+
+class DevolucaoContestacao(Base):
+    __tablename__ = "contestacoes"
+
+    id = Column(Integer, primary_key=True)
+    devolucao_id = Column(Integer, ForeignKey("devolucoes.id"), nullable=False, index=True)
+    tipo_divergencia = Column(String(100), nullable=False, default="")
+    descricao = Column(Text, nullable=False, default="")
+    valor_contestado = Column(Float, nullable=False, default=0)
+    evidencia_ids = Column(Text, default="[]")
+    texto_contestacao = Column(Text, default="")
+    status = Column(String(50), nullable=False, default="")
+    data_abertura = Column(String(40), nullable=False)
+    data_resultado = Column(String(40), nullable=True)
+
+    devolucao = relationship("Devolucao", back_populates="contestacoes")
+
+
+# --- Rastreio do sync com o ML (diagnóstico) -------------------------------
+
+class MLSyncRun(Base):
+    """Uma execução do sync de devoluções. Alimenta /api/devolucoes/sync-diagnostico."""
+    __tablename__ = "ml_sync_runs"
+
+    id = Column(Integer, primary_key=True)
+    tipo = Column(String(50), nullable=False)
+    status = Column(String(50), nullable=False)
+    iniciado_em = Column(String(40), nullable=False)
+    finalizado_em = Column(String(40), nullable=True)
+    total_declarado = Column(Integer, default=0)
+    total_encontrado = Column(Integer, default=0)
+    total_processado = Column(Integer, default=0)
+    total_erros = Column(Integer, default=0)
+    detalhes = Column(Text, default="{}")
+
+
+class MLRawPayload(Base):
+    """Payload cru da API do ML, para auditar o que veio quando algo diverge."""
+    __tablename__ = "ml_raw_payloads"
+    __table_args__ = (UniqueConstraint("resource_type", "resource_id",
+                                       name="uq_ml_raw_payloads_resource"),)
+
+    id = Column(Integer, primary_key=True)
+    sync_run_id = Column(Integer, ForeignKey("ml_sync_runs.id"), nullable=True, index=True)
+    resource_type = Column(String(50), nullable=False)
+    resource_id = Column(String(100), nullable=False)
+    claim_id = Column(String(50), default="", index=True)
+    payload = Column(Text, nullable=False)
+    captured_at = Column(String(40), nullable=False)
+
+
+class MLReconciliationDiff(Base):
+    """Divergência detectada entre o que o ML declara e o que conseguimos processar."""
+    __tablename__ = "ml_reconciliation_diffs"
+
+    id = Column(Integer, primary_key=True)
+    sync_run_id = Column(Integer, ForeignKey("ml_sync_runs.id"), nullable=False, index=True)
+    tipo = Column(String(50), nullable=False)
+    severidade = Column(String(20), nullable=False)
+    referencia = Column(String(120), default="")
+    detalhe = Column(Text, nullable=False)
+    created_at = Column(String(40), nullable=False)
+
+
+class MLTraceEvent(Base):
+    """Passo a passo de um sync, por trace_id. Alimenta /api/devolucoes/sync-trace."""
+    __tablename__ = "ml_trace_events"
+
+    id = Column(Integer, primary_key=True)
+    trace_id = Column(String(60), nullable=False, index=True)
+    sync_run_id = Column(Integer, ForeignKey("ml_sync_runs.id"), nullable=True, index=True)
+    step = Column(String(80), nullable=False)
+    status = Column(String(30), nullable=False)
+    duration_ms = Column(Integer, default=0)
+    claim_id = Column(String(50), default="")
+    details = Column(Text, default="{}")
+    created_at = Column(String(40), nullable=False)
+
+
+class MLClaimClassification(Base):
+    """
+    Cache do resultado da classificação de um claim em bucket.
+
+    `bucket` e `regra` são a saída de classify_ml_live_queue_claim(), cujas regras
+    são CONGELADAS pela BIBLIA_POS_VENDA_ML.md. Guardar o `regra` junto é o que
+    permite auditar por que um claim caiu em determinada fila.
+    Chave é o claim_id (string), não um id sintético.
+    """
+    __tablename__ = "ml_claim_classifications"
+
+    claim_id = Column(String(50), primary_key=True)
+    pedido_id = Column(String(100), default="", index=True)
+    order_ids = Column(Text, default="[]")
+    status = Column(String(50), default="")
+    stage = Column(String(50), default="")
+    claim_type = Column(String(50), default="")
+    reason_id = Column(String(50), default="")
+    return_id = Column(String(50), default="")
+    return_status = Column(String(50), default="")
+    shipment_status = Column(String(50), default="")
+    shipment_destination = Column(String(50), default="")
+    seller_actions = Column(Text, default="[]")
+    bucket = Column(String(40), nullable=False, index=True)
+    regra = Column(String(160), default="")
+    last_updated = Column(String(40), default="")
+    payload = Column(Text, default="{}")
+    active = Column(Integer, default=1, index=True)
+    updated_at = Column(String(40), nullable=False)
+
+    # --- Denormalizado do pedido/item, p/ montar o card sem novo GET ---
+    produto_nome = Column(String(255), default="")
+    produto_imagem = Column(Text, default="")
+    valor_pago = Column(Float, default=0)
+    taxa_venda = Column(Float, default=0)
+    ml_tipo_logistica = Column(String(50), default="")
+    motivo_label = Column(String(255), default="")
+    pack_id = Column(String(50), default="")
+    mandatory = Column(Integer, default=0)
+    due_date = Column(String(40), default="")
+    date_created = Column(String(40), default="")
