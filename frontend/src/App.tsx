@@ -83,7 +83,7 @@ interface ProdutoEstoque {
   }>
 }
 
-type Pagina = 'bemvindo' | 'inicial' | 'conferencia' | 'produtos_nota' | 'relacionamento_produto' | 'fornecedores' | 'embaldes' | 'anuncios' | 'notas-fiscais' | 'divergencias' | 'lista-separacao' | 'historico-full' | 'operadores' | 'lista-compra' | 'garimpador'
+type Pagina = 'bemvindo' | 'inicial' | 'conferencia' | 'produtos_nota' | 'relacionamento_produto' | 'fornecedores' | 'full-operacoes' | 'anuncios' | 'notas-fiscais' | 'operadores' | 'lista-compra' | 'garimpador'
 
 interface Divergencia {
   item_id: number
@@ -1656,7 +1656,7 @@ function App() {
       items: [
         { key: 'dashboard', label: 'Dashboard', icon: 'dashboard', active: pagina === 'inicial', onClick: () => setPagina('inicial') },
         { key: 'notas', label: 'Notas fiscais', icon: 'receipt', badge: notas.length, active: pagina === 'notas-fiscais', onClick: () => setPagina('notas-fiscais') },
-        { key: 'lista-sep', label: 'Lista de separação', icon: 'box', active: pagina === 'lista-separacao', onClick: () => setPagina('lista-separacao') },
+        { key: 'full-sep', label: 'FULL', icon: 'box', active: pagina === 'full-operacoes', onClick: () => setPagina('full-operacoes') },
         { key: 'fornecedores', label: 'Fornecedores', icon: 'users', active: pagina === 'fornecedores', onClick: () => setPagina('fornecedores') },
       ],
     },
@@ -1679,9 +1679,7 @@ function App() {
     {
       label: 'FULL',
       items: [
-        { key: 'inbound', label: 'Inbound FULL', icon: 'truck', active: pagina === 'embaldes', badge: inboundsAtivos.length, onClick: () => setPagina('embaldes') },
-        { key: 'historico-full', label: 'Histórico FULL', icon: 'sync', active: pagina === 'historico-full', onClick: () => setPagina('historico-full') },
-        { key: 'divergencias', label: 'Divergencias', icon: 'warning', badge: divergencias.length, active: pagina === 'divergencias', onClick: () => setPagina('divergencias') },
+        { key: 'full-ops', label: 'Operações FULL', icon: 'truck', badge: inboundsAtivos.length + divergencias.length, active: pagina === 'full-operacoes', onClick: () => setPagina('full-operacoes') },
       ],
     },
   ]
@@ -2122,8 +2120,8 @@ function App() {
               { tag: 'CU', cor: 'yellow', titulo: 'Compra urgente', valor: compraUrgente ?? '…', helper: compraUrgente == null ? 'calculando prioridade…' : (compraUrgente > 0 ? 'SKUs abaixo do mínimo' : 'estoque saudável'), ir: 'lista-compra' as Pagina },
               { tag: 'FN', cor: 'blue', titulo: 'Fornecedores', valor: estoque.length > 0 ? new Set(estoque.flatMap(e => e.notas_fiscais.map(n => n.fornecedor))).size : 0, helper: 'Fornecedores cadastrados', ir: 'fornecedores' as Pagina },
               { tag: 'IT', cor: 'green', titulo: 'Itens sincronizados', valor: itensSincronizados, helper: `${todosItens.length} itens no fluxo`, ir: 'anuncios' as Pagina },
-              { tag: 'IN', cor: 'yellow', titulo: 'Inbounds ativos', valor: inboundsAtivos.length, helper: inboundsAtivos.length > 0 ? `${progressoBaixasInbound.restante} un pendente` : 'Sem inbound em aberto', ir: 'embaldes' as Pagina },
-              { tag: 'DG', cor: 'red', titulo: 'Itens divergentes', valor: divergencias.length, helper: divergencias.length > 0 ? 'Exigem ação imediata' : 'Nenhuma divergência', ir: 'divergencias' as Pagina },
+              { tag: 'IN', cor: 'yellow', titulo: 'Inbounds ativos', valor: inboundsAtivos.length, helper: inboundsAtivos.length > 0 ? `${progressoBaixasInbound.restante} un pendente` : 'Sem inbound em aberto', ir: 'full-operacoes' as Pagina },
+              { tag: 'DG', cor: 'red', titulo: 'Itens divergentes', valor: divergencias.length, helper: divergencias.length > 0 ? 'Exigem ação imediata' : 'Nenhuma divergência', ir: 'full-operacoes' as Pagina },
             ].map((item) => (
               <div className="nvs-kpi-card" key={item.titulo} role="button" tabIndex={0} title={`Abrir ${item.titulo}`}
                 onClick={() => setPagina(item.ir)}
@@ -4249,18 +4247,28 @@ function App() {
     )
   }
 
-  // ===== PÁGINA EMBALDES =====
-  if (pagina === 'embaldes') {
+  // ===== PÁGINA CONSOLIDADA OPERAÇÕES FULL =====
+  const [abaFull, setAbaFull] = useState<'separacao' | 'inbound' | 'historico' | 'divergencias'>('separacao')
+
+  if (pagina === 'full-operacoes') {
+    const titulos: Record<typeof abaFull, { titulo: string; descricao: string }> = {
+      separacao: { titulo: 'Lista de Separação', descricao: 'Separe produtos com balanço, baixa ou espera' },
+      inbound: { titulo: 'Inbound FULL', descricao: 'Receba PDFs de inbound, revise o FULL e acompanhe baixas' },
+      historico: { titulo: 'Histórico FULL', descricao: 'Itens em espera e alterações de quantidade que vai pro FULL' },
+      divergencias: { titulo: 'Divergências', descricao: 'Itens com problemas que exigem ação imediata' },
+    }
+    const titulo = titulos[abaFull]
+
     return renderComShell(
-      'Operacao de inbound FULL',
-      'Receba PDFs de inbound, revise o FULL e acompanhe baixas.',
+      'Operações FULL',
+      'Gerencie inbounds, separação, histórico e divergências em um único lugar',
       <div className="app">
         <header className="header">
           <div className="container">
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <div>
-                <h1>INBOUND (LISTA DE SEPARAÇÃO)</h1>
-                <p>Suba os inbounds do Mercado Livre FULL antes da nota fiscal</p>
+                <h1>{titulo.titulo}</h1>
+                <p>{titulo.descricao}</p>
               </div>
               <button
                 onClick={() => setPagina('inicial')}
@@ -4280,54 +4288,127 @@ function App() {
             </div>
           </div>
         </header>
-        <main className="container main-content">
-          <EmbaldesManager />
-        </main>
-      </div>
-    )
-  }
 
-  // ===== PÁGINA LISTA DE SEPARAÇÃO =====
-  if (pagina === 'lista-separacao') {
-    return renderComShell(
-      'Lista de Separação',
-      'Separe produtos do inbound com ações visuais',
-      <div className="app">
-        <header className="header">
-          <div className="container">
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <div>
-                <h1>LISTA DE SEPARAÇÃO</h1>
-                <p>Separe produtos com balanço, baixa ou espera</p>
-              </div>
-            </div>
+        {/* Abas de navegação */}
+        <div style={{ borderBottom: '2px solid #e0e0e0', background: '#fafafa', padding: '0 1rem' }}>
+          <div className="container" style={{ display: 'flex', gap: '2rem' }}>
+            {[
+              { id: 'separacao' as const, label: '📦 Separação' },
+              { id: 'inbound' as const, label: '🚚 Inbound' },
+              { id: 'historico' as const, label: '📋 Histórico' },
+              { id: 'divergencias' as const, label: '⚠️ Divergências', badge: divergencias.length },
+            ].map((aba) => (
+              <button
+                key={aba.id}
+                onClick={() => setAbaFull(aba.id)}
+                style={{
+                  padding: '1rem 0',
+                  border: 'none',
+                  background: 'none',
+                  borderBottom: abaFull === aba.id ? '3px solid #1a237e' : '3px solid transparent',
+                  fontWeight: abaFull === aba.id ? 700 : 600,
+                  color: abaFull === aba.id ? '#1a237e' : '#666',
+                  cursor: 'pointer',
+                  fontSize: '0.95rem',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '0.5rem',
+                }}
+              >
+                {aba.label}
+                {aba.badge ? <span style={{ background: '#ff5252', color: '#fff', borderRadius: '999px', padding: '0.15rem 0.5rem', fontSize: '0.75rem', fontWeight: 700 }}>{aba.badge}</span> : null}
+              </button>
+            ))}
           </div>
-        </header>
-        <main className="container main-content">
-          <EmbaldesManager modoSeparacao={true} />
-        </main>
-      </div>
-    )
-  }
+        </div>
 
-  // ===== PÁGINA HISTÓRICO FULL =====
-  if (pagina === 'historico-full') {
-    return renderComShell(
-      'Histórico do FULL',
-      'Itens em espera e alterações de quantidade que vai pro FULL, por inbound',
-      <div className="app">
-        <header className="header">
-          <div className="container">
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <div>
-                <h1>HISTÓRICO FULL</h1>
-                <p>Em espera e mudanças de quantidade do que vai ser enviado</p>
-              </div>
-            </div>
-          </div>
-        </header>
         <main className="container main-content">
-          <HistoricoFull />
+          {abaFull === 'separacao' && <EmbaldesManager modoSeparacao={true} />}
+          {abaFull === 'inbound' && <EmbaldesManager />}
+          {abaFull === 'historico' && <HistoricoFull />}
+          {abaFull === 'divergencias' && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+              {divergencias.length === 0 ? (
+                <div style={{ textAlign: 'center', padding: '2rem', color: '#999' }}>
+                  <p>Nenhuma divergência encontrada.</p>
+                </div>
+              ) : (
+                divergencias.map(div => (
+                  <div key={div.item_id} style={{ padding: '1.5rem', border: '1px solid #ffb3ba', borderRadius: '8px', background: '#fff5f6' }}>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr auto', gap: '1rem', marginBottom: '0.9rem' }}>
+                      <div>
+                        <div style={{ fontWeight: 700, color: '#c62828', fontSize: '0.95rem' }}>
+                          {div.produto} ({div.codigo})
+                        </div>
+                        <div style={{ color: '#666', fontSize: '0.85rem', marginTop: '0.3rem' }}>
+                          NF {div.numero_nf}/{div.serie} de {div.fornecedor}
+                        </div>
+                      </div>
+                      <div style={{ textAlign: 'right' }}>
+                        <div style={{ fontSize: '0.75rem', color: '#999' }}>{div.tipo_divergencia}</div>
+                        <div style={{ fontSize: '0.9rem', fontWeight: 600, color: '#c62828' }}>{div.data_registro}</div>
+                      </div>
+                    </div>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem', marginBottom: '0.9rem', fontSize: '0.85rem' }}>
+                      <div>
+                        NF: <strong>{Math.round(div.quantidade_nf)}</strong> un
+                      </div>
+                      <div>
+                        Confirmado: <strong>{Math.round(div.quantidade_confirmada)}</strong> un
+                      </div>
+                    </div>
+                    <div style={{ display: 'flex', gap: '0.5rem' }}>
+                      <button
+                        onClick={() => resolverDivergenciaItem(div.item_id)}
+                        style={{
+                          padding: '0.5rem 1rem',
+                          background: '#4caf50',
+                          color: '#fff',
+                          border: 'none',
+                          borderRadius: '4px',
+                          cursor: 'pointer',
+                          fontSize: '0.8rem',
+                          fontWeight: 600,
+                        }}
+                      >
+                        ✓ Resolver
+                      </button>
+                      <button
+                        onClick={() => deletarDivergenciaItem(div.item_id)}
+                        style={{
+                          padding: '0.5rem 1rem',
+                          background: '#f44336',
+                          color: '#fff',
+                          border: 'none',
+                          borderRadius: '4px',
+                          cursor: 'pointer',
+                          fontSize: '0.8rem',
+                          fontWeight: 600,
+                        }}
+                      >
+                        🗑️ Deletar
+                      </button>
+                      <button
+                        onClick={() => vincularDivergenciaOlist(div)}
+                        style={{
+                          padding: '0.5rem 1rem',
+                          background: '#007acc',
+                          color: '#fff',
+                          border: 'none',
+                          borderRadius: '4px',
+                          cursor: 'pointer',
+                          fontSize: '0.8rem',
+                          fontWeight: 600,
+                        }}
+                      >
+                        🔗 Vincular Olist
+                      </button>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          )}
         </main>
       </div>
     )
