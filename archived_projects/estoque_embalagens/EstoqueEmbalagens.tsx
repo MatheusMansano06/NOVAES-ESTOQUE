@@ -132,7 +132,7 @@ export function EstoqueEmbalagens() {
       {/* ===== MINHAS EMBALAGENS ===== */}
       {aba === 'embalagens' && (
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: '0.8rem' }}>
-          {embalagens.length === 0 && <div style={{ color: '#90a4ae', padding: '2rem' }}>Nenhuma embalagem cadastrada ainda. Clique em "+ Nova embalagem".</div>}
+          {embalagens.length === 0 && <div style={{ color: '#90a4ae', padding: '2rem' }}>Nenhuma embalagem cadastrada ainda. Clique em “+ Nova embalagem”.</div>}
           {embalagens.map(e => {
             const baixo = e.ativo === 1 && e.estoque_atual <= e.estoque_minimo
             return (

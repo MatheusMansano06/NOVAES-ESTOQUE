@@ -1,113 +1,64 @@
-# 📦 Projetos Arquivados
+# Projetos Pausados
 
-Este diretório contém funcionalidades pausadas do NOVAES-ESTOQUE que estão prontas para serem retomadas quando necessário.
+Funcionalidades tiradas da navegação, mas **não deletadas**. Cada pasta guarda o
+componente React e um guia de restauração passo a passo.
 
-## Funcionalidades Arquivadas
+A regra aqui é: **só o frontend é arquivado.** O backend — endpoints, utilitários
+e tabelas — fica onde está, ativo e intacto. Retomar uma funcionalidade é, na
+prática, devolver o componente e religar quatro pontos no `App.tsx`.
 
-### 1. **Estoque de Embalagens** 
-**Status:** Pausado em 15/07/2026  
-**Última alteração:** Commit anterior  
-**Descrição:** Sistema de controle de caixas e inserts com baixa automática por venda.
+## O que está pausado
 
-**Arquivos:**
-- `estoque_embalagens/EstoqueEmbalagens.tsx` - Componente Frontend
-- `estoque_embalagens/embalagens.py` - Utilitário Backend
-- `estoque_embalagens/RESTORATION_GUIDE.md` - Guia completo de retomada
+| Projeto | Pausado em | Componente | Guia |
+|---|---|---|---|
+| Estoque de Embalagens | 15/07/2026 | `estoque_embalagens/EstoqueEmbalagens.tsx` | [guia](estoque_embalagens/RESTORATION_GUIDE.md) |
+| Radar de Envio FULL | 15/07/2026 | `radar_full/RadarFull.tsx` | [guia](radar_full/RESTORATION_GUIDE.md) |
+| Lista de Compra | 15/07/2026 | `lista_compra/ListaCompra.tsx` | [guia](lista_compra/RESTORATION_GUIDE.md) |
 
-**Modelos SQLAlchemy associados:**
-- `Embalagem`
-- `EmbalagemCompra`
-- `EmbalagemMovimento`
-- `EmbalagemVinculo`
+## O backend NÃO foi tocado
 
----
+Estes arquivos **continuam em `backend/app/utils/`**. Não estão nesta pasta e não
+devem ser copiados de volta:
 
-### 2. **Radar de Envio FULL**
-**Status:** Pausado em 15/07/2026  
-**Última alteração:** Commit anterior  
-**Descrição:** Previsão de ruptura de estoque e sugestão do melhor momento para enviar ao FULL.
+| Utilitário (no backend, ativo) | Endpoints que seguem no ar |
+|---|---|
+| `backend/app/utils/embalagens.py` | `/api/embalagens/*` |
+| `backend/app/utils/radar_full.py` | `/api/ml/radar-full` |
+| `backend/app/utils/lista_compra.py` | `/api/lista-compra`, `/api/lista-compra/atualizar-estoque` |
 
-**Arquivos:**
-- `radar_full/RadarFull.tsx` - Componente Frontend
-- `radar_full/radar_full.py` - Utilitário Backend
-- `radar_full/RESTORATION_GUIDE.md` - Guia completo de retomada
+Os três seguem importados no `main.py` e respondendo normalmente — só não há mais
+tela que os consuma. Um `curl` neles funciona hoje.
 
-**Dependências:**
-- Usa dados do `ml_venda_cache` (snapshot de vendas)
-- Usa dados de `embaldes_fu` (inbounds FULL)
+As tabelas também estão intactas: `embalagens`, `embalagem_compras`,
+`embalagem_movimentos`, `embalagem_vinculos`, `ml_item_cache`, `ml_venda_cache`,
+`ml_sync_state`. Nenhum dado histórico foi perdido.
 
----
+## Como retomar (~5 min)
 
-## Como Retomar uma Funcionalidade
+1. Leia o `RESTORATION_GUIDE.md` do projeto — cada um lista os pontos exatos, com código.
+2. Devolva o componente: `git mv archived_projects/<projeto>/<Componente>.tsx frontend/src/components/`
+3. Religue no `App.tsx`, nesta ordem: **tipo `Pagina`** → **import** → **item de menu** → **bloco `if (pagina === ...)`**.
+4. Valide: `cd frontend && npx tsc --noEmit && npm run build`
 
-### Passo 1: Ler o Guia de Retomada
-Cada projeto arquivado tem um arquivo `RESTORATION_GUIDE.md` com instruções específicas.
+### ⚠️ A armadilha do tipo `Pagina`
 
-### Passo 2: Copiar os Arquivos
-```bash
-# Exemplo: retomar Estoque de Embalagens
-cp archived_projects/estoque_embalagens/EstoqueEmbalagens.tsx frontend/src/components/
-cp archived_projects/estoque_embalagens/embalagens.py backend/app/utils/
-```
+Os KPIs do dashboard navegam via `ir: 'x' as Pagina`. Esse `as` é um **cast** — o
+TypeScript não valida se a página existe. Um link para uma página sem bloco `if`
+correspondente não gera erro de compilação: o app renderiza **tela branca**.
 
-### Passo 3: Restaurar Imports e Menu
-- Adicionar import no `frontend/src/App.tsx`
-- Adicionar tipo `Pagina` se necessário
-- Adicionar item no menu `ShellNavGroup`
-- Adicionar renderização condicional `if (pagina === ...)`
+É por isso que o passo 3 pede o tipo `Pagina` **primeiro**. Mantendo a união do
+tipo honesta, link órfão quebra no `tsc` em vez de quebrar na cara do operador.
 
-### Passo 4: Verificar Banco de Dados
-Confirmar que as tabelas SQL associadas existem. Se não existirem, executar migrations pendentes.
+Vale lembrar que `npm run build` (Vite/esbuild) **não faz typecheck** — só remove
+os tipos. Rodar `npx tsc --noEmit` é o que pega esse tipo de erro.
 
-### Passo 5: Testar Integração
-- Verificar imports no editor
-- Testar navegação até a página
-- Validar dados e API endpoints
+## Por que pausar em vez de deletar
+
+Preserva o trabalho, mantém o histórico, e o backend continuar no ar significa que
+retomar é só frontend. Se um dia quiser remover de vez: derrube as tabelas, apague
+os endpoints do `main.py` e limpe esta pasta.
 
 ---
 
-## Estrutura de Cada Projeto
-
-Cada pasta de projeto arquivado contém:
-
-```
-projeto_nome/
-├── [arquivos do frontend/backend]
-├── RESTORATION_GUIDE.md    # Instruções detalhadas
-└── MANIFEST.json           # Metadados do arquivo
-```
-
----
-
-## Sobre os Arquivos Removidos
-
-Os seguintes itens foram **removidos** do projeto ativo mas estão preservados aqui:
-
-### App.tsx
-- ❌ `import { EstoqueEmbalagens } from './components/EstoqueEmbalagens'`
-- ❌ `import { RadarFull } from './components/RadarFull'`
-- ❌ Páginas: `'estoque-embalagens'` e `'radar-full'` do tipo `Pagina`
-- ❌ Items do menu nas `ShellNavGroup`
-- ❌ Blocos `if (pagina === 'estoque-embalagens')` e `if (pagina === 'radar-full')`
-
-### main.py (Backend)
-- ❌ Endpoints relacionados a embalagens (GET/POST `/api/embalagens/*`)
-- ❌ Endpoints relacionados a radar (GET `/api/ml/radar-full`)
-
----
-
-## Segurança e Integridade
-
-✅ Todos os códigos estão **versionados em git**  
-✅ Banco de dados: colunas e tabelas **não foram deletadas**, apenas o código removido  
-✅ Você pode restaurar tudo via git se preferir antes de usar os guias  
-
----
-
-## Dúvidas?
-
-Se tiver problemas ao retomar uma funcionalidade:
-1. Consulte o `RESTORATION_GUIDE.md` específico
-2. Verifique o histórico git: `git log --all -- archived_projects/`
-3. Procure por comentários no código original
-
+Contexto adicional nas memórias do projeto: `estoque-embalagens.md`,
+`radar-envio-full.md`, `lista-de-compra.md`.

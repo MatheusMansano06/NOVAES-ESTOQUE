@@ -14,13 +14,14 @@
 
 ### 1. **Restaurar Componente Frontend**
 ```bash
-cp archived_projects/estoque_embalagens/EstoqueEmbalagens.tsx frontend/src/components/
+git mv archived_projects/estoque_embalagens/EstoqueEmbalagens.tsx frontend/src/components/
 ```
 
-### 2. **Restaurar Utilitário Backend**
-```bash
-cp archived_projects/estoque_embalagens/embalagens.py backend/app/utils/
-```
+### 2. **Backend: nada a fazer**
+
+`backend/app/utils/embalagens.py` **nunca saiu do lugar** e os endpoints
+`/api/embalagens/*` seguem ativos e importados no `main.py`. Só o frontend foi
+arquivado — não há `.py` para copiar de volta.
 
 ### 3. **Atualizar `frontend/src/App.tsx`**
 

@@ -15,13 +15,18 @@
 
 ### 1. **Restaurar Componente Frontend**
 ```bash
-cp archived_projects/radar_full/RadarFull.tsx frontend/src/components/
+git mv archived_projects/radar_full/RadarFull.tsx frontend/src/components/
 ```
 
-### 2. **Restaurar Utilitário Backend**
-```bash
-cp archived_projects/radar_full/radar_full.py backend/app/utils/
-```
+### 2. **Backend: nada a fazer**
+
+`backend/app/utils/radar_full.py` **nunca saiu do lugar** e o endpoint
+`/api/ml/radar-full` segue ativo e importado no `main.py`. Só o frontend foi
+arquivado — não há `.py` para copiar de volta.
+
+⚠️ O `RadarFull` recebe uma prop opcional `onVerListaCompra`, que abria a Lista
+de Compra. Essa página também está pausada (ver `../lista_compra/`). Ou restaure
+as duas juntas, ou simplesmente omita a prop — ela é opcional e o botão some.
 
 ### 3. **Atualizar `frontend/src/App.tsx`**
 
