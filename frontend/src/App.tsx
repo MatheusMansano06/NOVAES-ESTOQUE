@@ -8,8 +8,6 @@ import { EmbaldesManager } from './components/EmbaldesManager'
 import { HistoricoFull } from './components/HistoricoFull'
 import { AnunciosML } from './components/AnunciosML'
 import { ListaCompra } from './components/ListaCompra'
-import { RadarFull } from './components/RadarFull'
-import { EstoqueEmbalagens } from './components/EstoqueEmbalagens'
 import { Garimpador } from './components/Garimpador'
 import { OperadoresManager } from './components/OperadoresManager'
 import { AppShell, type ShellNavGroup, type ShellStatusItem } from './components/AppShell'
@@ -85,7 +83,7 @@ interface ProdutoEstoque {
   }>
 }
 
-type Pagina = 'bemvindo' | 'inicial' | 'conferencia' | 'produtos_nota' | 'relacionamento_produto' | 'fornecedores' | 'embaldes' | 'anuncios' | 'notas-fiscais' | 'divergencias' | 'lista-separacao' | 'historico-full' | 'operadores' | 'lista-compra' | 'radar-full' | 'estoque-embalagens' | 'garimpador'
+type Pagina = 'bemvindo' | 'inicial' | 'conferencia' | 'produtos_nota' | 'relacionamento_produto' | 'fornecedores' | 'embaldes' | 'anuncios' | 'notas-fiscais' | 'divergencias' | 'lista-separacao' | 'historico-full' | 'operadores' | 'lista-compra' | 'garimpador'
 
 interface Divergencia {
   item_id: number
@@ -230,9 +228,8 @@ function App() {
   const [notas, setNotas] = useState<NotaFiscal[]>([])
   const [estoque, setEstoque] = useState<ProdutoEstoque[]>([])
   const [divergencias, setDivergencias] = useState<Divergencia[]>([])
-  // KPIs do dashboard vindos do Radar (Envie HOJE) e da Lista de Compra (compra urgente).
-  // Carregam em segundo plano; o backend tem cache, então a maioria das visitas é instantânea.
-  const [radarHoje, setRadarHoje] = useState<number | null>(null)
+  // KPI do dashboard vindos da Lista de Compra (compra urgente).
+  // Carrega em segundo plano; o backend tem cache, então a maioria das visitas é instantânea.
   const [compraUrgente, setCompraUrgente] = useState<number | null>(null)
   const [loading, setLoading] = useState(false)
   const [message, setMessage] = useState('')
@@ -449,15 +446,11 @@ function App() {
     }
   }, [operadorSessao])
 
-  // KPIs de ação do dashboard: "Envie HOJE" (Radar) e "Compra urgente" (Lista de
-  // Compra). Busca em segundo plano ao abrir o dashboard; o backend tem cache.
+  // KPI de ação do dashboard: "Compra urgente" (Lista de Compra).
+  // Busca em segundo plano ao abrir o dashboard; o backend tem cache.
   useEffect(() => {
     if (pagina !== 'inicial' || !operadorSessao) return
     let vivo = true
-    fetch(`${API_BASE}/api/ml/radar-full?meta_dias=30&lead_time=5`, { cache: 'no-store' })
-      .then(r => r.json())
-      .then(d => { if (vivo && d?.resumo) setRadarHoje(d.resumo.hoje ?? 0) })
-      .catch(() => {})
     fetch(`${API_BASE}/api/lista-compra?meta_dias=75`, { cache: 'no-store' })
       .then(r => r.json())
       .then(d => { if (vivo && d?.resumo) setCompraUrgente(d.resumo.maxima ?? 0) })
@@ -1679,7 +1672,6 @@ function App() {
       label: 'Ferramentas',
       items: [
         { key: 'garimpador', label: 'Garimpador', icon: 'search', active: pagina === 'garimpador', onClick: () => setPagina('garimpador') },
-        { key: 'estoque-embalagens', label: 'Estoque de Embalagens', icon: 'box', active: pagina === 'estoque-embalagens', onClick: () => setPagina('estoque-embalagens') },
         { key: 'lista-compra', label: 'Lista de Compra', icon: 'receipt', active: pagina === 'lista-compra', onClick: () => setPagina('lista-compra') },
       ],
     },
@@ -1687,7 +1679,6 @@ function App() {
     {
       label: 'FULL',
       items: [
-        { key: 'radar-full', label: 'Radar de Envio', icon: 'radar', active: pagina === 'radar-full', onClick: () => setPagina('radar-full') },
         { key: 'inbound', label: 'Inbound FULL', icon: 'truck', active: pagina === 'embaldes', badge: inboundsAtivos.length, onClick: () => setPagina('embaldes') },
         { key: 'historico-full', label: 'Histórico FULL', icon: 'sync', active: pagina === 'historico-full', onClick: () => setPagina('historico-full') },
         { key: 'divergencias', label: 'Divergencias', icon: 'warning', badge: divergencias.length, active: pagina === 'divergencias', onClick: () => setPagina('divergencias') },
@@ -3358,23 +3349,6 @@ function App() {
   }
 
   // ===== PÁGINA DE ESTOQUE DE EMBALAGENS =====
-  if (pagina === 'estoque-embalagens') {
-    return renderComShell(
-      'Estoque de Embalagens',
-      'Controle de caixas e inserts com baixa automática por venda.',
-      <EstoqueEmbalagens />
-    )
-  }
-
-  // ===== PÁGINA DO RADAR DE ENVIO FULL =====
-  if (pagina === 'radar-full') {
-    return renderComShell(
-      'Radar de Envio Full',
-      'O momento certo de enviar cada produto pro Full — antes da ruptura.',
-      <RadarFull onVerListaCompra={() => setPagina('lista-compra')} />
-    )
-  }
-
   // ===== PÁGINA DO GARIMPADOR =====
   if (pagina === 'garimpador') {
     return renderComShell(
