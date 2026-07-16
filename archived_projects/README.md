@@ -9,36 +9,44 @@ prática, devolver o componente e religar quatro pontos no `App.tsx`.
 
 ## O que está pausado
 
-| Projeto | Pausado em | Componente | Guia |
+Nada. Os três projetos que estavam aqui foram **retomados em 16/07/2026** e voltaram
+para a navegação, no grupo **Arquivados** da sidebar:
+
+| Projeto | Pausado em | Retomado em | Componente (hoje) |
 |---|---|---|---|
-| Estoque de Embalagens | 15/07/2026 | `estoque_embalagens/EstoqueEmbalagens.tsx` | [guia](estoque_embalagens/RESTORATION_GUIDE.md) |
-| Radar de Envio FULL | 15/07/2026 | `radar_full/RadarFull.tsx` | [guia](radar_full/RESTORATION_GUIDE.md) |
-| Lista de Compra | 15/07/2026 | `lista_compra/ListaCompra.tsx` | [guia](lista_compra/RESTORATION_GUIDE.md) |
+| Estoque de Embalagens | 15/07/2026 | 16/07/2026 | `frontend/src/components/EstoqueEmbalagens.tsx` |
+| Radar de Envio FULL | 15/07/2026 | 16/07/2026 | `frontend/src/components/RadarFull.tsx` |
+| Lista de Compra | 15/07/2026 | 16/07/2026 | `frontend/src/components/ListaCompra.tsx` |
 
-## O backend NÃO foi tocado
+Os `RESTORATION_GUIDE.md` de cada pasta seguem aqui como registro do que foi feito
+— e servem de receita caso algum deles seja pausado de novo.
 
-Estes arquivos **continuam em `backend/app/utils/`**. Não estão nesta pasta e não
-devem ser copiados de volta:
+## O backend nunca foi tocado
 
-| Utilitário (no backend, ativo) | Endpoints que seguem no ar |
+Foi por isso que a retomada custou só o `App.tsx`: os utilitários e endpoints
+seguiram no ar o tempo todo, em `backend/app/utils/`.
+
+| Utilitário (ativo) | Endpoints |
 |---|---|
 | `backend/app/utils/embalagens.py` | `/api/embalagens/*` |
 | `backend/app/utils/radar_full.py` | `/api/ml/radar-full` |
 | `backend/app/utils/lista_compra.py` | `/api/lista-compra`, `/api/lista-compra/atualizar-estoque` |
 
-Os três seguem importados no `main.py` e respondendo normalmente — só não há mais
-tela que os consuma. Um `curl` neles funciona hoje.
-
 As tabelas também estão intactas: `embalagens`, `embalagem_compras`,
 `embalagem_movimentos`, `embalagem_vinculos`, `ml_item_cache`, `ml_venda_cache`,
 `ml_sync_state`. Nenhum dado histórico foi perdido.
 
-## Como retomar (~5 min)
+## Como pausar/retomar (~5 min)
 
 1. Leia o `RESTORATION_GUIDE.md` do projeto — cada um lista os pontos exatos, com código.
-2. Devolva o componente: `git mv archived_projects/<projeto>/<Componente>.tsx frontend/src/components/`
+2. Mova o componente: `git mv` entre `archived_projects/<projeto>/` e `frontend/src/components/`.
 3. Religue no `App.tsx`, nesta ordem: **tipo `Pagina`** → **import** → **item de menu** → **bloco `if (pagina === ...)`**.
 4. Valide: `cd frontend && npx tsc --noEmit && npm run build`
+
+⚠️ Os passos "4. Atualizar `backend/app/main.py`" dos guias do Radar e do Estoque de
+Embalagens estão **obsoletos**: mandam criar endpoints com sintaxe FastAPI
+(`@router.get`), mas este backend usa `Route(...)` do Starlette e as rotas já
+existem e nunca saíram. Siga o passo 2 de cada guia ("Backend: nada a fazer").
 
 ### ⚠️ A armadilha do tipo `Pagina`
 
@@ -55,8 +63,7 @@ os tipos. Rodar `npx tsc --noEmit` é o que pega esse tipo de erro.
 ## Por que pausar em vez de deletar
 
 Preserva o trabalho, mantém o histórico, e o backend continuar no ar significa que
-retomar é só frontend. Se um dia quiser remover de vez: derrube as tabelas, apague
-os endpoints do `main.py` e limpe esta pasta.
+retomar é só frontend — como a retomada de 16/07/2026 comprovou.
 
 ---
 

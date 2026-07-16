@@ -9,6 +9,9 @@ import { HistoricoFull } from './components/HistoricoFull'
 import { AnunciosML } from './components/AnunciosML'
 import { Garimpador } from './components/Garimpador'
 import { OperadoresManager } from './components/OperadoresManager'
+import { ListaCompra } from './components/ListaCompra'
+import { RadarFull } from './components/RadarFull'
+import { EstoqueEmbalagens } from './components/EstoqueEmbalagens'
 import { AppShell, type ShellNavGroup, type ShellStatusItem } from './components/AppShell'
 import {
   baixarMultiplosOuPdfs,
@@ -82,7 +85,7 @@ interface ProdutoEstoque {
   }>
 }
 
-type Pagina = 'bemvindo' | 'inicial' | 'conferencia' | 'produtos_nota' | 'relacionamento_produto' | 'fornecedores' | 'full-operacoes' | 'anuncios' | 'notas-fiscais' | 'operadores' | 'garimpador'
+type Pagina = 'bemvindo' | 'inicial' | 'conferencia' | 'produtos_nota' | 'relacionamento_produto' | 'fornecedores' | 'full-operacoes' | 'anuncios' | 'notas-fiscais' | 'operadores' | 'garimpador' | 'lista-compra' | 'radar-full' | 'estoque-embalagens'
 
 interface Divergencia {
   item_id: number
@@ -1657,6 +1660,17 @@ function App() {
       label: 'Ferramentas',
       items: [
         { key: 'garimpador', label: 'Garimpador', icon: 'search', active: pagina === 'garimpador', onClick: () => setPagina('garimpador') },
+      ],
+    },
+    // === ARQUIVADOS ===
+    // Projetos pausados em 15/07/2026 e religados a pedido. O backend deles
+    // nunca saiu do ar — só a tela tinha sido tirada da navegação.
+    {
+      label: 'Arquivados',
+      items: [
+        { key: 'lista-compra', label: 'Lista de Compra', icon: 'receipt', active: pagina === 'lista-compra', onClick: () => setPagina('lista-compra') },
+        { key: 'radar-full', label: 'Radar de Envio', icon: 'radar', active: pagina === 'radar-full', onClick: () => setPagina('radar-full') },
+        { key: 'estoque-embalagens', label: 'Estoque de Embalagens', icon: 'box', active: pagina === 'estoque-embalagens', onClick: () => setPagina('estoque-embalagens') },
       ],
     },
   ]
@@ -3312,7 +3326,33 @@ function App() {
     )
   }
 
+  // ===== PÁGINA DE LISTA DE COMPRA =====
+  if (pagina === 'lista-compra') {
+    return renderComShell(
+      'Lista de Compra',
+      'Prioridade de compra pela curva ABC do ML cruzada com estoque e velocidade de venda.',
+      <ListaCompra />
+    )
+  }
+
+  // ===== PÁGINA DO RADAR DE ENVIO FULL =====
+  if (pagina === 'radar-full') {
+    return renderComShell(
+      'Radar de Envio Full',
+      'O momento certo de enviar cada produto pro Full — antes da ruptura.',
+      <RadarFull onVerListaCompra={() => setPagina('lista-compra')} />
+    )
+  }
+
   // ===== PÁGINA DE ESTOQUE DE EMBALAGENS =====
+  if (pagina === 'estoque-embalagens') {
+    return renderComShell(
+      'Estoque de Embalagens',
+      'Controle de caixas e inserts com baixa automática por venda.',
+      <EstoqueEmbalagens />
+    )
+  }
+
   // ===== PÁGINA DO GARIMPADOR =====
   if (pagina === 'garimpador') {
     return renderComShell(
