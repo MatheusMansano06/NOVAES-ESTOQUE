@@ -824,6 +824,12 @@ class MLClaimClassification(Base):
     return_status = Column(String(50), default="")
     shipment_status = Column(String(50), default="")
     shipment_destination = Column(String(50), default="")
+    # Previsão de chegada do envio de devolução (lead_time.estimated_delivery_time.date).
+    # É o que alimenta a esteira "Chegando hoje".
+    previsao_chegada = Column(String(40), default="")
+    # Marcado pela bipagem no barracão. Preenchido = recebido/em espera de resolução.
+    # O upsert do sync NÃO mexe nesta coluna, então sobrevive a re-sincronizações.
+    recebido_em = Column(String(40), default="")
     seller_actions = Column(Text, default="[]")
     bucket = Column(String(40), nullable=False, index=True)
     regra = Column(String(160), default="")

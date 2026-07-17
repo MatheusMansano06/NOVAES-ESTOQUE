@@ -49,6 +49,20 @@ interface Resumo {
   fonte: string
 }
 
+/** Item da esteira "Chegando hoje" — vem de /api/devolucoes/chegando-hoje. */
+interface ChegandoCard {
+  claim_id: string
+  pedido_id: string
+  pack_id?: string
+  produto_nome: string
+  produto_imagem: string
+  valor_pago: number
+  motivo_label: string
+  ml_tipo_logistica: string
+  previsao_chegada: string
+  recebido?: boolean  // marcado no cliente logo após bipar
+}
+
 /** Contadores do painel, já agregados no backend (/api/devolucoes/painel). */
 interface Painel {
   total: number
@@ -142,7 +156,10 @@ export function Devolucoes() {
   const [carregando, setCarregando] = useState(true)
   const [sincAutomatico, setSincAutomatico] = useState(true)
   const [erro, setErro] = useState('')
-  const [busca, setBusca] = useState('')
+  const [chegando, setChegando] = useState<ChegandoCard[]>([])
+  const [carregandoChegando, setCarregandoChegando] = useState(true)
+  const [codigoBip, setCodigoBip] = useState('')
+  const [bipMsg, setBipMsg] = useState<{ tipo: 'ok' | 'erro'; texto: string } | null>(null)
   const [painel, setPainel] = useState<PainelFlutuante>(null)
   const dialogRef = useRef<HTMLDialogElement>(null)
   const syncRodouRef = useRef(false)
@@ -153,14 +170,16 @@ export function Devolucoes() {
     setErro('')
     try {
       const buckets: Bucket[] = ['para_revisao', 'para_retirar', 'outros_problemas']
-      const [p, r, ...cs] = await Promise.all([
+      const [p, r, ch, ...cs] = await Promise.all([
         fetch(`${API_BASE}/api/devolucoes/painel`, { cache: 'no-store' }).then(x => x.json()),
         fetch(`${API_BASE}/api/resumo-ml`, { cache: 'no-store' }).then(x => x.json()),
+        fetch(`${API_BASE}/api/devolucoes/chegando-hoje`, { cache: 'no-store' }).then(x => x.json()),
         ...buckets.map(b =>
           fetch(`${API_BASE}/api/devolucoes/cards?bucket=${b}`, { cache: 'no-store' }).then(x => x.json())),
       ])
       setPainelDados(p)
       setResumo(r)
+      setChegando(Array.isArray(ch?.cards) ? ch.cards : [])
       setCards({
         para_revisao: cs[0]?.cards || [],
         para_retirar: cs[1]?.cards || [],
@@ -170,6 +189,7 @@ export function Devolucoes() {
       setErro(String(e instanceof Error ? e.message : e))
     } finally {
       setCarregando(false)
+      setCarregandoChegando(false)
     }
   }, [])
 
@@ -253,12 +273,45 @@ export function Devolucoes() {
     }
   }
 
-  const buscarPedido = (e: React.FormEvent) => {
+  const biparCodigo = async (e: React.FormEvent) => {
     e.preventDefault()
-    const q = busca.trim()
-    if (!q) return
-    setPainel({ tipo: 'busca', titulo: `Resultado para "${q}"`, termo: q })
+    const codigo = codigoBip.trim()
+    if (!codigo) return
+    setBipMsg(null)
+    try {
+      const r = await fetch(`${API_BASE}/api/devolucoes/bipar-chegada`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ codigo }),
+      })
+      const d = await r.json()
+      if (!r.ok) {
+        setBipMsg({ tipo: 'erro', texto: String(d.mensagem || 'Código não encontrado na fila.') })
+      } else {
+        setChegando(prev => {
+          const naLista = prev.some(c => c.claim_id === d.claim_id)
+          if (naLista) {
+            return prev.map(c => c.claim_id === d.claim_id ? { ...c, recebido: true } : c)
+          }
+          // Chegou mas não estava previsto para hoje: entra já como recebido.
+          return [{
+            claim_id: d.claim_id, pedido_id: codigo, produto_nome: d.produto_nome || '',
+            produto_imagem: d.produto_imagem || '', valor_pago: 0, motivo_label: '',
+            ml_tipo_logistica: '', previsao_chegada: '', recebido: true,
+          }, ...prev]
+        })
+        setBipMsg(d.ja_recebido
+          ? { tipo: 'erro', texto: `Já bipado: ${d.produto_nome || 'item'}` }
+          : { tipo: 'ok', texto: `✓ Recebido: ${d.produto_nome || 'item'}` })
+      }
+    } catch (err) {
+      setBipMsg({ tipo: 'erro', texto: String(err instanceof Error ? err.message : err) })
+    } finally {
+      setCodigoBip('')
+    }
   }
+
+  const chegandoRestante = chegando.filter(c => !c.recebido).length
 
   // Contadores agregados no backend (as regras são as mesmas do original).
   const chamados = painelDados?.chamados ?? 0
@@ -397,7 +450,7 @@ export function Devolucoes() {
         <p>
           {devolucoes.length
             ? 'Nada bate com esse filtro.'
-            : 'Rode “Sincronizar tudo” para trazer as devoluções do Mercado Livre.'}
+            : 'A sincronização com o Mercado Livre roda sozinha ao abrir — aguarde alguns instantes.'}
         </p>
       </div>
     )
@@ -412,25 +465,51 @@ export function Devolucoes() {
             <small>Acompanhe, revise e resolva pendências de devolução de forma rápida e inteligente.</small>
           </section>
 
-          <section className="order-entry-panel">
-            <div>
-              <p className="eyebrow">Entrada de devolucao</p>
-              <h1>Leia ou digite o ID do pedido</h1>
-              <span>Use a pistola de QR code/codigo de barras ou digite o numero manualmente.</span>
+          <section className="order-entry-panel esteira-panel">
+            <div className="esteira-head">
+              <p className="eyebrow">Chegando hoje no barracão</p>
+              <div className="esteira-counter">
+                <strong>{carregandoChegando ? '—' : chegandoRestante}</strong>
+                <span>{chegandoRestante === 1 ? 'devolução para bipar hoje' : 'devoluções para bipar hoje'}</span>
+              </div>
+              <span>Bipe a venda que chegou para cruzar com a devolução prevista e dar entrada.</span>
               {sincAutomatico && <small style={{ display: 'block', marginTop: '8px', color: '#666' }}>🔄 Sincronizando com o Mercado Livre…</small>}
             </div>
             <div className="order-entry-actions">
-              <form className="search-pill-form" onSubmit={buscarPedido}>
-                <span className="input-chip">ID ML</span>
-                <input className="read-input" value={busca} onChange={e => setBusca(e.target.value)}
+              <form className="search-pill-form" onSubmit={biparCodigo}>
+                <span className="input-chip">Bipe</span>
+                <input className="read-input" value={codigoBip} onChange={e => setCodigoBip(e.target.value)}
                        inputMode="search" autoComplete="off"
-                       placeholder="Pedido, pacote ou rastreio" autoFocus />
-                <button type="submit">Buscar venda</button>
+                       placeholder="Venda, pacote ou rastreio" autoFocus />
+                <button type="submit">Confirmar chegada</button>
               </form>
             </div>
+            {bipMsg && (
+              <div className={`import-feedback bip-${bipMsg.tipo}`}>{bipMsg.texto}</div>
+            )}
             {erro && (
               <div className="import-feedback">⚠️ {erro}</div>
             )}
+
+            <div className="esteira-lista">
+              {carregandoChegando ? (
+                <p className="mediacoes-empty">Carregando fila de chegada…</p>
+              ) : !chegando.length ? (
+                <p className="mediacoes-empty">Nada previsto para chegar hoje.</p>
+              ) : chegando.map(c => (
+                <article key={c.claim_id} className={`esteira-item ${c.recebido ? 'recebido' : ''}`}>
+                  <img src={c.produto_imagem || IMG_VAZIA} alt="" loading="lazy" />
+                  <div className="esteira-item-info">
+                    <b>#{String(c.pedido_id || '').replace(/\D/g, '') || '-'}</b>
+                    <strong>{c.produto_nome || '(sem título)'}</strong>
+                    <small>{c.motivo_label || '—'} · {money(c.valor_pago)}</small>
+                  </div>
+                  <span className={`esteira-tag ${c.recebido ? 'ok' : 'wait'}`}>
+                    {c.recebido ? 'Recebido' : 'Aguardando'}
+                  </span>
+                </article>
+              ))}
+            </div>
           </section>
 
           <section className="summary-consolidated">

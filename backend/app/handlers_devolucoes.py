@@ -16,6 +16,7 @@ Adaptações: jsonify -> JSONResponse, request.args -> request.query_params,
 
 import asyncio
 import json
+import re
 from typing import Optional
 
 from starlette.concurrency import run_in_threadpool
@@ -273,6 +274,76 @@ async def resumo_financeiro(request: Request):
         FROM devolucoes
     """)
     return JSONResponse(row or {})
+
+
+# --------------------------------------------------- esteira "chegando hoje"
+
+# O -3h converte o instante do ML (que vem em -03:00/-04:00, normalizado p/ UTC
+# pelo SQLite) para o dia de Brasília antes de cortar — mesma convenção do painel.
+_HOJE_BRT = "date('now', '-3 hours')"
+
+
+async def chegando_hoje(request: Request):
+    """
+    Fila do barracão: devoluções cuja previsão de chegada é HOJE e que ainda não
+    foram bipadas. A data vem do ML (lead_time.estimated_delivery_time.date); só
+    contam as que vêm para o endereço do vendedor (não as que voltam pro FULL).
+    """
+    rows = _linhas(f"""
+        SELECT claim_id, pedido_id, pack_id, order_ids, produto_nome, produto_imagem,
+               valor_pago, ml_tipo_logistica, motivo_label, previsao_chegada,
+               shipment_status, shipment_destination
+        FROM ml_claim_classifications
+        WHERE active = 1
+          AND COALESCE(recebido_em, '') = ''
+          AND COALESCE(previsao_chegada, '') <> ''
+          AND shipment_destination = 'seller_address'
+          AND date(datetime(previsao_chegada, '-3 hours')) = {_HOJE_BRT}
+        ORDER BY produto_nome
+    """)
+    for r in rows:
+        try:
+            r["order_ids"] = json.loads(r.get("order_ids") or "[]")
+        except json.JSONDecodeError:
+            r["order_ids"] = []
+    return JSONResponse({"total": len(rows), "cards": rows})
+
+
+async def bipar_chegada(request: Request):
+    """
+    Bipagem no barracão: cruza o código lido (venda, pacote ou rastreio) com a
+    fila e marca o item como recebido → em espera de resolução.
+
+    Casa por dígitos contra pedido_id, pack_id ou qualquer um dos order_ids. Não
+    exige que a previsão seja hoje: um item que chegou adiantado também bipa.
+    """
+    body = await request.json()
+    codigo = re.sub(r"\D", "", str(body.get("codigo") or ""))
+    if not codigo:
+        return _erro("Informe o código bipado (pedido, pacote ou rastreio).")
+
+    row = _linha("""
+        SELECT claim_id, pedido_id, produto_nome, produto_imagem, recebido_em
+        FROM ml_claim_classifications
+        WHERE active = 1
+          AND (pedido_id = :c OR pack_id = :c OR order_ids LIKE :like)
+        LIMIT 1
+    """, {"c": codigo, "like": f'%"{codigo}"%'})
+    if not row:
+        return _erro(f"Nenhuma devolução na fila bate com o código {codigo}.", 404)
+    if row.get("recebido_em"):
+        return JSONResponse({"mensagem": "Este item já foi bipado.", "ja_recebido": True,
+                             "claim_id": row["claim_id"],
+                             "produto_nome": row.get("produto_nome")})
+
+    quando = now_iso()
+    _exec("UPDATE ml_claim_classifications SET recebido_em = :d WHERE claim_id = :c",
+          {"d": quando, "c": row["claim_id"]})
+    return JSONResponse({"mensagem": "Recebido — em espera de resolução",
+                         "claim_id": row["claim_id"],
+                         "produto_nome": row.get("produto_nome"),
+                         "produto_imagem": row.get("produto_imagem"),
+                         "recebido_em": quando})
 
 
 # ------------------------------------------------------------------- sync

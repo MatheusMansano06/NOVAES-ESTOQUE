@@ -41,7 +41,9 @@ from app.integracoes_ml import ml
 from app.jobs import iniciar_scheduler
 from app.handlers_devolucoes import (
     buscar_devolucao as dev_buscar_devolucao,
+    bipar_chegada as dev_bipar_chegada,
     cards_por_bucket as dev_cards_por_bucket,
+    chegando_hoje as dev_chegando_hoje,
     confirmar_chegada as dev_confirmar_chegada,
     criar_contestacao as dev_criar_contestacao,
     criar_devolucao as dev_criar_devolucao,
@@ -126,6 +128,16 @@ def _garantir_colunas_sqlite():
                     print(f"[DB] Coluna ml_item_cache.{nome} criada")
 
             # --- Devoluções ML (portado de DEVOLUCOES-ML-main) ---
+            # Previsão de chegada no cache de classificação (esteira "Chegando hoje").
+            # Sem esta migração a tabela em prod fica sem a coluna e o sync dá 500.
+            colunas_clf = {row[1] for row in conn.exec_driver_sql(
+                "PRAGMA table_info(ml_claim_classifications)").fetchall()}
+            for nome_col in ("previsao_chegada", "recebido_em"):
+                if colunas_clf and nome_col not in colunas_clf:
+                    conn.exec_driver_sql(
+                        f"ALTER TABLE ml_claim_classifications ADD COLUMN {nome_col} VARCHAR(40) DEFAULT ''")
+                    print(f"[DB] Coluna ml_claim_classifications.{nome_col} criada")
+
             # As 10 tabelas nascem do create_all(). O que não dá para expressar no
             # model é o índice ÚNICO PARCIAL de ml_claim_id: ele é o que torna o
             # sync idempotente (sem ele, re-sincronizar duplica a devolução do
@@ -5625,6 +5637,8 @@ routes = [
     Route("/api/devolucoes/filtros-ml", dev_filtros_ml, methods=["GET"]),
     Route("/api/devolucoes/fila-ml-live", dev_fila_ml_live, methods=["GET"]),
     Route("/api/devolucoes/resumo-financeiro", dev_resumo_financeiro, methods=["GET"]),
+    Route("/api/devolucoes/chegando-hoje", dev_chegando_hoje, methods=["GET"]),
+    Route("/api/devolucoes/bipar-chegada", dev_bipar_chegada, methods=["POST"]),
     Route("/api/devolucoes/sincronizar-ml", dev_sincronizar_ml, methods=["POST"]),
     Route("/api/devolucoes/sincronizar-ml-completo", dev_sincronizar_ml_completo, methods=["POST"]),
     Route("/api/devolucoes/sync-diagnostico", dev_sync_diagnostico, methods=["GET"]),

@@ -3467,3 +3467,113 @@ body.meli-page {
   max-width: 100%;
   min-width: 0;
 }
+
+/* ===================== Esteira "Chegando hoje" ===================== */
+.devolucoes-page .order-entry-panel.esteira-panel {
+  display: block;               /* empilha cabeçalho, bipagem e lista */
+}
+.devolucoes-page .esteira-head {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 14px;
+}
+.devolucoes-page .esteira-counter {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin: 2px 0;
+}
+.devolucoes-page .esteira-counter strong {
+  font-size: 40px;
+  font-weight: 900;
+  line-height: 1;
+  color: #0f766e;
+}
+.devolucoes-page .esteira-counter span {
+  font-size: 14px;
+  font-weight: 700;
+  color: #334155;
+}
+.devolucoes-page .esteira-panel .order-entry-actions {
+  max-width: 520px;
+}
+.devolucoes-page .import-feedback.bip-ok {
+  background: #ecfdf5;
+  border: 1px solid #6ee7b7;
+  color: #065f46;
+}
+.devolucoes-page .import-feedback.bip-erro {
+  background: #fef2f2;
+  border: 1px solid #fca5a5;
+  color: #991b1b;
+}
+.devolucoes-page .esteira-lista {
+  margin-top: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 340px;
+  overflow-y: auto;
+}
+.devolucoes-page .esteira-item {
+  display: grid;
+  grid-template-columns: 48px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 12px;
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  transition: opacity .2s, background .2s;
+}
+.devolucoes-page .esteira-item.recebido {
+  background: #f0fdf4;
+  border-color: #bbf7d0;
+  opacity: .72;
+}
+.devolucoes-page .esteira-item.recebido .esteira-item-info strong {
+  text-decoration: line-through;
+  color: #64748b;
+}
+.devolucoes-page .esteira-item img {
+  width: 48px;
+  height: 48px;
+  object-fit: cover;
+  border-radius: 8px;
+}
+.devolucoes-page .esteira-item-info {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.devolucoes-page .esteira-item-info b {
+  font-size: 11px;
+  color: #64748b;
+  font-weight: 700;
+}
+.devolucoes-page .esteira-item-info strong {
+  font-size: 14px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.devolucoes-page .esteira-item-info small {
+  font-size: 12px;
+  color: #64748b;
+}
+.devolucoes-page .esteira-tag {
+  font-size: 11px;
+  font-weight: 800;
+  padding: 4px 10px;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+.devolucoes-page .esteira-tag.wait {
+  background: #fef9c3;
+  color: #854d0e;
+}
+.devolucoes-page .esteira-tag.ok {
+  background: #dcfce7;
+  color: #166534;
+}
