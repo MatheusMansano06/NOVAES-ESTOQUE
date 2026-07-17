@@ -2258,6 +2258,8 @@ body.meli-page {
 .devolucoes-page .summary-item.card-orange .item-count { color: #ea580c; }
 .devolucoes-page .summary-item.card-purple .item-count { color: #7e22ce; }
 .devolucoes-page .summary-item.card-teal .item-count { color: #0d9488; }
+.devolucoes-page .summary-item.card-red .item-count { color: #dc2626; }
+.devolucoes-page .summary-item.card-red .item-tag { background: #fee2e2; color: #dc2626; }
 .devolucoes-page .summary-item.card-blue .item-tag { background: #e8efff; color: #2563eb; }
 .devolucoes-page .summary-item.card-green .item-tag { background: #e7f9ef; color: #059669; }
 .devolucoes-page .summary-item.card-orange .item-tag { background: #fff2e2; color: #ea580c; }

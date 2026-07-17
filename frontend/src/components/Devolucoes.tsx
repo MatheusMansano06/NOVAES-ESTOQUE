@@ -159,7 +159,7 @@ type PainelFlutuante =
   | { tipo: 'mediacoes'; titulo: string }
   | { tipo: 'pendencias'; titulo: string }
   | { tipo: 'diff'; titulo: string }
-  | { tipo: 'bucket'; titulo: string; bucket: Bucket }
+  | { tipo: 'bucket'; titulo: string; bucket: Bucket; prazo?: 'urgente' | 'retirar' }
   | null
 
 export function Devolucoes() {
@@ -339,6 +339,16 @@ export function Devolucoes() {
   const chegandoRestante = chegando.filter(c => !c.recebido).length
   const recebidosHoje = chegando.filter(c => c.recebido).length
 
+  // O ML separa os pickups por prazo: "Urgentes" (retirar em <=3 dias) fica fora
+  // de "Para retirar no correio". A classificação (bucket) é a mesma; a divisão
+  // é só de apresentação, por due_date — por isso é feita aqui, não na Bíblia.
+  const ehUrgente = (c: CardML) => {
+    const d = diasAte(c.due_date)
+    return d !== null && d <= 3
+  }
+  const urgentesCards = (cards.para_retirar || []).filter(ehUrgente)
+  const retirarCards = (cards.para_retirar || []).filter(c => !ehUrgente(c))
+
   const buscarPedido = (e: React.FormEvent) => {
     e.preventDefault()
     const q = busca.trim()
@@ -492,7 +502,10 @@ export function Devolucoes() {
       )
     }
     if (painel.tipo === 'bucket') {
-      const lista = cards[painel.bucket] || []
+      let lista = cards[painel.bucket] || []
+      if (painel.bucket === 'para_retirar' && painel.prazo) {
+        lista = lista.filter(painel.prazo === 'urgente' ? ehUrgente : c => !ehUrgente(c))
+      }
       if (!lista.length) {
         return (
           <div className="empty compact">
@@ -675,7 +688,20 @@ export function Devolucoes() {
               </div>
               <div className="summary-list">
                 {itemResumo('para_revisao', 'card-blue', 'review', 'Para sua revisão', 'Atenção necessária')}
-                {itemResumo('para_retirar', 'card-orange', 'mail', 'Para retirar no correio', 'Aguardando envio')}
+                <button type="button" className="summary-item card-red"
+                        onClick={() => setPainel({ tipo: 'bucket', bucket: 'para_retirar', prazo: 'urgente', titulo: 'Urgentes — retirar em até 3 dias' })}>
+                  <span className="summary-icon summary-icon-alert" aria-hidden="true" />
+                  <strong className="item-count">{urgentesCards.length}</strong>
+                  <span className="item-label">Urgentes (retirar)</span>
+                  <small className="item-tag">Últimos 3 dias</small>
+                </button>
+                <button type="button" className="summary-item card-orange"
+                        onClick={() => setPainel({ tipo: 'bucket', bucket: 'para_retirar', prazo: 'retirar', titulo: 'Para retirar no correio' })}>
+                  <span className="summary-icon summary-icon-mail" aria-hidden="true" />
+                  <strong className="item-count">{retirarCards.length}</strong>
+                  <span className="item-label">Para retirar no correio</span>
+                  <small className="item-tag">Prazo &gt; 3 dias</small>
+                </button>
                 {itemResumo('outros_problemas', 'card-purple', 'alert', 'Outros problemas', 'Demais pendências')}
                 <button type="button" className="summary-item card-teal">
                   <span className="summary-icon summary-icon-chart" aria-hidden="true" />
