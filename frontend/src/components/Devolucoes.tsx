@@ -163,6 +163,7 @@ export function Devolucoes() {
   const [painel, setPainel] = useState<PainelFlutuante>(null)
   const dialogRef = useRef<HTMLDialogElement>(null)
   const syncRodouRef = useRef(false)
+  const bipInputRef = useRef<HTMLInputElement>(null)
 
   /** Só o que o painel mostra: contadores + buckets. Poucos KB, abre instantâneo. */
   const carregar = useCallback(async () => {
@@ -308,6 +309,7 @@ export function Devolucoes() {
       setBipMsg({ tipo: 'erro', texto: String(err instanceof Error ? err.message : err) })
     } finally {
       setCodigoBip('')
+      bipInputRef.current?.focus()  // pistola bipa a próxima sem clicar
     }
   }
 
@@ -478,7 +480,8 @@ export function Devolucoes() {
             <div className="order-entry-actions">
               <form className="search-pill-form" onSubmit={biparCodigo}>
                 <span className="input-chip">Bipe</span>
-                <input className="read-input" value={codigoBip} onChange={e => setCodigoBip(e.target.value)}
+                <input ref={bipInputRef} className="read-input" value={codigoBip}
+                       onChange={e => setCodigoBip(e.target.value)}
                        inputMode="search" autoComplete="off"
                        placeholder="Venda, pacote ou rastreio" autoFocus />
                 <button type="submit">Confirmar chegada</button>
