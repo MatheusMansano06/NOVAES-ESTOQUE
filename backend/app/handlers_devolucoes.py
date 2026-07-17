@@ -346,6 +346,83 @@ async def bipar_chegada(request: Request):
                          "recebido_em": quando})
 
 
+# ------------------------------------------- diff vs ML Seller Center (debug)
+
+_BUCKETS_VISIVEIS = ("para_revisao", "para_retirar", "outros_problemas")
+
+
+def _so_digitos(v) -> str:
+    return re.sub(r"\D", "", str(v or ""))
+
+
+async def diff_seller_center(request: Request):
+    """
+    Diagnóstico read-only: recebe os IDs que o ML lista em "Próximas a serem
+    atendidas" e mostra, claim a claim, onde a NOSSA classificação diverge —
+    a coluna `regra` explica POR QUE cada um caiu no balde em que caiu.
+
+    Não altera nada. Body: {"ids": ["2000...", "5417...", ...]} (aceita número
+    de venda/pedido, pacote, order_id ou claim_id — casa por dígitos).
+    """
+    body = await request.json()
+    ids = {_so_digitos(x) for x in (body.get("ids") or [])}
+    ids.discard("")
+    if not ids:
+        return _erro("Envie 'ids': a lista de números que o ML mostra na fila.")
+
+    rows = _linhas("""
+        SELECT claim_id, pedido_id, pack_id, order_ids, bucket, regra,
+               produto_nome, shipment_destination
+        FROM ml_claim_classifications WHERE active = 1
+    """)
+
+    def chaves(r: dict) -> set:
+        ks = {_so_digitos(r.get("claim_id")), _so_digitos(r.get("pedido_id")),
+              _so_digitos(r.get("pack_id"))}
+        try:
+            ks.update(_so_digitos(o) for o in json.loads(r.get("order_ids") or "[]"))
+        except json.JSONDecodeError:
+            pass
+        ks.discard("")
+        return ks
+
+    idx: dict = {}
+    for r in rows:
+        for k in chaves(r):
+            idx.setdefault(k, r)
+
+    ml_mostra_nos_escondemos, nao_encontrados = [], []
+    for i in sorted(ids):
+        r = idx.get(i)
+        if not r:
+            nao_encontrados.append(i)
+        elif r["bucket"] not in _BUCKETS_VISIVEIS:
+            ml_mostra_nos_escondemos.append({
+                "id": i, "claim_id": r["claim_id"], "bucket": r["bucket"],
+                "regra": r["regra"], "produto_nome": r["produto_nome"],
+                "destino": r["shipment_destination"],
+            })
+
+    nos_mostramos_ml_nao = [
+        {"claim_id": r["claim_id"], "pedido_id": r["pedido_id"], "bucket": r["bucket"],
+         "regra": r["regra"], "produto_nome": r["produto_nome"]}
+        for r in rows
+        if r["bucket"] in _BUCKETS_VISIVEIS and not (chaves(r) & ids)
+    ]
+
+    return JSONResponse({
+        "recebidos": len(ids),
+        "ml_mostra_nos_escondemos": ml_mostra_nos_escondemos,
+        "nos_mostramos_ml_nao": nos_mostramos_ml_nao,
+        "nao_encontrados_no_cache": nao_encontrados,
+        "resumo": {
+            "ml_mostra_nos_escondemos": len(ml_mostra_nos_escondemos),
+            "nos_mostramos_ml_nao": len(nos_mostramos_ml_nao),
+            "nao_encontrados": len(nao_encontrados),
+        },
+    })
+
+
 # ------------------------------------------------------------------- sync
 
 def _rodar_sync_rapido(user_id: str, sync_run_id: int, trace_id: str) -> None:

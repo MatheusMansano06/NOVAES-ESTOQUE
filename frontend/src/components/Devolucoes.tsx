@@ -49,6 +49,24 @@ interface Resumo {
   fonte: string
 }
 
+/** Uma linha do diff contra o Seller Center. */
+interface DiffItem {
+  id?: string
+  claim_id: string
+  pedido_id?: string
+  bucket: string
+  regra: string
+  produto_nome: string
+  destino?: string
+}
+interface DiffResultado {
+  recebidos: number
+  ml_mostra_nos_escondemos: DiffItem[]
+  nos_mostramos_ml_nao: DiffItem[]
+  nao_encontrados_no_cache: string[]
+  resumo: { ml_mostra_nos_escondemos: number; nos_mostramos_ml_nao: number; nao_encontrados: number }
+}
+
 /** Item da esteira "Chegando hoje" — vem de /api/devolucoes/chegando-hoje. */
 interface ChegandoCard {
   claim_id: string
@@ -140,6 +158,7 @@ type PainelFlutuante =
   | { tipo: 'reputacao'; titulo: string }
   | { tipo: 'mediacoes'; titulo: string }
   | { tipo: 'pendencias'; titulo: string }
+  | { tipo: 'diff'; titulo: string }
   | { tipo: 'bucket'; titulo: string; bucket: Bucket }
   | null
 
@@ -160,6 +179,9 @@ export function Devolucoes() {
   const [carregandoChegando, setCarregandoChegando] = useState(true)
   const [codigoBip, setCodigoBip] = useState('')
   const [bipMsg, setBipMsg] = useState<{ tipo: 'ok' | 'erro'; texto: string } | null>(null)
+  const [diffTexto, setDiffTexto] = useState('')
+  const [diffRes, setDiffRes] = useState<DiffResultado | null>(null)
+  const [diffLoad, setDiffLoad] = useState(false)
   const [painel, setPainel] = useState<PainelFlutuante>(null)
   const dialogRef = useRef<HTMLDialogElement>(null)
   const syncRodouRef = useRef(false)
@@ -248,8 +270,8 @@ export function Devolucoes() {
     if (!d) return
     if (painel && !d.open) d.showModal()
     if (!painel && d.open) d.close()
-    // buckets saem dos cards (já em memória); o resto precisa da lista.
-    if (painel && painel.tipo !== 'bucket') carregarLista()
+    // buckets saem dos cards (já em memória); diff usa endpoint próprio; o resto precisa da lista.
+    if (painel && painel.tipo !== 'bucket' && painel.tipo !== 'diff') carregarLista()
   }, [painel, carregarLista])
 
   /** Polling do progresso — a conexão do POST não sobrevive ao sync inteiro. */
@@ -315,6 +337,24 @@ export function Devolucoes() {
 
   const chegandoRestante = chegando.filter(c => !c.recebido).length
 
+  const compararSellerCenter = async () => {
+    const ids = diffTexto.split(/[^0-9]+/).filter(Boolean)
+    if (!ids.length) { setDiffRes(null); return }
+    setDiffLoad(true)
+    try {
+      const r = await fetch(`${API_BASE}/api/devolucoes/diff-seller-center`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ids }),
+      })
+      setDiffRes(await r.json())
+    } catch (e) {
+      setErro(String(e instanceof Error ? e.message : e))
+    } finally {
+      setDiffLoad(false)
+    }
+  }
+
   // Contadores agregados no backend (as regras são as mesmas do original).
   const chamados = painelDados?.chamados ?? 0
   const reembolsos = painelDados?.reembolsos ?? 0
@@ -353,6 +393,58 @@ export function Devolucoes() {
 
   const conteudoPainel = () => {
     if (!painel) return null
+    if (painel.tipo === 'diff') {
+      const linha = (d: DiffItem) => (
+        <article className="diff-row" key={d.claim_id}>
+          <b>#{d.claim_id}</b>
+          <strong>{d.produto_nome || '(sem título)'}</strong>
+          <small>balde: <code>{d.bucket}</code>{d.destino ? ` · ${d.destino}` : ''}</small>
+          <small className="diff-regra">regra: {d.regra || '—'}</small>
+        </article>
+      )
+      return (
+        <div className="diff-panel">
+          <p className="diff-help">
+            Cole os números que o ML mostra em “Próximas a serem atendidas” (venda, pacote ou claim).
+            Separe por espaço, vírgula ou quebra de linha.
+          </p>
+          <textarea className="diff-input" value={diffTexto} rows={4}
+                    onChange={e => setDiffTexto(e.target.value)}
+                    placeholder="2000012345  2000067890  5417..." />
+          <button type="button" className="update-ml-button" onClick={compararSellerCenter}
+                  disabled={diffLoad}>
+            {diffLoad ? 'Comparando…' : 'Comparar'}
+          </button>
+          {diffRes && (
+            <div className="diff-result">
+              <p className="diff-summary">
+                {diffRes.recebidos} ID(s) · <b>{diffRes.resumo.ml_mostra_nos_escondemos}</b> o ML mostra e nós escondemos ·
+                {' '}<b>{diffRes.resumo.nos_mostramos_ml_nao}</b> nós mostramos e o ML não ·
+                {' '}<b>{diffRes.resumo.nao_encontrados}</b> fora do cache
+              </p>
+              <div className="diff-group">
+                <h3>ML mostra, nós escondemos ({diffRes.ml_mostra_nos_escondemos.length})</h3>
+                {diffRes.ml_mostra_nos_escondemos.length
+                  ? diffRes.ml_mostra_nos_escondemos.map(linha)
+                  : <p className="mediacoes-empty">Nada aqui — não escondemos nenhum que o ML lista.</p>}
+              </div>
+              <div className="diff-group">
+                <h3>Nós mostramos, ML não ({diffRes.nos_mostramos_ml_nao.length})</h3>
+                {diffRes.nos_mostramos_ml_nao.length
+                  ? diffRes.nos_mostramos_ml_nao.map(linha)
+                  : <p className="mediacoes-empty">Nada aqui — tudo que exibimos está na lista do ML.</p>}
+              </div>
+              {diffRes.nao_encontrados_no_cache.length > 0 && (
+                <div className="diff-group">
+                  <h3>Fora do cache ({diffRes.nao_encontrados_no_cache.length})</h3>
+                  <p className="diff-regra">{diffRes.nao_encontrados_no_cache.join(', ')}</p>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )
+    }
     if (painel.tipo === 'mediacoes') {
       const processando = mediacoes.filter(i => i.situacao_mediacao === 'processando')
       const concluidas = mediacoes.filter(i => i.situacao_mediacao === 'concluida')
@@ -542,6 +634,10 @@ export function Devolucoes() {
                     <button type="button" className="summary-link"
                             onClick={() => setPainel({ tipo: 'todas', titulo: 'Todas as devolucoes' })}>
                       Ver todas
+                    </button>
+                    <button type="button" className="summary-link"
+                            onClick={() => setPainel({ tipo: 'diff', titulo: 'Conferir vs Seller Center' })}>
+                      Conferir ML
                     </button>
                   </div>
                 </div>

@@ -3577,3 +3577,45 @@ body.meli-page {
   background: #dcfce7;
   color: #166534;
 }
+
+/* ===================== Diff vs Seller Center ===================== */
+.devolucoes-page .diff-panel { display: flex; flex-direction: column; gap: 10px; }
+.devolucoes-page .diff-help { font-size: 13px; color: #64748b; }
+.devolucoes-page .diff-input {
+  width: 100%;
+  font-family: ui-monospace, monospace;
+  font-size: 13px;
+  padding: 10px;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  resize: vertical;
+}
+.devolucoes-page .diff-panel .update-ml-button { align-self: flex-start; }
+.devolucoes-page .diff-summary {
+  font-size: 13px;
+  background: #f1f5f9;
+  padding: 8px 12px;
+  border-radius: 8px;
+  margin: 8px 0;
+}
+.devolucoes-page .diff-group { margin-top: 12px; }
+.devolucoes-page .diff-group h3 { font-size: 14px; margin-bottom: 6px; }
+.devolucoes-page .diff-row {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 12px;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  margin-bottom: 6px;
+}
+.devolucoes-page .diff-row b { font-size: 12px; color: #64748b; }
+.devolucoes-page .diff-row strong { font-size: 14px; }
+.devolucoes-page .diff-row small { font-size: 12px; color: #64748b; }
+.devolucoes-page .diff-row code {
+  background: #eef2ff;
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-size: 12px;
+}
+.devolucoes-page .diff-regra { font-family: ui-monospace, monospace; color: #94a3b8; }
