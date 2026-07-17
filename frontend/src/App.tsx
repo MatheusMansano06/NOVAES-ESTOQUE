@@ -3329,12 +3329,9 @@ function App() {
   }
 
   // ===== PÁGINA DE DEVOLUÇÕES (MERCADO LIVRE) =====
+  // Sem título no shell: a tela portada já abre com o próprio hero.
   if (pagina === 'devolucoes') {
-    return renderComShell(
-      'Devolucoes',
-      'A fila de devolucoes do Mercado Livre: o que retirar, o que revisar e o que esta em mediacao.',
-      <Devolucoes />
-    )
+    return renderComShell('', '', <Devolucoes />)
   }
 
   // ===== PÁGINA DE LISTA DE COMPRA =====

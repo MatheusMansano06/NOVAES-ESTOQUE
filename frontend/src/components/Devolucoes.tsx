@@ -49,6 +49,19 @@ interface Resumo {
   fonte: string
 }
 
+/** Contadores do painel, já agregados no backend (/api/devolucoes/painel). */
+interface Painel {
+  total: number
+  chamados: number
+  reembolsos: number
+  riscos: number
+  total_tarifas: number
+  checklists_ativos: number
+  aguardando: number
+  perto: number
+  pct_pendencias: number
+}
+
 const IMG_VAZIA =
   "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='96' height='96' viewBox='0 0 96 96'%3E%3Crect width='96' height='96' rx='8' fill='%23f1f5f9'/%3E%3Cpath d='M25 64h46L58 43l-10 13-7-9-16 17Z' fill='%23cbd5e1'/%3E%3Ccircle cx='35' cy='34' r='8' fill='%23dbe4ef'/%3E%3C/svg%3E"
 
@@ -101,8 +114,16 @@ const mlPrimaryId = (i: Devolucao) =>
 const mlDetailUrl = (i: Devolucao) =>
   `https://www.mercadolivre.com.br/vendas/${String(i.pedido_id || '').replace(/\D/g, '')}/detalhe`
 
+/**
+ * O painel guarda o QUE mostrar, não os itens: a lista chega depois da
+ * abertura (é buscada sob demanda), então capturar o array no clique deixaria
+ * o painel preso num estado vazio.
+ */
 type PainelFlutuante =
-  | { tipo: 'todas'; titulo: string; itens: Devolucao[] }
+  | { tipo: 'todas'; titulo: string }
+  | { tipo: 'busca'; titulo: string; termo: string }
+  | { tipo: 'reembolso'; titulo: string }
+  | { tipo: 'reputacao'; titulo: string }
   | { tipo: 'mediacoes'; titulo: string }
   | { tipo: 'pendencias'; titulo: string }
   | { tipo: 'bucket'; titulo: string; bucket: Bucket }
@@ -111,10 +132,13 @@ type PainelFlutuante =
 export function Devolucoes() {
   const [devolucoes, setDevolucoes] = useState<Devolucao[]>([])
   const [mediacoes, setMediacoes] = useState<Devolucao[]>([])
+  const [listaCarregada, setListaCarregada] = useState(false)
+  const [carregandoLista, setCarregandoLista] = useState(false)
   const [cards, setCards] = useState<Record<Bucket, CardML[]>>({
     para_revisao: [], para_retirar: [], outros_problemas: [],
   })
   const [resumo, setResumo] = useState<Resumo | null>(null)
+  const [painelDados, setPainelDados] = useState<Painel | null>(null)
   const [carregando, setCarregando] = useState(true)
   const [sincronizando, setSincronizando] = useState<'' | 'rapido' | 'completo'>('')
   const [feedback, setFeedback] = useState('')
@@ -123,20 +147,19 @@ export function Devolucoes() {
   const [painel, setPainel] = useState<PainelFlutuante>(null)
   const dialogRef = useRef<HTMLDialogElement>(null)
 
+  /** Só o que o painel mostra: contadores + buckets. Poucos KB, abre instantâneo. */
   const carregar = useCallback(async () => {
     setCarregando(true)
     setErro('')
     try {
       const buckets: Bucket[] = ['para_revisao', 'para_retirar', 'outros_problemas']
-      const [lista, meds, r, ...cs] = await Promise.all([
-        fetch(`${API_BASE}/api/devolucoes`, { cache: 'no-store' }).then(x => x.json()),
-        fetch(`${API_BASE}/api/devolucoes/mediacoes`, { cache: 'no-store' }).then(x => x.json()),
+      const [p, r, ...cs] = await Promise.all([
+        fetch(`${API_BASE}/api/devolucoes/painel`, { cache: 'no-store' }).then(x => x.json()),
         fetch(`${API_BASE}/api/resumo-ml`, { cache: 'no-store' }).then(x => x.json()),
         ...buckets.map(b =>
           fetch(`${API_BASE}/api/devolucoes/cards?bucket=${b}`, { cache: 'no-store' }).then(x => x.json())),
       ])
-      setDevolucoes(Array.isArray(lista) ? lista : [])
-      setMediacoes(Array.isArray(meds) ? meds : [])
+      setPainelDados(p)
       setResumo(r)
       setCards({
         para_revisao: cs[0]?.cards || [],
@@ -150,6 +173,29 @@ export function Devolucoes() {
     }
   }, [])
 
+  /**
+   * A lista completa (2,3 MB) e as mediações (1,7 MB) só descem quando o
+   * operador abre o painel flutuante — carregá-las na abertura da aba era o
+   * que fazia a tela demorar a aparecer.
+   */
+  const carregarLista = useCallback(async () => {
+    if (listaCarregada || carregandoLista) return
+    setCarregandoLista(true)
+    try {
+      const [lista, meds] = await Promise.all([
+        fetch(`${API_BASE}/api/devolucoes`, { cache: 'no-store' }).then(x => x.json()),
+        fetch(`${API_BASE}/api/devolucoes/mediacoes`, { cache: 'no-store' }).then(x => x.json()),
+      ])
+      setDevolucoes(Array.isArray(lista) ? lista : [])
+      setMediacoes(Array.isArray(meds) ? meds : [])
+      setListaCarregada(true)
+    } catch (e) {
+      setErro(String(e instanceof Error ? e.message : e))
+    } finally {
+      setCarregandoLista(false)
+    }
+  }, [listaCarregada, carregandoLista])
+
   useEffect(() => { carregar() }, [carregar])
 
   useEffect(() => {
@@ -157,7 +203,9 @@ export function Devolucoes() {
     if (!d) return
     if (painel && !d.open) d.showModal()
     if (!painel && d.open) d.close()
-  }, [painel])
+    // buckets saem dos cards (já em memória); o resto precisa da lista.
+    if (painel && painel.tipo !== 'bucket') carregarLista()
+  }, [painel, carregarLista])
 
   const sincronizar = async (modo: 'rapido' | 'completo') => {
     setSincronizando(modo)
@@ -186,31 +234,24 @@ export function Devolucoes() {
 
   const buscarPedido = (e: React.FormEvent) => {
     e.preventDefault()
-    const q = busca.trim().toLowerCase()
+    const q = busca.trim()
     if (!q) return
-    const achados = devolucoes.filter(i =>
-      `${i.pedido_id} ${i.cliente_nome} ${i.produto_nome} ${i.ml_claim_id || ''}`
-        .toLowerCase().includes(q))
-    setPainel({ tipo: 'todas', titulo: `Resultado para "${busca.trim()}"`, itens: achados })
+    setPainel({ tipo: 'busca', titulo: `Resultado para "${q}"`, termo: q })
   }
 
-  // Chamados/Reembolso vêm das mediações (situacao_mediacao), como no original.
-  const chamados = useMemo(
-    () => mediacoes.filter(i => i.situacao_mediacao === 'processando').length, [mediacoes])
-  const reembolsos = useMemo(
-    () => mediacoes.filter(i => i.situacao_mediacao === 'concluida').length, [mediacoes])
-  const riscos = useMemo(
-    () => devolucoes.filter(i => hasReputationRisk(i) && !isFinal(i)).length, [devolucoes])
-  const totalTarifas = useMemo(
-    () => devolucoes.reduce((s, i) => s + Math.abs(Number(i.ml_tarifa_devolucao || 0)), 0), [devolucoes])
+  // Contadores agregados no backend (as regras são as mesmas do original).
+  const chamados = painelDados?.chamados ?? 0
+  const reembolsos = painelDados?.reembolsos ?? 0
+  const riscos = painelDados?.riscos ?? 0
+  const totalTarifas = painelDados?.total_tarifas ?? 0
+  const nChecklistsAtivos = painelDados?.checklists_ativos ?? 0
+  const aguardando = painelDados?.aguardando ?? 0
+  const perto = painelDados?.perto ?? 0
+  const pctPendencias = painelDados?.pct_pendencias ?? 0
 
+  /** Só para o painel flutuante de pendências — depende da lista carregada. */
   const checklistsAtivos = useMemo(
     () => devolucoes.filter(i => Number(i.etapa_checklist_atual || 0) > 0 && !isFinal(i)), [devolucoes])
-  const aguardando = useMemo(() => devolucoes.filter(needsReview).length, [devolucoes])
-  const perto = useMemo(
-    () => devolucoes.filter(i => ['critica', 'alta'].includes(calcularUrgencia(i))).length, [devolucoes])
-  const pctPendencias = devolucoes.length
-    ? Math.round((checklistsAtivos.length / devolucoes.length) * 100) : 0
 
   const itemResumo = (b: Bucket, cls: string, icone: string, texto: string, tag: string) => (
     <button type="button" className={`summary-item ${cls}`}
@@ -312,15 +353,29 @@ export function Devolucoes() {
         </div>
       )
     }
-    // todas / resultado de busca
-    return painel.itens.length ? (
-      <div className="floating-grid">{painel.itens.map(i => cardFlutuante(i))}</div>
+    // todas / busca / reembolso / reputação — todos saem da lista
+    if (carregandoLista && !listaCarregada) {
+      return <div className="empty compact"><p>Carregando devoluções…</p></div>
+    }
+    let itens: Devolucao[] = devolucoes
+    if (painel.tipo === 'busca') {
+      const q = painel.termo.toLowerCase()
+      itens = devolucoes.filter(i =>
+        `${i.pedido_id} ${i.cliente_nome} ${i.produto_nome} ${i.ml_claim_id || ''}`
+          .toLowerCase().includes(q))
+    } else if (painel.tipo === 'reembolso') {
+      itens = mediacoes.filter(i => i.situacao_mediacao === 'concluida')
+    } else if (painel.tipo === 'reputacao') {
+      itens = devolucoes.filter(i => hasReputationRisk(i) && !isFinal(i))
+    }
+    return itens.length ? (
+      <div className="floating-grid">{itens.map(i => cardFlutuante(i))}</div>
     ) : (
       <div className="empty compact">
         <h2>Nenhuma devolução encontrada</h2>
         <p>
           {devolucoes.length
-            ? 'Nada bate com essa busca.'
+            ? 'Nada bate com esse filtro.'
             : 'Rode “Sincronizar tudo” para trazer as devoluções do Mercado Livre.'}
         </p>
       </div>
@@ -332,7 +387,6 @@ export function Devolucoes() {
       <main className="meli-shell reference-shell triage-layout">
         <section className="center-workspace">
           <section className="dashboard-hero">
-            <p>BEM-VINDO DE VOLTA</p>
             <h1>Gerencie suas <span>devoluções</span></h1>
             <small>Acompanhe, revise e resolva pendências de devolução de forma rápida e inteligente.</small>
           </section>
@@ -382,24 +436,16 @@ export function Devolucoes() {
                         Chamados <b>{chamados}</b>
                       </button>
                       <button type="button" className="shortcut-chip"
-                              onClick={() => setPainel({
-                                tipo: 'todas', titulo: 'Aguardando reembolso',
-                                itens: mediacoes.filter(i => i.situacao_mediacao === 'concluida'),
-                              })}>
+                              onClick={() => setPainel({ tipo: 'reembolso', titulo: 'Aguardando reembolso' })}>
                         Reembolso <b>{reembolsos}</b>
                       </button>
                       <button type="button" className="shortcut-chip"
-                              onClick={() => setPainel({
-                                tipo: 'todas', titulo: 'Risco de reputação',
-                                itens: devolucoes.filter(i => hasReputationRisk(i) && !isFinal(i)),
-                              })}>
+                              onClick={() => setPainel({ tipo: 'reputacao', titulo: 'Risco de reputação' })}>
                         Reputação <b>{riscos}</b>
                       </button>
                     </div>
                     <button type="button" className="summary-link"
-                            onClick={() => setPainel({
-                              tipo: 'todas', titulo: 'Todas as devolucoes', itens: devolucoes,
-                            })}>
+                            onClick={() => setPainel({ tipo: 'todas', titulo: 'Todas as devolucoes' })}>
                       Ver todas
                     </button>
                   </div>
@@ -435,14 +481,14 @@ export function Devolucoes() {
                 <p>Checklists iniciados</p>
                 <small>
                   {carregando ? 'Carregando…'
-                    : checklistsAtivos.length
-                      ? `${checklistsAtivos.length} checklist(s) em andamento.`
+                    : nChecklistsAtivos
+                      ? `${nChecklistsAtivos} checklist(s) em andamento.`
                       : 'Nenhum checklist em andamento no momento.'}
                 </small>
               </div>
             </div>
             <div className="pending-col right">
-              <article><strong>{checklistsAtivos.length}</strong><span>Checklists ativos</span></article>
+              <article><strong>{nChecklistsAtivos}</strong><span>Checklists ativos</span></article>
               <article><strong>{aguardando}</strong><span>Aguardando sua ação</span></article>
               <article><strong>{perto}</strong><span>Perto do vencimento</span></article>
             </div>

@@ -306,10 +306,14 @@ export function AppShell({
         </header>
 
         <main className="nvs-workspace">
-          <div className="nvs-page-head">
-            <h1>{title}</h1>
-            <p>{subtitle}</p>
-          </div>
+          {/* Título vazio = a página traz o próprio cabeçalho (ex.: Devoluções,
+              que tem o hero do layout original) e não quer dois títulos. */}
+          {title && (
+            <div className="nvs-page-head">
+              <h1>{title}</h1>
+              <p>{subtitle}</p>
+            </div>
+          )}
           {children}
         </main>
       </div>

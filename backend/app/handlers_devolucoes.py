@@ -183,6 +183,67 @@ async def fila_ml_live(request: Request):
         return _erro("Nao foi possivel calcular a fila ao vivo do Mercado Livre", 400, erro=str(exc))
 
 
+async def painel_pos_venda(request: Request):
+    """
+    Todos os números do painel numa consulta só.
+
+    Existe por causa do peso: a tela montava isso no navegador a partir de
+    /api/devolucoes + /api/devolucoes/mediacoes — 4 MB de JSON (1300+ linhas
+    com todas as colunas) baixados a cada abertura para exibir sete contadores.
+    Agregado em SQL a resposta cabe em bytes e a tela abre instantânea; a lista
+    completa só é buscada quando o operador abre o painel flutuante.
+
+    As regras replicam 1:1 as do layout original (ver Devolucoes.tsx).
+    """
+    FINAIS = "('aprovado','parcial','reprovado','encerrado','sem_divergencia')"
+    MEDIACAO_FINAL = "('aprovado','parcial','reprovado')"
+    EM_MEDIACAO = ("(d.status IN ('aguardando_plataforma','contestacao_aberta','aprovado',"
+                   "'parcial','reprovado') OR COALESCE(d.mediacao_mensagem,'') <> '' "
+                   "OR EXISTS (SELECT 1 FROM contestacoes c WHERE c.devolucao_id = d.id))")
+
+    row = _linha(f"""
+        SELECT
+          COUNT(*) AS total,
+          SUM(CASE WHEN {EM_MEDIACAO} AND d.status NOT IN {MEDIACAO_FINAL}
+                   THEN 1 ELSE 0 END) AS chamados,
+          SUM(CASE WHEN {EM_MEDIACAO} AND d.status IN {MEDIACAO_FINAL}
+                   THEN 1 ELSE 0 END) AS reembolsos,
+          SUM(CASE WHEN (d.motivo_devolucao = 'PDD9952'
+                         OR LOWER(COALESCE(d.acao_recomendada,'')) LIKE '%reputa%')
+                    AND d.status NOT IN {FINAIS} THEN 1 ELSE 0 END) AS riscos,
+          COALESCE(SUM(ABS(COALESCE(d.ml_tarifa_devolucao, 0))), 0) AS total_tarifas,
+          SUM(CASE WHEN COALESCE(d.etapa_checklist_atual, 0) > 0
+                    AND d.status NOT IN {FINAIS} THEN 1 ELSE 0 END) AS checklists_ativos,
+          SUM(CASE WHEN d.status IN ('produto_recebido','divergencia_encontrada','em_analise')
+                    AND COALESCE(d.requer_acao, 1) = 1 THEN 1 ELSE 0 END) AS aguardando,
+          -- "perto do vencimento" = urgência crítica ou alta = prazo em até 3 dias.
+          -- O '-3 hours' converte para o fuso de Brasília antes de cortar o dia:
+          -- o ML manda o prazo em -04:00 e o SQLite normaliza para UTC, então um
+          -- prazo de 20/07 23:34 (BRT) viraria 21/07 e ficaria 1 dia fora da conta.
+          SUM(CASE WHEN d.status NOT IN {FINAIS}
+                    AND d.prazo_resolucao IS NOT NULL AND TRIM(d.prazo_resolucao) <> ''
+                    AND date(datetime(d.prazo_resolucao, '-3 hours'))
+                        <= date('now', '-3 hours', '+3 day')
+                   THEN 1 ELSE 0 END) AS perto
+        FROM devolucoes d
+        WHERE COALESCE(d.ml_ativo, 1) = 1
+    """) or {}
+
+    total = int(row.get("total") or 0)
+    ativos = int(row.get("checklists_ativos") or 0)
+    return JSONResponse({
+        "total": total,
+        "chamados": int(row.get("chamados") or 0),
+        "reembolsos": int(row.get("reembolsos") or 0),
+        "riscos": int(row.get("riscos") or 0),
+        "total_tarifas": float(row.get("total_tarifas") or 0),
+        "checklists_ativos": ativos,
+        "aguardando": int(row.get("aguardando") or 0),
+        "perto": int(row.get("perto") or 0),
+        "pct_pendencias": round((ativos / total) * 100) if total else 0,
+    })
+
+
 async def resumo_financeiro(request: Request):
     row = _linha("""
         SELECT COUNT(*) as total_devolucoes,
