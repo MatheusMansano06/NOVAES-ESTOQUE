@@ -39,6 +39,30 @@ from app.utils.embalagens import (
 from app.integracoes_olist import olist
 from app.integracoes_ml import ml
 from app.jobs import iniciar_scheduler
+from app.handlers_devolucoes import (
+    buscar_devolucao as dev_buscar_devolucao,
+    cards_por_bucket as dev_cards_por_bucket,
+    confirmar_chegada as dev_confirmar_chegada,
+    criar_contestacao as dev_criar_contestacao,
+    criar_devolucao as dev_criar_devolucao,
+    fila_ml_live as dev_fila_ml_live,
+    filtros_ml as dev_filtros_ml,
+    get_checklist as dev_get_checklist,
+    historico_devolucao as dev_historico_devolucao,
+    historico_incompletos as dev_historico_incompletos,
+    listar_contestacoes as dev_listar_contestacoes,
+    listar_devolucoes as dev_listar_devolucoes,
+    listar_evidencias as dev_listar_evidencias,
+    listar_mediacoes as dev_listar_mediacoes,
+    resumo_financeiro as dev_resumo_financeiro,
+    resumo_ml as dev_resumo_ml,
+    salvar_checklist as dev_salvar_checklist,
+    salvar_progresso_checklist as dev_salvar_progresso_checklist,
+    sincronizar_ml as dev_sincronizar_ml,
+    sync_diagnostico as dev_sync_diagnostico,
+    sync_trace as dev_sync_trace,
+    sync_trace_ultimo as dev_sync_trace_ultimo,
+)
 
 # Carregar variáveis de ambiente do arquivo .env
 load_dotenv()
@@ -5585,6 +5609,33 @@ routes = [
     Route("/api/embaldes/{embale_id}/itens/{item_id}/em-espera", marcar_em_espera_embale, methods=["POST"]),
     Route("/api/embaldes/{embale_id}/itens/{item_id}/nao-enviar", marcar_nao_enviar_embale, methods=["POST"]),
     Route("/api/embaldes/{embale_id}/encerrar", encerrar_embale, methods=["POST"]),
+
+    # --- Devoluções ML (portado de DEVOLUCOES-ML-main) ---
+    # ATENÇÃO à ordem: as rotas literais (/cards, /mediacoes, /sincronizar-ml...)
+    # precisam vir ANTES de /api/devolucoes/{item_id}, senão o Starlette casa
+    # "cards" como item_id e devolve 404/erro de int().
+    Route("/api/devolucoes", dev_listar_devolucoes, methods=["GET"]),
+    Route("/api/devolucoes", dev_criar_devolucao, methods=["POST"]),
+    Route("/api/devolucoes/mediacoes", dev_listar_mediacoes, methods=["GET"]),
+    Route("/api/devolucoes/cards", dev_cards_por_bucket, methods=["GET"]),
+    Route("/api/devolucoes/filtros-ml", dev_filtros_ml, methods=["GET"]),
+    Route("/api/devolucoes/fila-ml-live", dev_fila_ml_live, methods=["GET"]),
+    Route("/api/devolucoes/resumo-financeiro", dev_resumo_financeiro, methods=["GET"]),
+    Route("/api/devolucoes/sincronizar-ml", dev_sincronizar_ml, methods=["POST"]),
+    Route("/api/devolucoes/sync-diagnostico", dev_sync_diagnostico, methods=["GET"]),
+    Route("/api/devolucoes/sync-trace/ultimo", dev_sync_trace_ultimo, methods=["GET"]),
+    Route("/api/devolucoes/sync-trace/{trace_id}", dev_sync_trace, methods=["GET"]),
+    Route("/api/devolucoes/historico/incompletos", dev_historico_incompletos, methods=["GET"]),
+    Route("/api/resumo-ml", dev_resumo_ml, methods=["GET"]),
+    Route("/api/devolucoes/{item_id:int}", dev_buscar_devolucao, methods=["GET"]),
+    Route("/api/devolucoes/{item_id:int}/historico", dev_historico_devolucao, methods=["GET"]),
+    Route("/api/devolucoes/{item_id:int}/chegada", dev_confirmar_chegada, methods=["POST"]),
+    Route("/api/devolucoes/{item_id:int}/checklist", dev_get_checklist, methods=["GET"]),
+    Route("/api/devolucoes/{item_id:int}/checklist", dev_salvar_checklist, methods=["POST"]),
+    Route("/api/devolucoes/{item_id:int}/checklist/progresso", dev_salvar_progresso_checklist, methods=["POST"]),
+    Route("/api/devolucoes/{item_id:int}/evidencias", dev_listar_evidencias, methods=["GET"]),
+    Route("/api/devolucoes/{item_id:int}/contestacoes", dev_listar_contestacoes, methods=["GET"]),
+    Route("/api/devolucoes/{item_id:int}/contestacoes", dev_criar_contestacao, methods=["POST"]),
 ]
 
 async def _on_startup():

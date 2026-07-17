@@ -603,7 +603,10 @@ class Devolucao(Base):
     __tablename__ = "devolucoes"
 
     id = Column(Integer, primary_key=True)
-    marketplace = Column(String(50), nullable=False, default="mercadolivre")
+    # "Mercado Livre" exatamente assim (com espaço e maiúsculas): o sync grava e
+    # consulta por esse literal. Mudar aqui faz o upsert deixar de casar com as
+    # linhas existentes e passar a duplicar devolução.
+    marketplace = Column(String(50), nullable=False, default="Mercado Livre", index=True)
     pedido_id = Column(String(100), nullable=False, index=True)
     cliente_nome = Column(String(255), nullable=False, default="")
     produto_nome = Column(String(255), nullable=False, default="")

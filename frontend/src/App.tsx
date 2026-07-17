@@ -12,6 +12,7 @@ import { OperadoresManager } from './components/OperadoresManager'
 import { ListaCompra } from './components/ListaCompra'
 import { RadarFull } from './components/RadarFull'
 import { EstoqueEmbalagens } from './components/EstoqueEmbalagens'
+import { Devolucoes } from './components/Devolucoes'
 import { AppShell, type ShellNavGroup, type ShellStatusItem } from './components/AppShell'
 import {
   baixarMultiplosOuPdfs,
@@ -85,7 +86,7 @@ interface ProdutoEstoque {
   }>
 }
 
-type Pagina = 'bemvindo' | 'inicial' | 'conferencia' | 'produtos_nota' | 'relacionamento_produto' | 'fornecedores' | 'full-operacoes' | 'anuncios' | 'notas-fiscais' | 'operadores' | 'garimpador' | 'lista-compra' | 'radar-full' | 'estoque-embalagens'
+type Pagina = 'bemvindo' | 'inicial' | 'conferencia' | 'produtos_nota' | 'relacionamento_produto' | 'fornecedores' | 'full-operacoes' | 'anuncios' | 'notas-fiscais' | 'operadores' | 'garimpador' | 'lista-compra' | 'radar-full' | 'estoque-embalagens' | 'devolucoes'
 
 interface Divergencia {
   item_id: number
@@ -1653,6 +1654,7 @@ function App() {
       label: 'Marketplace',
       items: [
         { key: 'anuncios', label: 'Anuncios ML', icon: 'megaphone', active: pagina === 'anuncios', onClick: () => setPagina('anuncios') },
+        { key: 'devolucoes', label: 'Devolucoes', icon: 'box', active: pagina === 'devolucoes', onClick: () => setPagina('devolucoes') },
       ],
     },
     // === FERRAMENTAS ===
@@ -3323,6 +3325,15 @@ function App() {
       'Painel Mercado Livre',
       'Acompanhe anuncios, estoque, imagens, precificacao e dimensoes.',
       <AnunciosML onVoltar={voltarParaInicial} />
+    )
+  }
+
+  // ===== PÁGINA DE DEVOLUÇÕES (MERCADO LIVRE) =====
+  if (pagina === 'devolucoes') {
+    return renderComShell(
+      'Devolucoes',
+      'A fila de devolucoes do Mercado Livre: o que retirar, o que revisar e o que esta em mediacao.',
+      <Devolucoes />
     )
   }
 

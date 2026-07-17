@@ -137,6 +137,11 @@ def normalized_ml_text(value: Optional[str]) -> str:
     return "".join(ch for ch in decomposed if unicodedata.category(ch) != "Mn")
 
 
+def motivo_label(reason_id: Optional[str]) -> str:
+    """Rótulo legível do motivo. Reason_id desconhecido volta cru (e '-' se vazio)."""
+    return MOTIVO_LABELS.get(str(reason_id or ""), str(reason_id or "") or "-")
+
+
 def claim_available_actions(claim: dict) -> list[dict]:
     return [
         action
