@@ -179,6 +179,7 @@ export function Devolucoes() {
   const [carregandoChegando, setCarregandoChegando] = useState(true)
   const [codigoBip, setCodigoBip] = useState('')
   const [bipMsg, setBipMsg] = useState<{ tipo: 'ok' | 'erro'; texto: string } | null>(null)
+  const [busca, setBusca] = useState('')
   const [diffTexto, setDiffTexto] = useState('')
   const [diffRes, setDiffRes] = useState<DiffResultado | null>(null)
   const [diffLoad, setDiffLoad] = useState(false)
@@ -336,6 +337,14 @@ export function Devolucoes() {
   }
 
   const chegandoRestante = chegando.filter(c => !c.recebido).length
+  const recebidosHoje = chegando.filter(c => c.recebido).length
+
+  const buscarPedido = (e: React.FormEvent) => {
+    e.preventDefault()
+    const q = busca.trim()
+    if (!q) return
+    setPainel({ tipo: 'busca', titulo: `Resultado para "${q}"`, termo: q })
+  }
 
   const compararSellerCenter = async () => {
     const ids = diffTexto.split(/[^0-9]+/).filter(Boolean)
@@ -560,23 +569,40 @@ export function Devolucoes() {
           </section>
 
           <section className="order-entry-panel esteira-panel">
-            <div className="esteira-head">
-              <p className="eyebrow">Chegando hoje no barracão</p>
-              <div className="esteira-counter">
-                <strong>{carregandoChegando ? '—' : chegandoRestante}</strong>
-                <span>{chegandoRestante === 1 ? 'devolução para bipar hoje' : 'devoluções para bipar hoje'}</span>
+            <div className="esteira-top">
+              <div className="esteira-head">
+                <p className="eyebrow">Chegando hoje no barracão</p>
+                <h1 className="esteira-title">Bipe as devoluções que chegaram</h1>
+                <span>Cruze a venda recebida com a devolução prevista e dê entrada em segundos.</span>
+                {sincAutomatico && <small className="esteira-sync">Sincronizando com o Mercado Livre…</small>}
               </div>
-              <span>Bipe a venda que chegou para cruzar com a devolução prevista e dar entrada.</span>
-              {sincAutomatico && <small style={{ display: 'block', marginTop: '8px', color: '#666' }}>🔄 Sincronizando com o Mercado Livre…</small>}
+              <div className="esteira-stats">
+                <div className="esteira-stat big">
+                  <strong>{carregandoChegando ? '—' : chegandoRestante}</strong>
+                  <span>a bipar hoje</span>
+                </div>
+                <div className="esteira-stat ok">
+                  <strong>{carregandoChegando ? '—' : recebidosHoje}</strong>
+                  <span>já recebidas</span>
+                </div>
+              </div>
             </div>
-            <div className="order-entry-actions">
-              <form className="search-pill-form" onSubmit={biparCodigo}>
+
+            <div className="esteira-forms">
+              <form className="search-pill-form bip" onSubmit={biparCodigo}>
                 <span className="input-chip">Bipe</span>
                 <input ref={bipInputRef} className="read-input" value={codigoBip}
                        onChange={e => setCodigoBip(e.target.value)}
                        inputMode="search" autoComplete="off"
                        placeholder="Venda, pacote ou rastreio" autoFocus />
                 <button type="submit">Confirmar chegada</button>
+              </form>
+              <form className="search-pill-form busca" onSubmit={buscarPedido}>
+                <span className="input-chip">Buscar</span>
+                <input className="read-input" value={busca} onChange={e => setBusca(e.target.value)}
+                       inputMode="search" autoComplete="off"
+                       placeholder="Pedido, cliente ou produto" />
+                <button type="submit">Buscar venda</button>
               </form>
             </div>
             {bipMsg && (
@@ -590,17 +616,22 @@ export function Devolucoes() {
               {carregandoChegando ? (
                 <p className="mediacoes-empty">Carregando fila de chegada…</p>
               ) : !chegando.length ? (
-                <p className="mediacoes-empty">Nada previsto para chegar hoje.</p>
-              ) : chegando.map(c => (
+                <div className="esteira-vazio">
+                  <span className="esteira-vazio-icone" aria-hidden="true">📦</span>
+                  <strong>Nada previsto para chegar hoje</strong>
+                  <small>Assim que o ML atualizar as previsões, elas aparecem aqui.</small>
+                </div>
+              ) : chegando.map((c, i) => (
                 <article key={c.claim_id} className={`esteira-item ${c.recebido ? 'recebido' : ''}`}>
+                  <span className="esteira-pos">{i + 1}</span>
                   <img src={c.produto_imagem || IMG_VAZIA} alt="" loading="lazy" />
                   <div className="esteira-item-info">
                     <b>#{String(c.pedido_id || '').replace(/\D/g, '') || '-'}</b>
                     <strong>{c.produto_nome || '(sem título)'}</strong>
-                    <small>{c.motivo_label || '—'} · {money(c.valor_pago)}</small>
+                    <small>{c.motivo_label || 'Devolução'} · {money(c.valor_pago)}</small>
                   </div>
                   <span className={`esteira-tag ${c.recebido ? 'ok' : 'wait'}`}>
-                    {c.recebido ? 'Recebido' : 'Aguardando'}
+                    {c.recebido ? '✓ Recebido' : 'Aguardando'}
                   </span>
                 </article>
               ))}
