@@ -17,6 +17,7 @@ Adaptações: jsonify -> JSONResponse, request.args -> request.query_params,
 import json
 from typing import Optional
 
+from starlette.concurrency import run_in_threadpool
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 
@@ -38,6 +39,7 @@ from app.devolucoes_sync import (
     refresh_ml_classification_cache,
     resumo_from_classification_cache,
     start_ml_sync_run,
+    sync_ml_completo,
     trace_payload,
     upsert_ml_devolucao,
 )
@@ -111,13 +113,26 @@ async def historico_devolucao(request: Request):
         {"i": item_id}))
 
 
+MEDIATION_FINAL_STATUSES = {"aprovado", "parcial", "reprovado"}
+
+
 async def listar_mediacoes(request: Request):
-    return JSONResponse(_linhas("""
-        SELECT * FROM devolucoes
-        WHERE status IN ('contestacao_aberta','aguardando_plataforma','aprovado','parcial','reprovado')
-           OR COALESCE(mediacao_mensagem,'') <> ''
-        ORDER BY id DESC
-    """))
+    rows = _linhas("""
+        SELECT d.* FROM devolucoes d
+        WHERE (
+            d.status IN ('aguardando_plataforma','contestacao_aberta','aprovado','parcial','reprovado')
+            OR COALESCE(d.mediacao_mensagem, '') <> ''
+            OR EXISTS (SELECT 1 FROM contestacoes c WHERE c.devolucao_id = d.id)
+        )
+        ORDER BY datetime(COALESCE(d.ultima_sincronizacao_ml, d.data_solicitacao)) DESC
+    """)
+    # situacao_mediacao é derivada, não é coluna: a tela conta "Chamados"
+    # (processando) e "Reembolso" (concluida) em cima dela.
+    for r in rows:
+        status = str(r.get("status") or "").lower()
+        r["situacao_mediacao"] = ("concluida" if status in MEDIATION_FINAL_STATUSES
+                                  else "processando")
+    return JSONResponse(rows)
 
 
 # -------------------------------------------------------------- filas / cards
@@ -208,8 +223,13 @@ async def sincronizar_ml(request: Request):
             "sort": "last_updated:desc",
             "workers": ml_worker_count("ML_LIVE_QUEUE_WORKERS", 4),
         })
-        cache_result = refresh_ml_classification_cache(user_id, sync_run_id, trace_id)
-        mediations_result = refresh_local_mediations(sync_run_id, trace_id)
+        # run_in_threadpool: o refresh é síncrono e leva minutos. Chamado direto
+        # de um handler async ele prende o event loop e o app INTEIRO para de
+        # responder enquanto o sync roda — não só esta rota.
+        cache_result = await run_in_threadpool(
+            refresh_ml_classification_cache, user_id, sync_run_id, trace_id)
+        mediations_result = await run_in_threadpool(
+            refresh_local_mediations, sync_run_id, trace_id)
         resumo = cache_result["resumo"]
         resumo["fonte"] = "mercado_livre_cache_classificacao"
         add_ml_trace_event(trace_id, sync_run_id, "summary_database", details={
@@ -257,6 +277,40 @@ async def sincronizar_ml(request: Request):
                                detalhes={"erro": str(exc)})
             add_ml_trace_event(trace_id, sync_run_id, "sync_finish", status="error",
                                details={"erro": str(exc)}, started_at=sync_started)
+        return _erro("Nao foi possivel sincronizar o Mercado Livre", 400, erro=str(exc))
+
+
+async def sincronizar_ml_completo(request: Request):
+    """
+    Sync pesado: traz TODOS os claims (abertos e fechados) para a tabela
+    `devolucoes`. Leva minutos — o do dia a dia é /sincronizar-ml.
+    """
+    trace_id = novo_trace_id()
+    sync_run_id = 0
+    try:
+        user_id = _ml_pronto()
+        if not user_id:
+            return _erro("Mercado Livre nao configurado (ML_USER_ID ausente).")
+        sync_run_id = start_ml_sync_run("completo", {"user_id": user_id, "trace_id": trace_id})
+        add_ml_trace_event(trace_id, sync_run_id, "sync_start",
+                           details={"tipo": "completo", "user_id": user_id})
+        # Idem sincronizar_ml: bloqueante por minutos, fora do event loop.
+        resultado = await run_in_threadpool(sync_ml_completo, user_id, sync_run_id, trace_id)
+        finish_ml_sync_run(
+            sync_run_id,
+            status="success" if not resultado["erros"] else "partial",
+            total_declarado=resultado["encontrados"],
+            total_encontrado=resultado["encontrados"],
+            total_processado=resultado["processados"],
+            total_erros=resultado["total_erros"],
+            detalhes={"trace_id": trace_id, **resultado})
+        return JSONResponse({"mensagem": "Sincronizacao completa concluida",
+                             "sync_run_id": sync_run_id, "trace_id": trace_id,
+                             **resultado})
+    except Exception as exc:
+        if sync_run_id:
+            finish_ml_sync_run(sync_run_id, status="error", total_erros=1,
+                               detalhes={"erro": str(exc)})
         return _erro("Nao foi possivel sincronizar o Mercado Livre", 400, erro=str(exc))
 
 

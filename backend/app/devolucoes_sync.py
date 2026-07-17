@@ -996,6 +996,29 @@ def build_ml_devolucao(claim: dict, sync_run_id: Optional[int] = None) -> dict:
 
 # ----------------------------------------------------- refresh do cache/sync
 
+def needs_review_item(item: dict) -> bool:
+    return (item.get("status") in {"produto_recebido", "divergencia_encontrada", "em_analise"}
+            and int(item.get("requer_acao") or 0) == 1)
+
+
+def resumo_from_items(items: list[dict], fonte: str) -> dict:
+    para_revisao = sum(1 for i in items if needs_review_item(i))
+    para_retirar = sum(1 for i in items if i.get("prioridade_prazo") == "retirar_correio")
+    return {
+        "para_revisao": para_revisao, "para_retirar": para_retirar,
+        "outros_problemas": max(len(items) - para_revisao - para_retirar, 0),
+        "total": len(items), "fonte": fonte,
+    }
+
+
+def resumo_from_database() -> dict:
+    # 'Mercado Livre' literal: é o que o upsert grava (ver models.Devolucao.marketplace).
+    return resumo_from_items(
+        _linhas("SELECT * FROM devolucoes WHERE marketplace = 'Mercado Livre' "
+                "AND COALESCE(ml_ativo, 1) = 1"),
+        "banco_sincronizado")
+
+
 def resumo_from_classification_cache() -> dict:
     rows = _linhas("SELECT bucket, COUNT(*) AS total FROM ml_claim_classifications "
                    "WHERE active = 1 GROUP BY bucket")
@@ -1070,6 +1093,95 @@ def refresh_ml_classification_cache(user_id: str, sync_run_id: Optional[int] = N
     }
     add_ml_trace_event(trace_id, sync_run_id, "classification_cache_refresh",
                        status="ok" if not errors else "partial", details=result,
+                       started_at=started)
+    return result
+
+
+def all_ml_claims(user_id: str, *, claim_type: str = "returns",
+                  sync_run_id: Optional[int] = None,
+                  trace_id: Optional[str] = None) -> list[dict]:
+    """
+    Todos os claims de devolução — abertos E fechados.
+
+    Diferente de ml_live_claims_for_queue (que pega só o topo por last_updated
+    p/ montar a fila do dia), este varre as duas pontas porque é o que alimenta
+    a tabela `devolucoes`: sem os fechados o histórico e o financeiro ficam
+    capengas. O teto de páginas é o do original — a busca do ML degrada muito
+    depois disso.
+    """
+    claims: list[dict] = []
+    vistos: set[str] = set()
+    for status_filter, env_name, default in (
+        ("opened", "ML_SYNC_MAX_PAGES_OPENED", 10),
+        ("closed", "ML_SYNC_MAX_PAGES_CLOSED", 12),
+    ):
+        lote, _ = ml_claims_search(user_id, status_filter, claim_type=claim_type,
+                                   max_pages=env_int(env_name, default),
+                                   sync_run_id=sync_run_id, trace_id=trace_id)
+        for claim in lote:
+            claim_id = str(claim.get("id") or "")
+            if claim_id and claim_id not in vistos:
+                vistos.add(claim_id)
+                claims.append(claim)
+    return claims
+
+
+def sync_ml_completo(user_id: str, sync_run_id: int, trace_id: str) -> dict:
+    """
+    Popula a tabela `devolucoes` a partir do ML (abertos + fechados).
+
+    É o par do refresh_ml_classification_cache: aquele monta a fila (cache de
+    classificação), este materializa a devolução em si — que é de onde saem o
+    feed, o checklist, a contestação e o financeiro. Sem rodar este, a tabela
+    `devolucoes` fica vazia e metade da tela não tem o que mostrar.
+    """
+    started = perf_counter()
+    claims = all_ml_claims(user_id, sync_run_id=sync_run_id, trace_id=trace_id)
+    add_ml_trace_event(trace_id, sync_run_id, "claims_completo_encontrados",
+                       details={"total": len(claims)}, started_at=started)
+
+    itens: list[dict] = []
+    erros: list[str] = []
+    build_started = perf_counter()
+    with ThreadPoolExecutor(max_workers=ml_worker_count("ML_SYNC_MANUAL_WORKERS", 4)) as ex:
+        futures = {ex.submit(build_ml_devolucao, c, sync_run_id): c for c in claims}
+        for future in as_completed(futures):
+            claim = futures[future]
+            try:
+                item = future.result()
+                item["ml_ativo"] = 1
+                itens.append(item)
+            except Exception as exc:
+                erros.append(f"{claim.get('id')}: {exc}")
+                add_ml_reconciliation_diff(sync_run_id, "processamento_claim_completo",
+                                           "erro", str(claim.get("id") or ""), str(exc))
+    add_ml_trace_event(trace_id, sync_run_id, "claims_completo_processados",
+                       status="ok" if not erros else "partial",
+                       details={"processados": len(itens), "erros": len(erros)},
+                       started_at=build_started)
+
+    # Serial de propósito: o upsert casa por ml_claim_id e duas threads no mesmo
+    # claim furariam o índice único parcial.
+    criadas = atualizadas = 0
+    for item in itens:
+        try:
+            if upsert_ml_devolucao(item) == "created":
+                criadas += 1
+            else:
+                atualizadas += 1
+        except Exception as exc:
+            erros.append(f"upsert {item.get('ml_claim_id')}: {exc}")
+
+    resumo = resumo_from_database()
+    resumo["fonte"] = "mercado_livre_completo"
+    result = {
+        "duracao_ms": int((perf_counter() - started) * 1000),
+        "encontrados": len(claims), "processados": len(itens),
+        "criadas": criadas, "atualizadas": atualizadas,
+        "erros": erros[:10], "total_erros": len(erros), "resumo": resumo,
+    }
+    add_ml_trace_event(trace_id, sync_run_id, "sync_completo_finish",
+                       status="ok" if not erros else "partial", details=result,
                        started_at=started)
     return result
 
