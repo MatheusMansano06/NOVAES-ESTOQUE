@@ -62,6 +62,7 @@ from app.handlers_devolucoes import (
     sincronizar_ml as dev_sincronizar_ml,
     sincronizar_ml_completo as dev_sincronizar_ml_completo,
     sync_diagnostico as dev_sync_diagnostico,
+    sync_status as dev_sync_status,
     sync_trace as dev_sync_trace,
     sync_trace_ultimo as dev_sync_trace_ultimo,
 )
@@ -5627,6 +5628,7 @@ routes = [
     Route("/api/devolucoes/sincronizar-ml", dev_sincronizar_ml, methods=["POST"]),
     Route("/api/devolucoes/sincronizar-ml-completo", dev_sincronizar_ml_completo, methods=["POST"]),
     Route("/api/devolucoes/sync-diagnostico", dev_sync_diagnostico, methods=["GET"]),
+    Route("/api/devolucoes/sync-status/{sync_run_id:int}", dev_sync_status, methods=["GET"]),
     Route("/api/devolucoes/sync-trace/ultimo", dev_sync_trace_ultimo, methods=["GET"]),
     Route("/api/devolucoes/sync-trace/{trace_id}", dev_sync_trace, methods=["GET"]),
     Route("/api/devolucoes/historico/incompletos", dev_historico_incompletos, methods=["GET"]),

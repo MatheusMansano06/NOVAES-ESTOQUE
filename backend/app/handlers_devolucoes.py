@@ -14,6 +14,7 @@ Adaptações: jsonify -> JSONResponse, request.args -> request.query_params,
 `<int:item_id>` -> request.path_params, sqlite3 -> SQLAlchemy (devolucoes_sync).
 """
 
+import asyncio
 import json
 from typing import Optional
 
@@ -56,6 +57,23 @@ def _ml_pronto() -> Optional[str]:
     """Devolve o user_id do ML, ou None se a integração não estiver configurada."""
     user_id = str(getattr(ml, "user_id", "") or "").strip()
     return user_id or None
+
+
+# Um sync roda no executor, então um restart do processo (deploy, crash) deixa a
+# run em 'running' para sempre. Sem este teto, uma run órfã trancaria o botão com
+# 409 até alguém mexer no banco. 40min: o pior caso medido foi ~14min.
+SYNC_ORFAO_MINUTOS = 40
+
+
+def _sync_em_curso(tipo: str) -> Optional[int]:
+    """id da sync_run viva deste tipo, ignorando as órfãs de processo morto."""
+    row = _linha("""
+        SELECT id FROM ml_sync_runs
+        WHERE tipo = :t AND status = 'running'
+          AND datetime(iniciado_em) > datetime('now', :janela)
+        ORDER BY id DESC LIMIT 1
+    """, {"t": tipo, "janela": f"-{SYNC_ORFAO_MINUTOS} minutes"})
+    return int(row["id"]) if row else None
 
 
 # ------------------------------------------------------------------ listagem
@@ -259,38 +277,13 @@ async def resumo_financeiro(request: Request):
 
 # ------------------------------------------------------------------- sync
 
-async def sincronizar_ml(request: Request):
-    """
-    Reconstrói o cache de classificação a partir do ML e atualiza mediações.
-
-    Todo o passo a passo vai para ml_trace_events sob um trace_id — é como se
-    diagnostica um sync que veio torto, via /sync-trace/{trace_id}.
-    """
+def _rodar_sync_rapido(user_id: str, sync_run_id: int, trace_id: str) -> None:
+    """Corpo do sync da fila, fora do event loop (chamado em threadpool)."""
     from time import perf_counter
-    sync_run_id = 0
-    trace_id = novo_trace_id()
     sync_started = perf_counter()
     try:
-        user_id = _ml_pronto()
-        if not user_id:
-            return _erro("Mercado Livre nao configurado (ML_USER_ID ausente).")
-        sync_run_id = start_ml_sync_run("classification_cache",
-                                        {"user_id": user_id, "trace_id": trace_id})
-        add_ml_trace_event(trace_id, sync_run_id, "sync_start", details={
-            "tipo": "classification_cache", "user_id": user_id,
-            "max_pages": env_int("ML_LIVE_QUEUE_MAX_PAGES", 3),
-            "closed_returns_pages": env_int("ML_LIVE_QUEUE_CLOSED_RETURNS_PAGES", 2),
-            "closed_mediations_pages": env_int("ML_LIVE_QUEUE_CLOSED_MEDIATIONS_PAGES", 5),
-            "sort": "last_updated:desc",
-            "workers": ml_worker_count("ML_LIVE_QUEUE_WORKERS", 4),
-        })
-        # run_in_threadpool: o refresh é síncrono e leva minutos. Chamado direto
-        # de um handler async ele prende o event loop e o app INTEIRO para de
-        # responder enquanto o sync roda — não só esta rota.
-        cache_result = await run_in_threadpool(
-            refresh_ml_classification_cache, user_id, sync_run_id, trace_id)
-        mediations_result = await run_in_threadpool(
-            refresh_local_mediations, sync_run_id, trace_id)
+        cache_result = refresh_ml_classification_cache(user_id, sync_run_id, trace_id)
+        refresh_local_mediations(sync_run_id, trace_id)
         resumo = cache_result["resumo"]
         resumo["fonte"] = "mercado_livre_cache_classificacao"
         add_ml_trace_event(trace_id, sync_run_id, "summary_database", details={
@@ -306,57 +299,53 @@ async def sincronizar_ml(request: Request):
         add_ml_trace_event(trace_id, sync_run_id, "sync_finish",
                            status="success" if not cache_result["erros"] else "partial",
                            details=cache_result, started_at=sync_started)
-
-        breakdown = {}
-        for bucket in ["para_revisao", "para_retirar", "outros_problemas", "fora_da_fila", "erro"]:
-            r = _linha("SELECT COUNT(*) as cnt FROM ml_claim_classifications "
-                       "WHERE active = 1 AND bucket = :b", {"b": bucket})
-            breakdown[bucket] = int((r or {}).get("cnt") or 0)
-
-        total_declarado_ml = sum(int(v or 0) for v in cache_result["declarados"].values())
-        total_found = sum(breakdown.get(b, 0) for b in BUCKETS_VISIVEIS)
-
-        return JSONResponse({
-            "mensagem": "Sincronizacao concluida",
-            "sync_run_id": sync_run_id, "trace_id": trace_id,
-            "total_declarado_ml": total_declarado_ml,
-            "total": resumo["total"], "criadas": 0,
-            "atualizadas": cache_result["cache_misses"],
-            "erros": cache_result["erros"], "resumo": resumo,
-            "mediacoes_monitoradas": mediations_result,
-            "debug": {
-                **{b: breakdown.get(b, 0) for b in
-                   ("para_revisao", "para_retirar", "outros_problemas", "fora_da_fila")},
-                "total_encontrados": cache_result["inspecionados"],
-                "missing_items": total_declarado_ml - total_found,
-                "missing_em_fora_da_fila": breakdown.get("fora_da_fila", 0),
-            },
-        })
     except Exception as exc:
-        if sync_run_id:
-            finish_ml_sync_run(sync_run_id, status="error", total_erros=1,
-                               detalhes={"erro": str(exc)})
-            add_ml_trace_event(trace_id, sync_run_id, "sync_finish", status="error",
-                               details={"erro": str(exc)}, started_at=sync_started)
-        return _erro("Nao foi possivel sincronizar o Mercado Livre", 400, erro=str(exc))
+        finish_ml_sync_run(sync_run_id, status="error", total_erros=1,
+                           detalhes={"erro": str(exc)})
+        add_ml_trace_event(trace_id, sync_run_id, "sync_finish", status="error",
+                           details={"erro": str(exc)}, started_at=sync_started)
 
 
-async def sincronizar_ml_completo(request: Request):
+async def sincronizar_ml(request: Request):
     """
-    Sync pesado: traz TODOS os claims (abertos e fechados) para a tabela
-    `devolucoes`. Leva minutos — o do dia a dia é /sincronizar-ml.
+    Dispara o refresh da fila e volta na hora (202). Ver sincronizar_ml_completo:
+    o proxy do Railway derruba a conexão antes de um sync destes terminar.
+
+    O passo a passo vai para ml_trace_events sob um trace_id — é como se
+    diagnostica um sync que veio torto, via /sync-trace/{trace_id}.
     """
     trace_id = novo_trace_id()
-    sync_run_id = 0
+    user_id = _ml_pronto()
+    if not user_id:
+        return _erro("Mercado Livre nao configurado (ML_USER_ID ausente).")
+
+    em_curso = _sync_em_curso("classification_cache")
+    if em_curso:
+        return JSONResponse({"mensagem": "Ja existe uma atualizacao da fila em andamento",
+                             "sync_run_id": em_curso, "status": "running"},
+                            status_code=409)
+
+    sync_run_id = start_ml_sync_run("classification_cache",
+                                    {"user_id": user_id, "trace_id": trace_id})
+    add_ml_trace_event(trace_id, sync_run_id, "sync_start", details={
+        "tipo": "classification_cache", "user_id": user_id, "modo": "background",
+        "max_pages": env_int("ML_LIVE_QUEUE_MAX_PAGES", 3),
+        "closed_returns_pages": env_int("ML_LIVE_QUEUE_CLOSED_RETURNS_PAGES", 2),
+        "closed_mediations_pages": env_int("ML_LIVE_QUEUE_CLOSED_MEDIATIONS_PAGES", 5),
+        "sort": "last_updated:desc",
+        "workers": ml_worker_count("ML_LIVE_QUEUE_WORKERS", 4),
+    })
+    asyncio.get_running_loop().run_in_executor(
+        None, _rodar_sync_rapido, user_id, sync_run_id, trace_id)
+    return JSONResponse({"mensagem": "Atualizacao da fila iniciada",
+                         "sync_run_id": sync_run_id, "trace_id": trace_id,
+                         "status": "running"}, status_code=202)
+
+
+def _rodar_sync_completo(user_id: str, sync_run_id: int, trace_id: str) -> None:
+    """Corpo do sync completo, já fora do event loop (chamado em threadpool)."""
     try:
-        user_id = _ml_pronto()
-        if not user_id:
-            return _erro("Mercado Livre nao configurado (ML_USER_ID ausente).")
-        sync_run_id = start_ml_sync_run("completo", {"user_id": user_id, "trace_id": trace_id})
-        add_ml_trace_event(trace_id, sync_run_id, "sync_start",
-                           details={"tipo": "completo", "user_id": user_id})
-        # Idem sincronizar_ml: bloqueante por minutos, fora do event loop.
-        resultado = await run_in_threadpool(sync_ml_completo, user_id, sync_run_id, trace_id)
+        resultado = sync_ml_completo(user_id, sync_run_id, trace_id)
         finish_ml_sync_run(
             sync_run_id,
             status="success" if not resultado["erros"] else "partial",
@@ -365,14 +354,52 @@ async def sincronizar_ml_completo(request: Request):
             total_processado=resultado["processados"],
             total_erros=resultado["total_erros"],
             detalhes={"trace_id": trace_id, **resultado})
-        return JSONResponse({"mensagem": "Sincronizacao completa concluida",
-                             "sync_run_id": sync_run_id, "trace_id": trace_id,
-                             **resultado})
     except Exception as exc:
-        if sync_run_id:
-            finish_ml_sync_run(sync_run_id, status="error", total_erros=1,
-                               detalhes={"erro": str(exc)})
-        return _erro("Nao foi possivel sincronizar o Mercado Livre", 400, erro=str(exc))
+        finish_ml_sync_run(sync_run_id, status="error", total_erros=1,
+                           detalhes={"erro": str(exc), "trace_id": trace_id})
+
+
+async def sincronizar_ml_completo(request: Request):
+    """
+    Dispara o sync pesado e volta na hora (202) — NÃO espera terminar.
+
+    Ele leva ~5min e o proxy do Railway derruba a conexão antes disso: o sync
+    terminava certo no servidor, mas o navegador recebia "upstream error" (texto
+    puro do gateway) e o operador via um erro no lugar do sucesso. Agora a rota
+    só agenda; quem acompanha é /sync-status/{sync_run_id}.
+    """
+    trace_id = novo_trace_id()
+    user_id = _ml_pronto()
+    if not user_id:
+        return _erro("Mercado Livre nao configurado (ML_USER_ID ausente).")
+
+    em_curso = _sync_em_curso("completo")
+    if em_curso:
+        return JSONResponse({"mensagem": "Ja existe uma sincronizacao completa em andamento",
+                             "sync_run_id": em_curso, "status": "running"},
+                            status_code=409)
+
+    sync_run_id = start_ml_sync_run("completo", {"user_id": user_id, "trace_id": trace_id})
+    add_ml_trace_event(trace_id, sync_run_id, "sync_start",
+                       details={"tipo": "completo", "user_id": user_id, "modo": "background"})
+    asyncio.get_running_loop().run_in_executor(
+        None, _rodar_sync_completo, user_id, sync_run_id, trace_id)
+    return JSONResponse({"mensagem": "Sincronizacao completa iniciada",
+                         "sync_run_id": sync_run_id, "trace_id": trace_id,
+                         "status": "running"}, status_code=202)
+
+
+async def sync_status(request: Request):
+    """Progresso de uma sync_run — o cliente faz polling aqui enquanto roda."""
+    run_id = int(request.path_params["sync_run_id"])
+    row = _linha("SELECT * FROM ml_sync_runs WHERE id = :i", {"i": run_id})
+    if not row:
+        return _erro("Sincronizacao nao encontrada", 404)
+    try:
+        row["detalhes"] = json.loads(row.get("detalhes") or "{}")
+    except json.JSONDecodeError:
+        row["detalhes"] = {}
+    return JSONResponse(row)
 
 
 async def sync_diagnostico(request: Request):

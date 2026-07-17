@@ -140,12 +140,12 @@ export function Devolucoes() {
   const [resumo, setResumo] = useState<Resumo | null>(null)
   const [painelDados, setPainelDados] = useState<Painel | null>(null)
   const [carregando, setCarregando] = useState(true)
-  const [sincronizando, setSincronizando] = useState<'' | 'rapido' | 'completo'>('')
-  const [feedback, setFeedback] = useState('')
+  const [sincAutomatico, setSincAutomatico] = useState(true)
   const [erro, setErro] = useState('')
   const [busca, setBusca] = useState('')
   const [painel, setPainel] = useState<PainelFlutuante>(null)
   const dialogRef = useRef<HTMLDialogElement>(null)
+  const syncRodouRef = useRef(false)
 
   /** Só o que o painel mostra: contadores + buckets. Poucos KB, abre instantâneo. */
   const carregar = useCallback(async () => {
@@ -198,6 +198,30 @@ export function Devolucoes() {
 
   useEffect(() => { carregar() }, [carregar])
 
+  // Sync automático em background ao abrir (apenas uma vez)
+  useEffect(() => {
+    if (syncRodouRef.current) return
+    syncRodouRef.current = true
+
+    const rodarSync = async () => {
+      try {
+        const r = await fetch(`${API_BASE}/api/devolucoes/sincronizar-ml`, { method: 'POST' })
+        if (r.ok || r.status === 202) {
+          const d = await r.json()
+          // Aguarda o sync terminar
+          if (d.sync_run_id) {
+            await acompanharSync(d.sync_run_id)
+          }
+        }
+      } catch { /* rede falhou, segue com cache */ }
+      finally {
+        setSincAutomatico(false)
+      }
+    }
+
+    rodarSync()
+  }, [])
+
   useEffect(() => {
     const d = dialogRef.current
     if (!d) return
@@ -207,28 +231,25 @@ export function Devolucoes() {
     if (painel && painel.tipo !== 'bucket') carregarLista()
   }, [painel, carregarLista])
 
-  const sincronizar = async (modo: 'rapido' | 'completo') => {
-    setSincronizando(modo)
-    setErro('')
-    setFeedback(modo === 'completo'
-      ? 'Trazendo todas as devoluções do ML (abertas e fechadas). Leva alguns minutos…'
-      : 'Atualizando a fila no Mercado Livre…')
-    try {
-      const rota = modo === 'completo'
-        ? '/api/devolucoes/sincronizar-ml-completo'
-        : '/api/devolucoes/sincronizar-ml'
-      const r = await fetch(`${API_BASE}${rota}`, { method: 'POST' })
-      const d = await r.json()
-      if (!r.ok) throw new Error(d.erro || d.mensagem || 'Falha ao sincronizar')
-      setFeedback(modo === 'completo'
-        ? `Pronto: ${d.criadas ?? 0} criadas, ${d.atualizadas ?? 0} atualizadas.`
-        : `Fila atualizada: ${d.resumo?.total ?? 0} na fila.`)
-      await carregar()
-    } catch (e) {
-      setErro(String(e instanceof Error ? e.message : e))
-      setFeedback('')
-    } finally {
-      setSincronizando('')
+  /** Polling do progresso — a conexão do POST não sobrevive ao sync inteiro. */
+  const acompanharSync = async (syncRunId: number): Promise<void> => {
+    if (!syncRunId) return
+    const inicio = Date.now()
+    const LIMITE_MS = 30 * 60 * 1000
+    while (Date.now() - inicio < LIMITE_MS) {
+      await new Promise(res => setTimeout(res, 4000))
+      try {
+        const r = await fetch(`${API_BASE}/api/devolucoes/sync-status/${syncRunId}`,
+                              { cache: 'no-store' })
+        if (!r.ok) continue
+        const run = await r.json()
+        if (run.status !== 'running') {
+          // Sync terminou (sucesso ou erro); recarrega tudo
+          await carregar()
+          setListaCarregada(false)
+          return
+        }
+      } catch { /* rede oscilou; tenta de novo */ }
     }
   }
 
@@ -396,6 +417,7 @@ export function Devolucoes() {
               <p className="eyebrow">Entrada de devolucao</p>
               <h1>Leia ou digite o ID do pedido</h1>
               <span>Use a pistola de QR code/codigo de barras ou digite o numero manualmente.</span>
+              {sincAutomatico && <small style={{ display: 'block', marginTop: '8px', color: '#666' }}>🔄 Sincronizando com o Mercado Livre…</small>}
             </div>
             <div className="order-entry-actions">
               <form className="search-pill-form" onSubmit={buscarPedido}>
@@ -405,18 +427,9 @@ export function Devolucoes() {
                        placeholder="Pedido, pacote ou rastreio" autoFocus />
                 <button type="submit">Buscar venda</button>
               </form>
-              <button type="button" className="update-ml-button"
-                      onClick={() => sincronizar('rapido')} disabled={!!sincronizando}>
-                {sincronizando === 'rapido' ? 'Atualizando…' : 'Atualizar ML'}
-              </button>
-              <button type="button" className="update-ml-button"
-                      onClick={() => sincronizar('completo')} disabled={!!sincronizando}
-                      title="Traz todas as devoluções (abertas e fechadas) do ML para o banco. Leva minutos.">
-                {sincronizando === 'completo' ? 'Sincronizando…' : 'Sincronizar tudo'}
-              </button>
             </div>
-            {(feedback || erro) && (
-              <div className="import-feedback">{erro ? `⚠️ ${erro}` : feedback}</div>
+            {erro && (
+              <div className="import-feedback">⚠️ {erro}</div>
             )}
           </section>
 

@@ -1172,12 +1172,16 @@ def sync_ml_completo(user_id: str, sync_run_id: int, trace_id: str) -> dict:
         except Exception as exc:
             erros.append(f"upsert {item.get('ml_claim_id')}: {exc}")
 
+    # limite=0: aqui é o lugar de varrer todas as mediações, sem lote.
+    mediacoes = refresh_local_mediations(sync_run_id, trace_id, limite=0)
+
     resumo = resumo_from_database()
     resumo["fonte"] = "mercado_livre_completo"
     result = {
         "duracao_ms": int((perf_counter() - started) * 1000),
         "encontrados": len(claims), "processados": len(itens),
         "criadas": criadas, "atualizadas": atualizadas,
+        "mediacoes": mediacoes,
         "erros": erros[:10], "total_erros": len(erros), "resumo": resumo,
     }
     add_ml_trace_event(trace_id, sync_run_id, "sync_completo_finish",
@@ -1186,27 +1190,62 @@ def sync_ml_completo(user_id: str, sync_run_id: int, trace_id: str) -> dict:
     return result
 
 
-def refresh_local_mediations(sync_run_id: int, trace_id: str) -> dict:
-    """Reconsulta os claims em mediação para captar o desfecho."""
+def refresh_local_mediations(sync_run_id: int, trace_id: str,
+                             limite: Optional[int] = None) -> dict:
+    """
+    Reconsulta os claims em mediação para captar o desfecho.
+
+    Duas defesas contra o custo, porque a escala mudou: enquanto a tabela
+    `devolucoes` ficava vazia isto era instantâneo (não havia o que monitorar);
+    com ela populada são ~840 claims, e cada um custa várias chamadas ao ML
+    (claim + returns + shipments).
+
+    1) A busca vai em paralelo. O upsert fica serial de propósito — casa por
+       ml_claim_id e duas threads no mesmo claim furariam o índice único.
+    2) Só um LOTE por rodada, os mais desatualizados primeiro. Reconsultar os
+       840 a cada clique fazia o "Atualizar ML" levar 20+ minutos para reler,
+       na quase totalidade, devolução FULL que não mudou. Em lotes, cada clique
+       custa segundos e as rodadas do dia cobrem a fila inteira. O sync completo
+       (que é o lugar de varrer tudo) chama isto sem limite.
+    """
     started = perf_counter()
-    tracked = _linhas("""
-        SELECT DISTINCT ml_claim_id FROM devolucoes
+    if limite is None:
+        limite = env_int("ML_MEDIATION_MAX_POR_SYNC", 120)
+    tracked = _linhas(f"""
+        SELECT ml_claim_id FROM devolucoes
         WHERE ml_claim_id IS NOT NULL AND TRIM(ml_claim_id) <> ''
           AND (status IN ('aguardando_plataforma','contestacao_aberta','divergencia_encontrada',
                           'aprovado','parcial','reprovado')
                OR COALESCE(mediacao_mensagem, '') <> '')
-    """)
+        GROUP BY ml_claim_id
+        ORDER BY MIN(COALESCE(ultima_sincronizacao_ml, '')) ASC
+        {'LIMIT :lim' if limite > 0 else ''}
+    """, {"lim": limite} if limite > 0 else None)
     claim_ids = [str(r["ml_claim_id"]) for r in tracked if r["ml_claim_id"]]
-    updated = 0
     errors: list[str] = []
-    for claim_id in claim_ids:
+    itens: list[dict] = []
+
+    def buscar(claim_id: str) -> dict:
+        return build_ml_devolucao(ml_get(f"/post-purchase/v1/claims/{claim_id}"), sync_run_id)
+
+    with ThreadPoolExecutor(max_workers=ml_worker_count("ML_MEDIATION_WORKERS", 4)) as ex:
+        futures = {ex.submit(buscar, cid): cid for cid in claim_ids}
+        for future in as_completed(futures):
+            try:
+                itens.append(future.result())
+            except Exception as exc:
+                errors.append(f"{futures[future]}: {exc}")
+
+    updated = 0
+    for item in itens:
         try:
-            claim = ml_get(f"/post-purchase/v1/claims/{claim_id}")
-            upsert_ml_devolucao(build_ml_devolucao(claim, sync_run_id))
+            upsert_ml_devolucao(item)
             updated += 1
         except Exception as exc:
-            errors.append(f"{claim_id}: {exc}")
-    result = {"monitorados": len(claim_ids), "atualizados": updated, "erros": errors[:10]}
+            errors.append(f"upsert {item.get('ml_claim_id')}: {exc}")
+
+    result = {"monitorados": len(claim_ids), "atualizados": updated,
+              "limite_lote": limite, "erros": errors[:10]}
     add_ml_trace_event(trace_id, sync_run_id, "mediation_tracking_refresh",
                        status="ok" if not errors else "partial", details=result,
                        started_at=started)
