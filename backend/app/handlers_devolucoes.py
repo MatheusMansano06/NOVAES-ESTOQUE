@@ -330,7 +330,8 @@ async def bipar_chegada(request: Request):
     # O operador bipa a ETIQUETA (shipment_id, ex.: 47533782341). Também casamos
     # pedido/pacote/order_ids e o tracking (MEL<shipment_id>...) via LIKE.
     row = _linha("""
-        SELECT claim_id, pedido_id, produto_nome, produto_imagem, recebido_em
+        SELECT claim_id, pedido_id, produto_nome, produto_imagem, recebido_em,
+               bucket, shipment_status, shipment_destination
         FROM ml_claim_classifications
         WHERE active = 1
           AND (pedido_id = :c OR pack_id = :c OR shipment_id = :c
@@ -338,11 +339,14 @@ async def bipar_chegada(request: Request):
         LIMIT 1
     """, {"c": codigo, "like": f'%"{codigo}"%', "like2": f'%{codigo}%'})
     if not row:
-        return _erro(f"Nenhuma devolução na fila bate com o código {codigo}.", 404)
+        return _erro(f"Nenhuma devolução no sistema bate com o código {codigo}.", 404)
+    situacao = {"bucket": row.get("bucket"),
+                "shipment_status": row.get("shipment_status"),
+                "shipment_destination": row.get("shipment_destination")}
     if row.get("recebido_em"):
         return JSONResponse({"mensagem": "Este item já foi bipado.", "ja_recebido": True,
                              "claim_id": row["claim_id"],
-                             "produto_nome": row.get("produto_nome")})
+                             "produto_nome": row.get("produto_nome"), **situacao})
 
     quando = now_iso()
     _exec("UPDATE ml_claim_classifications SET recebido_em = :d WHERE claim_id = :c",
@@ -351,7 +355,7 @@ async def bipar_chegada(request: Request):
                          "claim_id": row["claim_id"],
                          "produto_nome": row.get("produto_nome"),
                          "produto_imagem": row.get("produto_imagem"),
-                         "recebido_em": quando})
+                         "recebido_em": quando, **situacao})
 
 
 # ------------------------------------------- diff vs ML Seller Center (debug)

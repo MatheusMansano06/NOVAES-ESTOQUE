@@ -169,6 +169,16 @@ def _garantir_colunas_sqlite():
 
 _garantir_colunas_sqlite()
 
+# Preenche shipment_id/tracking das classificações já existentes a partir dos
+# payloads salvos, para a bipagem funcionar em qualquer situação já capturada.
+try:
+    from app.devolucoes_sync import backfill_shipment_ids_from_payloads
+    _n_backfill = backfill_shipment_ids_from_payloads()
+    if _n_backfill:
+        print(f"[DB] shipment_id backfillado em {_n_backfill} classificacao(oes)")
+except Exception as _exc:  # nunca derruba o boot por causa do backfill
+    print(f"[DB] backfill de shipment_id falhou (segue sem): {_exc}")
+
 OPERADORES_PADRAO = ["Rafael", "Wellington", "Cris", "Cristofer", "Nathan", "Luisa"]
 MASTER_PIN_PADRAO = os.getenv("MASTER_PIN", "1234")
 

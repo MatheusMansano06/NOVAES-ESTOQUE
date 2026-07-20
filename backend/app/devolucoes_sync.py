@@ -468,6 +468,51 @@ def save_claim_classification(item: dict) -> None:
     })
 
 
+def backfill_shipment_ids_from_payloads() -> int:
+    """
+    Preenche shipment_id/tracking_number nas classificações a partir dos payloads
+    de return JÁ SALVOS (ml_raw_payloads) — sem chamar o ML.
+
+    É o que faz a BIPAGEM funcionar em QUALQUER situação, não só nos claims que o
+    sync re-inspecionou na janela recente: o operador bipa a etiqueta de qualquer
+    devolução do universo pós-venda e ela é encontrada. Idempotente — só toca
+    linhas ainda vazias; roda no boot e sai barato quando não há mais pendência.
+    """
+    db = SessionLocal()
+    try:
+        pendentes = db.execute(text(
+            "SELECT COUNT(*) FROM ml_claim_classifications "
+            "WHERE active = 1 AND COALESCE(shipment_id, '') = ''")).scalar() or 0
+        if not pendentes:
+            return 0
+        # Mais novo primeiro: se um claim reenviou a devolução, vale a etiqueta atual.
+        rows = db.execute(text(
+            "SELECT claim_id, payload FROM ml_raw_payloads "
+            "WHERE resource_type = 'return' AND COALESCE(claim_id, '') <> '' "
+            "ORDER BY id DESC")).fetchall()
+        n = 0
+        for claim_id, payload in rows:
+            try:
+                shs = (json.loads(payload or "{}") or {}).get("shipments") or []
+            except (json.JSONDecodeError, TypeError):
+                continue
+            if not shs:
+                continue
+            sid = str((shs[0] or {}).get("shipment_id") or "")
+            trk = str((shs[0] or {}).get("tracking_number") or "")
+            if not sid and not trk:
+                continue
+            res = db.execute(text(
+                "UPDATE ml_claim_classifications SET shipment_id = :s, tracking_number = :t "
+                "WHERE claim_id = :c AND COALESCE(shipment_id, '') = ''"),
+                {"s": sid, "t": trk, "c": str(claim_id)})
+            n += res.rowcount or 0
+        db.commit()
+        return n
+    finally:
+        db.close()
+
+
 # ----------------------------------------------------------- fila ao vivo
 
 def inspect_claim_for_queue(claim: dict, *, use_cache: bool = True) -> tuple[dict, bool]:
