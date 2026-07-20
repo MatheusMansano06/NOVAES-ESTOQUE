@@ -285,21 +285,26 @@ _HOJE_BRT = "date('now', '-3 hours')"
 
 async def chegando_hoje(request: Request):
     """
-    Fila do barracão: devoluções cuja previsão de chegada é HOJE e que ainda não
-    foram bipadas. A data vem do ML (lead_time.estimated_delivery_time.date); só
-    contam as que vêm para o endereço do vendedor (não as que voltam pro FULL).
+    Fila do barracão: devoluções a caminho do endereço do vendedor que ainda não
+    foram bipadas — o operador bipa conforme cada uma chega fisicamente.
+
+    O ML NÃO entrega uma data de previsão barata: o `lead_time` vem null no
+    payload do retorno (ficaria em /shipments/{id}, uma chamada extra por item).
+    Então a esteira não filtra por "hoje" — mostra o pool que está vindo
+    (shipment shipped/delivered, destino seller_address), ordenado pelo prazo.
+    Só ficam de fora as que voltam pro FULL (destino warehouse).
     """
-    rows = _linhas(f"""
+    rows = _linhas("""
         SELECT claim_id, pedido_id, pack_id, order_ids, produto_nome, produto_imagem,
                valor_pago, ml_tipo_logistica, motivo_label, previsao_chegada,
-               shipment_status, shipment_destination
+               shipment_status, shipment_destination, due_date
         FROM ml_claim_classifications
         WHERE active = 1
           AND COALESCE(recebido_em, '') = ''
-          AND COALESCE(previsao_chegada, '') <> ''
           AND shipment_destination = 'seller_address'
-          AND date(datetime(previsao_chegada, '-3 hours')) = {_HOJE_BRT}
-        ORDER BY produto_nome
+          AND shipment_status IN ('shipped', 'delivered')
+          AND bucket IN ('para_retirar', 'para_revisao')
+        ORDER BY CASE WHEN COALESCE(due_date, '') = '' THEN 1 ELSE 0 END, due_date ASC
     """)
     for r in rows:
         try:

@@ -584,15 +584,15 @@ export function Devolucoes() {
           <section className="order-entry-panel esteira-panel">
             <div className="esteira-top">
               <div className="esteira-head">
-                <p className="eyebrow">Chegando hoje no barracão</p>
+                <p className="eyebrow">A caminho do barracão</p>
                 <h1 className="esteira-title">Bipe as devoluções que chegaram</h1>
-                <span>Cruze a venda recebida com a devolução prevista e dê entrada em segundos.</span>
+                <span>Todas as devoluções vindo para você. Bipe cada uma conforme chega para dar entrada.</span>
                 {sincAutomatico && <small className="esteira-sync">Sincronizando com o Mercado Livre…</small>}
               </div>
               <div className="esteira-stats">
                 <div className="esteira-stat big">
                   <strong>{carregandoChegando ? '—' : chegandoRestante}</strong>
-                  <span>a bipar hoje</span>
+                  <span>a bipar</span>
                 </div>
                 <div className="esteira-stat ok">
                   <strong>{carregandoChegando ? '—' : recebidosHoje}</strong>
@@ -631,8 +631,8 @@ export function Devolucoes() {
               ) : !chegando.length ? (
                 <div className="esteira-vazio">
                   <span className="esteira-vazio-icone" aria-hidden="true">📦</span>
-                  <strong>Nada previsto para chegar hoje</strong>
-                  <small>Assim que o ML atualizar as previsões, elas aparecem aqui.</small>
+                  <strong>Nenhuma devolução a caminho</strong>
+                  <small>Quando houver devoluções vindo para o seu endereço, elas aparecem aqui para bipar.</small>
                 </div>
               ) : chegando.map((c, i) => (
                 <article key={c.claim_id} className={`esteira-item ${c.recebido ? 'recebido' : ''}`}>
