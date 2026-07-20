@@ -41,10 +41,10 @@ API_BASE = "https://api.mercadolibre.com"
 # --- Versões das regras (batem com o original; servem de carimbo no cache) ---
 ML_CLASSIFIER_VERSION = "actions-v27"
 ML_CLOSED_TOUCH_GAP_HOURS = 24
-# v2: passou a capturar previsao_chegada (lead_time). O bump força o próximo
-# sync a re-inspecionar os claims cacheados e preencher a data — sem ele, a
-# esteira "Chegando hoje" nasceria vazia até cada claim mudar de status.
-ML_ENRICHMENT_VERSION = "enrich-v2"
+# v3: passou a capturar shipment_id + tracking_number (a etiqueta que o operador
+# BIPA no barracão). O bump força o sync a re-inspecionar os claims cacheados e
+# preencher esses campos — sem ele, a bipagem por shipment_id não acha nada.
+ML_ENRICHMENT_VERSION = "enrich-v3"
 
 MOTIVO_LABELS = {
     "PDD9939": "O comprador se arrependeu",

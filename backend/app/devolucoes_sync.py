@@ -227,6 +227,7 @@ def ml_return_shipments(retorno: Optional[dict]) -> list[dict]:
 
 _RETURN_INFO_VAZIO = {
     "return_id": "", "status": "", "shipment_status": "", "shipment_destination": "",
+    "shipment_id": "", "tracking_number": "",
     "estimated_arrival": "",
     "date_created": "", "refund_at": "", "seller_status": "", "seller_reason": "",
     "product_condition": "", "orders": [], "related_entities": [],
@@ -252,6 +253,8 @@ def claim_return_info(claim_id) -> dict:
                 "status": str((retorno or {}).get("status") or "").lower(),
                 "shipment_status": str((shipment or {}).get("status") or "").lower(),
                 "shipment_destination": str(((shipment or {}).get("destination") or {}).get("name") or "").lower(),
+                "shipment_id": str((shipment or {}).get("shipment_id") or ""),
+                "tracking_number": str((shipment or {}).get("tracking_number") or ""),
                 "estimated_arrival": _shipment_estimated_arrival(shipment),
                 "date_created": (retorno or {}).get("date_created") or "",
                 "refund_at": str((retorno or {}).get("refund_at") or "").lower(),
@@ -400,14 +403,14 @@ def save_claim_classification(item: dict) -> None:
         INSERT INTO ml_claim_classifications (
           claim_id, pedido_id, order_ids, status, stage, claim_type, reason_id,
           return_id, return_status, shipment_status, shipment_destination,
-          previsao_chegada,
+          shipment_id, tracking_number, previsao_chegada,
           seller_actions, bucket, regra, last_updated, payload, active, updated_at,
           produto_nome, produto_imagem, valor_pago, taxa_venda, ml_tipo_logistica,
           motivo_label, pack_id, mandatory, due_date, date_created
         ) VALUES (
           :claim_id, :pedido_id, :order_ids, :status, :stage, :claim_type, :reason_id,
           :return_id, :return_status, :shipment_status, :shipment_destination,
-          :previsao_chegada,
+          :shipment_id, :tracking_number, :previsao_chegada,
           :seller_actions, :bucket, :regra, :last_updated, :payload, 1, :updated_at,
           :produto_nome, :produto_imagem, :valor_pago, :taxa_venda, :ml_tipo_logistica,
           :motivo_label, :pack_id, :mandatory, :due_date, :date_created
@@ -419,6 +422,8 @@ def save_claim_classification(item: dict) -> None:
           return_id = excluded.return_id, return_status = excluded.return_status,
           shipment_status = excluded.shipment_status,
           shipment_destination = excluded.shipment_destination,
+          shipment_id = excluded.shipment_id,
+          tracking_number = excluded.tracking_number,
           previsao_chegada = excluded.previsao_chegada,
           seller_actions = excluded.seller_actions, bucket = excluded.bucket,
           regra = excluded.regra, last_updated = excluded.last_updated,
@@ -441,6 +446,8 @@ def save_claim_classification(item: dict) -> None:
         "return_status": str(item.get("return_status") or ""),
         "shipment_status": str(item.get("shipment_status") or ""),
         "shipment_destination": str(item.get("shipment_destination") or ""),
+        "shipment_id": str(item.get("shipment_id") or ""),
+        "tracking_number": str(item.get("tracking_number") or ""),
         "previsao_chegada": str(item.get("previsao_chegada") or ""),
         "seller_actions": json_dumps(item.get("seller_actions") or []),
         "bucket": str(item.get("bucket") or "fora_da_fila"),
@@ -497,6 +504,8 @@ def inspect_claim_for_queue(claim: dict, *, use_cache: bool = True) -> tuple[dic
         "return_status": return_info.get("status"),
         "shipment_status": return_info.get("shipment_status"),
         "shipment_destination": return_info.get("shipment_destination"),
+        "shipment_id": return_info.get("shipment_id"),
+        "tracking_number": return_info.get("tracking_number"),
         "previsao_chegada": return_info.get("estimated_arrival"),
         "seller_actions": action_names(detail),
         "bucket": bucket,

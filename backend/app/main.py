@@ -133,10 +133,10 @@ def _garantir_colunas_sqlite():
             # Sem esta migração a tabela em prod fica sem a coluna e o sync dá 500.
             colunas_clf = {row[1] for row in conn.exec_driver_sql(
                 "PRAGMA table_info(ml_claim_classifications)").fetchall()}
-            for nome_col in ("previsao_chegada", "recebido_em"):
+            for nome_col in ("previsao_chegada", "recebido_em", "shipment_id", "tracking_number"):
                 if colunas_clf and nome_col not in colunas_clf:
                     conn.exec_driver_sql(
-                        f"ALTER TABLE ml_claim_classifications ADD COLUMN {nome_col} VARCHAR(40) DEFAULT ''")
+                        f"ALTER TABLE ml_claim_classifications ADD COLUMN {nome_col} VARCHAR(60) DEFAULT ''")
                     print(f"[DB] Coluna ml_claim_classifications.{nome_col} criada")
 
             # As 10 tabelas nascem do create_all(). O que não dá para expressar no

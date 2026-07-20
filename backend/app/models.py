@@ -824,6 +824,10 @@ class MLClaimClassification(Base):
     return_status = Column(String(50), default="")
     shipment_status = Column(String(50), default="")
     shipment_destination = Column(String(50), default="")
+    # ID/etiqueta do envio de devolução — é o número que o operador BIPA no
+    # barracão (a etiqueta do ML). tracking_number costuma ser MEL<shipment_id>...
+    shipment_id = Column(String(40), default="", index=True)
+    tracking_number = Column(String(60), default="")
     # Previsão de chegada do envio de devolução (lead_time.estimated_delivery_time.date).
     # É o que alimenta a esteira "Chegando hoje".
     previsao_chegada = Column(String(40), default="")

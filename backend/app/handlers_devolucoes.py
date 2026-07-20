@@ -327,13 +327,16 @@ async def bipar_chegada(request: Request):
     if not codigo:
         return _erro("Informe o código bipado (pedido, pacote ou rastreio).")
 
+    # O operador bipa a ETIQUETA (shipment_id, ex.: 47533782341). Também casamos
+    # pedido/pacote/order_ids e o tracking (MEL<shipment_id>...) via LIKE.
     row = _linha("""
         SELECT claim_id, pedido_id, produto_nome, produto_imagem, recebido_em
         FROM ml_claim_classifications
         WHERE active = 1
-          AND (pedido_id = :c OR pack_id = :c OR order_ids LIKE :like)
+          AND (pedido_id = :c OR pack_id = :c OR shipment_id = :c
+               OR order_ids LIKE :like OR tracking_number LIKE :like2)
         LIMIT 1
-    """, {"c": codigo, "like": f'%"{codigo}"%'})
+    """, {"c": codigo, "like": f'%"{codigo}"%', "like2": f'%{codigo}%'})
     if not row:
         return _erro(f"Nenhuma devolução na fila bate com o código {codigo}.", 404)
     if row.get("recebido_em"):
