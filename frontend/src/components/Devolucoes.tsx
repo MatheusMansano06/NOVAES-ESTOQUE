@@ -81,6 +81,34 @@ interface ChegandoCard {
   recebido?: boolean  // marcado no cliente logo após bipar
 }
 
+/** Fase 3 — quanto vem pro barracão vs pro FULL. */
+interface ResumoChegando {
+  barracao_a_chegar: number
+  barracao_recebido: number
+  full_a_caminho: number
+}
+
+/** Fase 2 — item recebido/bipado, com os campos para filtrar. */
+interface RecebidoItem {
+  claim_id: string
+  pedido_id: string
+  produto_nome: string
+  produto_imagem: string
+  valor_pago: number
+  motivo_label: string
+  bucket: string
+  shipment_status: string
+  ml_tipo_logistica: string
+  logistica: 'full' | 'organica'
+  due_date?: string | null
+  recebido_em: string
+}
+interface RecebidosResp {
+  total: number
+  itens: RecebidoItem[]
+  facetas: { bucket: Record<string, number>; logistica: Record<string, number>; motivo: Record<string, number> }
+}
+
 /** Contadores do painel, já agregados no backend (/api/devolucoes/painel). */
 interface Painel {
   total: number
@@ -159,6 +187,7 @@ type PainelFlutuante =
   | { tipo: 'mediacoes'; titulo: string }
   | { tipo: 'pendencias'; titulo: string }
   | { tipo: 'diff'; titulo: string }
+  | { tipo: 'recebidos'; titulo: string }
   | { tipo: 'bucket'; titulo: string; bucket: Bucket; prazo?: 'urgente' | 'retirar' }
   | null
 
@@ -177,6 +206,10 @@ export function Devolucoes() {
   const [erro, setErro] = useState('')
   const [chegando, setChegando] = useState<ChegandoCard[]>([])
   const [carregandoChegando, setCarregandoChegando] = useState(true)
+  const [resumoChegando, setResumoChegando] = useState<ResumoChegando | null>(null)
+  const [recebidosData, setRecebidosData] = useState<RecebidosResp | null>(null)
+  const [recebidosLoad, setRecebidosLoad] = useState(false)
+  const [filtros, setFiltros] = useState<Set<string>>(new Set())
   const [codigoBip, setCodigoBip] = useState('')
   const [bipMsg, setBipMsg] = useState<{ tipo: 'ok' | 'erro'; texto: string } | null>(null)
   const [busca, setBusca] = useState('')
@@ -194,16 +227,18 @@ export function Devolucoes() {
     setErro('')
     try {
       const buckets: Bucket[] = ['para_revisao', 'para_retirar', 'outros_problemas']
-      const [p, r, ch, ...cs] = await Promise.all([
+      const [p, r, ch, rc, ...cs] = await Promise.all([
         fetch(`${API_BASE}/api/devolucoes/painel`, { cache: 'no-store' }).then(x => x.json()),
         fetch(`${API_BASE}/api/resumo-ml`, { cache: 'no-store' }).then(x => x.json()),
         fetch(`${API_BASE}/api/devolucoes/chegando-hoje`, { cache: 'no-store' }).then(x => x.json()),
+        fetch(`${API_BASE}/api/devolucoes/chegando-resumo`, { cache: 'no-store' }).then(x => x.json()),
         ...buckets.map(b =>
           fetch(`${API_BASE}/api/devolucoes/cards?bucket=${b}`, { cache: 'no-store' }).then(x => x.json())),
       ])
       setPainelDados(p)
       setResumo(r)
       setChegando(Array.isArray(ch?.cards) ? ch.cards : [])
+      setResumoChegando(rc && typeof rc === 'object' ? rc : null)
       setCards({
         para_revisao: cs[0]?.cards || [],
         para_retirar: cs[1]?.cards || [],
@@ -359,6 +394,37 @@ export function Devolucoes() {
     setPainel({ tipo: 'busca', titulo: `Resultado para "${q}"`, termo: q })
   }
 
+  const abrirRecebidos = async () => {
+    setPainel({ tipo: 'recebidos', titulo: 'Recebidos — organizar e filtrar' })
+    setFiltros(new Set())
+    if (recebidosData) return
+    setRecebidosLoad(true)
+    try {
+      const d = await fetch(`${API_BASE}/api/devolucoes/recebidos`, { cache: 'no-store' }).then(x => x.json())
+      setRecebidosData(d)
+    } catch (e) {
+      setErro(String(e instanceof Error ? e.message : e))
+    } finally {
+      setRecebidosLoad(false)
+    }
+  }
+
+  const toggleFiltro = (f: string) =>
+    setFiltros(prev => {
+      const n = new Set(prev)
+      n.has(f) ? n.delete(f) : n.add(f)
+      return n
+    })
+
+  // Urgência derivada do prazo, p/ virar chip filtrável.
+  const urgenciaDe = (due?: string | null): 'vencido' | 'ate3' | 'tranquilo' => {
+    const d = diasAte(due)
+    if (d === null) return 'tranquilo'
+    if (d < 0) return 'vencido'
+    if (d <= 3) return 'ate3'
+    return 'tranquilo'
+  }
+
   const compararSellerCenter = async () => {
     const ids = diffTexto.split(/[^0-9]+/).filter(Boolean)
     if (!ids.length) { setDiffRes(null); return }
@@ -413,8 +479,92 @@ export function Devolucoes() {
     </article>
   )
 
+  const BUCKET_LABEL: Record<string, string> = {
+    para_revisao: 'Para revisão', para_retirar: 'Para retirar',
+    outros_problemas: 'Outros problemas', fora_da_fila: 'Fora da fila',
+  }
+  const URG_LABEL: Record<string, string> = {
+    vencido: 'Vencido', ate3: 'Vence ≤3 dias', tranquilo: 'No prazo',
+  }
+
   const conteudoPainel = () => {
     if (!painel) return null
+    if (painel.tipo === 'recebidos') {
+      if (recebidosLoad && !recebidosData) {
+        return <div className="empty compact"><p>Carregando recebidos…</p></div>
+      }
+      const itens = recebidosData?.itens || []
+      // Filtro: AND entre dimensões, OR dentro da dimensão.
+      const ativos = { log: new Set<string>(), buc: new Set<string>(), urg: new Set<string>() }
+      filtros.forEach(f => {
+        const [dim, val] = f.split(':')
+        if (dim in ativos) (ativos as Record<string, Set<string>>)[dim].add(val)
+      })
+      const passa = (i: RecebidoItem) =>
+        (!ativos.log.size || ativos.log.has(i.logistica)) &&
+        (!ativos.buc.size || ativos.buc.has(i.bucket)) &&
+        (!ativos.urg.size || ativos.urg.has(urgenciaDe(i.due_date)))
+      const filtrados = itens.filter(passa)
+      const chip = (dim: string, val: string, label: string, n?: number) => (
+        <button type="button" key={`${dim}:${val}`}
+                className={`rec-chip ${filtros.has(`${dim}:${val}`) ? 'on' : ''}`}
+                onClick={() => toggleFiltro(`${dim}:${val}`)}>
+          {label}{n != null ? ` (${n})` : ''}
+        </button>
+      )
+      if (!itens.length) {
+        return (
+          <div className="empty compact">
+            <h2>Nada recebido ainda</h2>
+            <p>Assim que você bipar devoluções no barracão, elas aparecem aqui para organizar.</p>
+          </div>
+        )
+      }
+      return (
+        <div className="rec-panel">
+          <div className="rec-filtros">
+            <div className="rec-dim">
+              <span className="rec-dim-label">Logística</span>
+              {chip('log', 'organica', 'Orgânica', recebidosData?.facetas.logistica.organica)}
+              {chip('log', 'full', 'FULL', recebidosData?.facetas.logistica.full)}
+            </div>
+            <div className="rec-dim">
+              <span className="rec-dim-label">Situação</span>
+              {Object.keys(recebidosData?.facetas.bucket || {}).map(b =>
+                chip('buc', b, BUCKET_LABEL[b] || b, recebidosData?.facetas.bucket[b]))}
+            </div>
+            <div className="rec-dim">
+              <span className="rec-dim-label">Urgência</span>
+              {(['vencido', 'ate3', 'tranquilo'] as const).map(u => chip('urg', u, URG_LABEL[u]))}
+            </div>
+            {filtros.size > 0 && (
+              <button type="button" className="rec-limpar" onClick={() => setFiltros(new Set())}>
+                Limpar filtros
+              </button>
+            )}
+          </div>
+          <p className="rec-contagem">{filtrados.length} de {itens.length} recebido(s)</p>
+          <div className="floating-grid">
+            {filtrados.map(i => (
+              <article className="floating-card" key={i.claim_id}>
+                <img src={i.produto_imagem || IMG_VAZIA} alt="" loading="lazy" />
+                <b>#{String(i.pedido_id || i.claim_id).replace(/\D/g, '') || '-'}</b>
+                <strong>{i.produto_nome || '(sem título)'}</strong>
+                <small>
+                  {BUCKET_LABEL[i.bucket] || i.bucket}
+                  {i.logistica === 'full' ? ' · FULL' : ' · Orgânica'}
+                  {i.motivo_label ? ` · ${i.motivo_label}` : ''}
+                  {` · ${money(i.valor_pago)}`}
+                </small>
+                <span className={`rec-urg rec-urg-${urgenciaDe(i.due_date)}`}>
+                  {URG_LABEL[urgenciaDe(i.due_date)]}
+                </span>
+              </article>
+            ))}
+          </div>
+        </div>
+      )
+    }
     if (painel.tipo === 'diff') {
       const linha = (d: DiffItem) => (
         <article className="diff-row" key={d.claim_id}>
@@ -601,8 +751,16 @@ export function Devolucoes() {
                   <strong>{carregandoChegando ? '—' : recebidosHoje}</strong>
                   <span>já recebidas</span>
                 </div>
+                <div className="esteira-stat full">
+                  <strong>{resumoChegando ? resumoChegando.full_a_caminho : '—'}</strong>
+                  <span>a caminho do FULL</span>
+                </div>
               </div>
             </div>
+            <p className="esteira-full-nota">
+              Você bipa só o que chega no barracão. As <b>{resumoChegando?.full_a_caminho ?? 0}</b> do
+              FULL voltam pro Mercado Livre — rastreadas, sem bipar.
+            </p>
 
             <div className="esteira-forms">
               <form className="search-pill-form bip" onSubmit={biparCodigo}>
@@ -681,6 +839,9 @@ export function Devolucoes() {
                     <button type="button" className="summary-link"
                             onClick={() => setPainel({ tipo: 'todas', titulo: 'Todas as devolucoes' })}>
                       Ver todas
+                    </button>
+                    <button type="button" className="summary-link" onClick={abrirRecebidos}>
+                      Recebidos
                     </button>
                     <button type="button" className="summary-link"
                             onClick={() => setPainel({ tipo: 'diff', titulo: 'Conferir vs Seller Center' })}>

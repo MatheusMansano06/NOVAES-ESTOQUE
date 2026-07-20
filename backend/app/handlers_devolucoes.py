@@ -315,6 +315,71 @@ async def chegando_hoje(request: Request):
     return JSONResponse({"total": len(rows), "cards": rows})
 
 
+async def chegando_resumo(request: Request):
+    """
+    Fase 3 — separa a QUANTIDADE A CHEGAR por destino: o que vem pro seu barracão
+    (seller_address, bipável) vs o que volta pro FULL/warehouse do ML (rastreado,
+    não bipado). Amarra no projeto de devolução do FULL.
+    """
+    row = _linha("""
+        SELECT
+          SUM(CASE WHEN shipment_destination = 'seller_address'
+                    AND shipment_status IN ('shipped','delivered')
+                    AND bucket IN ('para_retirar','para_revisao')
+                    AND COALESCE(recebido_em,'') = '' THEN 1 ELSE 0 END) AS barracao,
+          SUM(CASE WHEN shipment_destination = 'seller_address'
+                    AND shipment_status IN ('shipped','delivered')
+                    AND bucket IN ('para_retirar','para_revisao')
+                    AND COALESCE(recebido_em,'') <> '' THEN 1 ELSE 0 END) AS barracao_recebido,
+          SUM(CASE WHEN shipment_destination = 'warehouse'
+                    AND shipment_status IN ('shipped','ready_to_ship') THEN 1 ELSE 0 END) AS full_a_caminho
+        FROM ml_claim_classifications WHERE active = 1
+    """) or {}
+    return JSONResponse({
+        "barracao_a_chegar": int(row.get("barracao") or 0),
+        "barracao_recebido": int(row.get("barracao_recebido") or 0),
+        "full_a_caminho": int(row.get("full_a_caminho") or 0),
+    })
+
+
+# ----------------------------------------------- recebidos filtráveis (Fase 2)
+
+def _full_ou_organica(tipo: Optional[str]) -> str:
+    return "full" if str(tipo or "") == "full_ml" else "organica"
+
+
+async def recebidos(request: Request):
+    """
+    Fase 2 — tudo que foi bipado/recebido, com os campos para o operador FILTRAR
+    (motivo, situação/bucket, logística FULL vs orgânica, urgência por prazo). A
+    filtragem em si é no cliente: o conjunto de recebidos é pequeno e cabe de uma.
+    """
+    rows = _linhas("""
+        SELECT claim_id, pedido_id, produto_nome, produto_imagem, valor_pago,
+               motivo_label, bucket, shipment_status, shipment_destination,
+               ml_tipo_logistica, due_date, recebido_em, mandatory
+        FROM ml_claim_classifications
+        WHERE active = 1 AND COALESCE(recebido_em,'') <> ''
+        ORDER BY recebido_em DESC
+    """)
+    for r in rows:
+        r["logistica"] = _full_ou_organica(r.get("ml_tipo_logistica"))
+    # Facetas para os chips (contagem por dimensão).
+    def conta(chave):
+        acc = {}
+        for r in rows:
+            acc[r.get(chave) or "—"] = acc.get(r.get(chave) or "—", 0) + 1
+        return acc
+    return JSONResponse({
+        "total": len(rows), "itens": rows,
+        "facetas": {
+            "bucket": conta("bucket"),
+            "logistica": conta("logistica"),
+            "motivo": conta("motivo_label"),
+        },
+    })
+
+
 async def bipar_chegada(request: Request):
     """
     Bipagem no barracão: cruza o código lido (venda, pacote ou rastreio) com a

@@ -3737,3 +3737,39 @@ body.meli-page {
   .devolucoes-page .esteira-stats { width: 100%; }
   .devolucoes-page .esteira-stat { flex: 1; }
 }
+
+/* ===================== Fase 3 — FULL vs barracão ===================== */
+.devolucoes-page .esteira-stat.full { background:#fff7ed; border-color:#fdba74; }
+.devolucoes-page .esteira-stat.full strong { color:#ea580c; }
+.devolucoes-page .esteira-full-nota {
+  margin-top: 10px; font-size: 12.5px; color:#64748b;
+  background:#f8fafc; border:1px dashed #e2e8f0; border-radius:8px; padding:8px 12px;
+}
+
+/* ===================== Fase 2 — recebidos filtráveis ===================== */
+.devolucoes-page .rec-filtros {
+  display:flex; flex-direction:column; gap:10px;
+  padding:12px; background:#f8fafc; border:1px solid #e2e8f0; border-radius:10px; margin-bottom:12px;
+}
+.devolucoes-page .rec-dim { display:flex; align-items:center; gap:6px; flex-wrap:wrap; }
+.devolucoes-page .rec-dim-label {
+  font-size:11px; font-weight:800; text-transform:uppercase; color:#94a3b8;
+  min-width:74px; letter-spacing:.03em;
+}
+.devolucoes-page .rec-chip {
+  border:1px solid #cbd5e1; background:#fff; color:#334155;
+  border-radius:999px; padding:5px 12px; font-size:12.5px; font-weight:600; cursor:pointer;
+}
+.devolucoes-page .rec-chip:hover { border-color:#3483fa; }
+.devolucoes-page .rec-chip.on { background:#3483fa; border-color:#3483fa; color:#fff; }
+.devolucoes-page .rec-limpar {
+  align-self:flex-start; border:0; background:none; color:#dc2626; font-size:12px;
+  font-weight:700; cursor:pointer; padding:2px 0;
+}
+.devolucoes-page .rec-contagem { font-size:13px; color:#64748b; margin-bottom:8px; }
+.devolucoes-page .rec-urg {
+  font-size:11px; font-weight:800; padding:2px 8px; border-radius:6px; align-self:flex-start;
+}
+.devolucoes-page .rec-urg-vencido { background:#fee2e2; color:#dc2626; }
+.devolucoes-page .rec-urg-ate3 { background:#fef3c7; color:#b45309; }
+.devolucoes-page .rec-urg-tranquilo { background:#dcfce7; color:#16a34a; }
