@@ -212,6 +212,8 @@ export function Devolucoes() {
   const [filtros, setFiltros] = useState<Set<string>>(new Set())
   const [codigoBip, setCodigoBip] = useState('')
   const [bipMsg, setBipMsg] = useState<{ tipo: 'ok' | 'erro'; texto: string } | null>(null)
+  const [ultimoRecebido, setUltimoRecebido] = useState<
+    { nome: string; img: string; situacao: string; jaRecebido?: boolean } | null>(null)
   const [busca, setBusca] = useState('')
   const [diffTexto, setDiffTexto] = useState('')
   const [diffRes, setDiffRes] = useState<DiffResultado | null>(null)
@@ -361,6 +363,16 @@ export function Devolucoes() {
             produto_imagem: d.produto_imagem || '', valor_pago: 0, motivo_label: '',
             ml_tipo_logistica: '', previsao_chegada: '', recebido: true,
           }, ...prev]
+        })
+        const sit: Record<string, string> = {
+          para_revisao: 'Para revisão', para_retirar: 'Para retirar',
+          outros_problemas: 'Outros problemas', fora_da_fila: 'Recebido',
+        }
+        setUltimoRecebido({
+          nome: d.produto_nome || 'Devolução',
+          img: d.produto_imagem || '',
+          situacao: sit[String(d.bucket || '')] || 'Recebido',
+          jaRecebido: !!d.ja_recebido,
         })
         setBipMsg(d.ja_recebido
           ? { tipo: 'erro', texto: `Já bipado: ${d.produto_nome || 'item'}` }
@@ -747,10 +759,10 @@ export function Devolucoes() {
                   <strong>{carregandoChegando ? '—' : chegandoRestante}</strong>
                   <span>a bipar</span>
                 </div>
-                <div className="esteira-stat ok">
+                <button type="button" className="esteira-stat ok esteira-stat-btn" onClick={abrirRecebidos}>
                   <strong>{carregandoChegando ? '—' : recebidosHoje}</strong>
-                  <span>já recebidas</span>
-                </div>
+                  <span>já recebidas ›</span>
+                </button>
                 <div className="esteira-stat full">
                   <strong>{resumoChegando ? resumoChegando.full_a_caminho : '—'}</strong>
                   <span>a caminho do FULL</span>
@@ -779,7 +791,22 @@ export function Devolucoes() {
                 <button type="submit">Buscar venda</button>
               </form>
             </div>
-            {bipMsg && (
+            {ultimoRecebido && (
+              <div className={`recebido-confirma ${ultimoRecebido.jaRecebido ? 'ja' : ''}`}>
+                <img src={ultimoRecebido.img || IMG_VAZIA} alt="" />
+                <div className="recebido-confirma-info">
+                  <b>{ultimoRecebido.jaRecebido ? '⚠️ Já estava bipada' : '✓ Devolução recebida'}</b>
+                  <strong>{ultimoRecebido.nome}</strong>
+                  <small>{ultimoRecebido.situacao} · entrou em espera de resolução</small>
+                </div>
+                <button type="button" className="recebido-confirma-link" onClick={abrirRecebidos}>
+                  Ver em Recebidos
+                </button>
+                <button type="button" className="recebido-confirma-x" aria-label="Fechar"
+                        onClick={() => setUltimoRecebido(null)}>×</button>
+              </div>
+            )}
+            {bipMsg && !ultimoRecebido && (
               <div className={`import-feedback bip-${bipMsg.tipo}`}>{bipMsg.texto}</div>
             )}
             {erro && (
