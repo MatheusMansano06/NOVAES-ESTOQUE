@@ -311,6 +311,9 @@ export function Devolucoes() {
       const d = await r.json()
       if (!r.ok) {
         setBipMsg({ tipo: 'erro', texto: String(d.mensagem || 'Código não encontrado na fila.') })
+      } else if (d.avulso) {
+        // Etiqueta ainda não sincronizada: registrada, será vinculada no próximo sync.
+        setBipMsg({ tipo: 'ok', texto: String(d.mensagem || '✓ Recebido e registrado.') })
       } else {
         setChegando(prev => {
           const naLista = prev.some(c => c.claim_id === d.claim_id)

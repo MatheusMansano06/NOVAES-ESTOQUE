@@ -853,3 +853,22 @@ class MLClaimClassification(Base):
     mandatory = Column(Integer, default=0)
     due_date = Column(String(40), default="")
     date_created = Column(String(40), default="")
+
+
+class RecebimentoAvulso(Base):
+    """
+    Bipagem que NÃO casou com nenhuma classificação no momento (devolução muito
+    nova, ainda não sincronizada). Registrada aqui para o bipe NUNCA travar a
+    operação: o item físico é logado e vinculado à devolução no próximo sync
+    (reconciliar_avulsos). `codigo` é o que foi bipado, só dígitos.
+    """
+    __tablename__ = "recebimentos_avulsos"
+
+    id = Column(Integer, primary_key=True)
+    codigo = Column(String(60), nullable=False, index=True)
+    order_id = Column(String(40), default="")       # best-effort do /shipments ao vivo
+    shipment_status = Column(String(50), default="")
+    recebido_em = Column(String(40), nullable=False)
+    vinculado_claim_id = Column(String(50), default="")  # preenchido na reconciliação
+    vinculado_em = Column(String(40), default="")
+    info = Column(Text, default="{}")               # dump do shipment ao vivo (auditoria)

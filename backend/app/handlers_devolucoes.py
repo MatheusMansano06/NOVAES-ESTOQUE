@@ -23,12 +23,13 @@ from starlette.concurrency import run_in_threadpool
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 
-from app.devolucoes_ml import MLDevolucoesError
+from app.devolucoes_ml import MLDevolucoesError, ml_get
 from app.devolucoes_sync import (
     STATUS_PERMITIDOS,
     _linha,
     _linhas,
     _exec,
+    reconciliar_avulsos,
     add_ml_trace_event,
     build_ml_devolucao,
     env_int,
@@ -339,7 +340,7 @@ async def bipar_chegada(request: Request):
         LIMIT 1
     """, {"c": codigo, "like": f'%"{codigo}"%', "like2": f'%{codigo}%'})
     if not row:
-        return _erro(f"Nenhuma devolução no sistema bate com o código {codigo}.", 404)
+        return _bipar_fallback_ao_vivo(codigo)
     situacao = {"bucket": row.get("bucket"),
                 "shipment_status": row.get("shipment_status"),
                 "shipment_destination": row.get("shipment_destination")}
@@ -356,6 +357,81 @@ async def bipar_chegada(request: Request):
                          "produto_nome": row.get("produto_nome"),
                          "produto_imagem": row.get("produto_imagem"),
                          "recebido_em": quando, **situacao})
+
+
+def _shipment_ao_vivo(codigo: str) -> dict:
+    """Consulta /shipments/{id} best-effort — valida a etiqueta e tenta o pedido."""
+    try:
+        sh = ml_get(f"/shipments/{codigo}") or {}
+    except Exception:
+        return {}
+    return {
+        "order_id": str(sh.get("order_id") or ""),
+        "status": str(sh.get("status") or ""),
+        "raw": sh,
+    }
+
+
+def _bipar_fallback_ao_vivo(codigo: str) -> JSONResponse:
+    """
+    A etiqueta não está no cache (devolução nova, fora da janela do sync). O bipe
+    NÃO pode travar a operação: valida no ML ao vivo, registra o recebimento
+    avulso e vincula à devolução no próximo sync (reconciliar_avulsos). Se por
+    sorte o pedido já estiver no cache, casa e marca recebido na hora.
+    """
+    quando = now_iso()
+    vivo = _shipment_ao_vivo(codigo)
+    order_id = vivo.get("order_id") or ""
+
+    # O pedido já pode estar no cache mesmo sem o shipment_id preenchido.
+    if order_id:
+        row = _linha("""
+            SELECT claim_id, produto_nome, produto_imagem, recebido_em, bucket,
+                   shipment_status, shipment_destination
+            FROM ml_claim_classifications
+            WHERE active = 1 AND (pedido_id = :o OR order_ids LIKE :ol) LIMIT 1
+        """, {"o": order_id, "ol": f'%"{order_id}"%'})
+        if row:
+            if not row.get("recebido_em"):
+                _exec("UPDATE ml_claim_classifications SET recebido_em = :d, shipment_id = :s "
+                      "WHERE claim_id = :c",
+                      {"d": quando, "s": codigo, "c": row["claim_id"]})
+            return JSONResponse({"mensagem": "Recebido — em espera de resolução",
+                                 "claim_id": row["claim_id"],
+                                 "produto_nome": row.get("produto_nome"),
+                                 "produto_imagem": row.get("produto_imagem"),
+                                 "recebido_em": quando, "via": "fallback_pedido",
+                                 "bucket": row.get("bucket"),
+                                 "shipment_status": row.get("shipment_status"),
+                                 "shipment_destination": row.get("shipment_destination")})
+
+    # Não achou nem pelo pedido: registra avulso para vincular no próximo sync.
+    _exec("""INSERT INTO recebimentos_avulsos (codigo, order_id, shipment_status, recebido_em, info)
+             VALUES (:c, :o, :st, :d, :info)""",
+          {"c": codigo, "o": order_id, "st": vivo.get("status") or "",
+           "d": quando, "info": json.dumps(vivo.get("raw") or {})[:4000]})
+    reconciliar_avulsos()  # tenta vincular já, caso o claim esteja no cache
+    achou_ml = bool(vivo)
+    return JSONResponse({
+        "mensagem": ("Recebido e registrado — vou vincular à devolução no próximo sync."
+                     if achou_ml else
+                     "Recebido e registrado. Código não confirmado no ML ainda — "
+                     "será vinculado quando sincronizar."),
+        "avulso": True, "recebido_em": quando, "codigo": codigo,
+        "order_id": order_id, "confirmado_ml": achou_ml})
+
+
+# ------------------------------------------- shipment ao vivo (debug/aprendizado)
+
+async def debug_shipment(request: Request):
+    """Retorna /shipments/{sid} cru — para mapear a forma real do payload."""
+    sid = re.sub(r"\D", "", request.query_params.get("sid") or "")
+    if not sid:
+        return _erro("passe ?sid=<shipment_id>")
+    try:
+        return JSONResponse({"sid": sid, "shipment": ml_get(f"/shipments/{sid}")})
+    except Exception as exc:
+        return _erro(f"ml_get falhou: {exc}", 502)
 
 
 # ------------------------------------------- diff vs ML Seller Center (debug)

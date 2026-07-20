@@ -468,6 +468,47 @@ def save_claim_classification(item: dict) -> None:
     })
 
 
+def reconciliar_avulsos() -> int:
+    """
+    Vincula recebimentos avulsos (bipes que não casaram na hora) às classificações
+    que entretanto chegaram pelo sync. Casa por shipment_id, pedido ou order_id e
+    marca `recebido_em` na classificação — respeitando bipe que já lá esteja.
+    """
+    db = SessionLocal()
+    try:
+        pendentes = db.execute(text(
+            "SELECT id, codigo, order_id, recebido_em FROM recebimentos_avulsos "
+            "WHERE COALESCE(vinculado_claim_id, '') = ''")).fetchall()
+        n = 0
+        for aid, codigo, order_id, recebido_em in pendentes:
+            cod = str(codigo or "")
+            oid = str(order_id or "")
+            row = db.execute(text("""
+                SELECT claim_id FROM ml_claim_classifications
+                WHERE active = 1
+                  AND (shipment_id = :c OR pedido_id = :c OR pack_id = :c
+                       OR tracking_number LIKE :like OR order_ids LIKE :ol
+                       OR (:oid <> '' AND (pedido_id = :oid OR order_ids LIKE :oidl)))
+                LIMIT 1
+            """), {"c": cod, "like": f"%{cod}%", "ol": f'%"{cod}"%',
+                   "oid": oid, "oidl": f'%"{oid}"%'}).fetchone()
+            if not row:
+                continue
+            claim_id = row[0]
+            db.execute(text(
+                "UPDATE ml_claim_classifications SET recebido_em = :d "
+                "WHERE claim_id = :c AND COALESCE(recebido_em, '') = ''"),
+                {"d": recebido_em, "c": claim_id})
+            db.execute(text(
+                "UPDATE recebimentos_avulsos SET vinculado_claim_id = :c, vinculado_em = :d "
+                "WHERE id = :i"), {"c": claim_id, "d": now_iso(), "i": aid})
+            n += 1
+        db.commit()
+        return n
+    finally:
+        db.close()
+
+
 def backfill_shipment_ids_from_payloads() -> int:
     """
     Preenche shipment_id/tracking_number nas classificações a partir dos payloads
@@ -1152,12 +1193,14 @@ def refresh_ml_classification_cache(user_id: str, sync_run_id: Optional[int] = N
             active_ids.add(str(item["claim_id"]))
 
     _marcar_ativos(active_ids)
+    vinculados = reconciliar_avulsos()
 
     resumo = resumo_from_classification_cache()
     result = {
         "duracao_ms": int((perf_counter() - started) * 1000),
         "declarados": declared, "inspecionados": len(rows),
         "cache_hits": cache_hits, "cache_misses": cache_misses,
+        "avulsos_vinculados": vinculados,
         "erros": errors[:10], "resumo": resumo,
     }
     add_ml_trace_event(trace_id, sync_run_id, "classification_cache_refresh",
