@@ -3692,10 +3692,17 @@ body.meli-page {
 .devolucoes-page .esteira-stat.big strong { color: #0e7490; }
 .devolucoes-page .esteira-stat.ok { background: #f0fdf4; border-color: #bbf7d0; }
 .devolucoes-page .esteira-stat.ok strong { color: #16a34a; }
+.devolucoes-page .order-entry-panel.esteira-panel {
+  display: block !important;
+  grid-template-columns: none !important;
+}
 .devolucoes-page .esteira-forms {
-  display: grid;
-  grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr);
+  display: flex;
+  flex-direction: column;
   gap: 12px;
+}
+.devolucoes-page .esteira-forms .search-pill-form {
+  width: 100%;
 }
 .devolucoes-page .esteira-forms .search-pill-form.bip { border: 2px solid #3483fa22; }
 .devolucoes-page .esteira-forms .search-pill-form.busca button { background: #475569; }
