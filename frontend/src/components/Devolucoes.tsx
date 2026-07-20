@@ -23,6 +23,8 @@ interface Devolucao {
   etapa_checklist_atual?: number | null
   motivo_devolucao?: string | null
   acao_recomendada?: string | null
+  mediacao_mensagem?: string | null
+  ml_valor_pago?: number | null
   /** Derivado por /api/devolucoes/mediacoes, não é coluna. */
   situacao_mediacao?: 'processando' | 'concluida'
 }
@@ -188,6 +190,7 @@ type PainelFlutuante =
   | { tipo: 'pendencias'; titulo: string }
   | { tipo: 'diff'; titulo: string }
   | { tipo: 'recebidos'; titulo: string }
+  | { tipo: 'mediacao'; titulo: string }
   | { tipo: 'bucket'; titulo: string; bucket: Bucket; prazo?: 'urgente' | 'retirar' }
   | null
 
@@ -308,8 +311,8 @@ export function Devolucoes() {
     if (!d) return
     if (painel && !d.open) d.showModal()
     if (!painel && d.open) d.close()
-    // buckets saem dos cards (já em memória); diff usa endpoint próprio; o resto precisa da lista.
-    if (painel && painel.tipo !== 'bucket' && painel.tipo !== 'diff') carregarLista()
+    // buckets/diff/recebidos usam dados próprios; o resto (mediação, todas, busca…) precisa da lista.
+    if (painel && !['bucket', 'diff', 'recebidos'].includes(painel.tipo)) carregarLista()
   }, [painel, carregarLista])
 
   /** Polling do progresso — a conexão do POST não sobrevive ao sync inteiro. */
@@ -501,6 +504,81 @@ export function Devolucoes() {
 
   const conteudoPainel = () => {
     if (!painel) return null
+    if (painel.tipo === 'mediacao') {
+      if (carregandoLista && !listaCarregada) {
+        return <div className="empty compact"><p>Carregando mediações…</p></div>
+      }
+      // Etapas da tratativa a partir do status + requer_acao.
+      const etapa = (i: Devolucao): 'voce' | 'ml' | 'fim' => {
+        if (['aprovado', 'parcial', 'reprovado'].includes(i.status)) return 'fim'
+        return Number(i.requer_acao ?? 1) === 1 ? 'voce' : 'ml'
+      }
+      const cols: { chave: 'voce' | 'ml' | 'fim'; titulo: string; sub: string }[] = [
+        { chave: 'voce', titulo: 'Precisa de você', sub: 'Responder o mediador / contestar' },
+        { chave: 'ml', titulo: 'Aguardando o ML', sub: 'Você já agiu; ML analisando' },
+        { chave: 'fim', titulo: 'Concluídas', sub: 'Resultado final' },
+      ]
+      const porEtapa = (c: 'voce' | 'ml' | 'fim') => mediacoes
+        .filter(i => etapa(i) === c)
+        .sort((a, b) => (diasAte(a.prazo_resolucao) ?? 999) - (diasAte(b.prazo_resolucao) ?? 999))
+      const cardMed = (i: Devolucao) => {
+        const u = calcularUrgencia(i)
+        const dias = diasAte(i.prazo_resolucao)
+        const prazoTxt = dias === null ? '' : dias < 0 ? 'VENCIDO'
+          : dias === 0 ? 'vence HOJE' : dias === 1 ? 'vence amanhã' : `${dias} dias`
+        return (
+          <article className="med-card" key={i.id}>
+            <div className="med-card-top">
+              <img src={i.produto_imagem || IMG_VAZIA} alt="" loading="lazy" />
+              <div className="med-card-h">
+                <b>{mlPrimaryId(i)}</b>
+                <strong>{i.produto_nome}</strong>
+                <small>{label(i.status)} · {money(i.ml_valor_pago ?? 0)}</small>
+              </div>
+              {prazoTxt && <span className={`med-prazo urg-${u}`}>{prazoTxt}</span>}
+            </div>
+            {i.mediacao_mensagem && (
+              <p className="med-msg">“{i.mediacao_mensagem.slice(0, 180)}{i.mediacao_mensagem.length > 180 ? '…' : ''}”</p>
+            )}
+            <div className="med-acoes">
+              <a href={mlDetailUrl(i)} target="_blank" rel="noreferrer" className="med-btn primary">
+                Abrir no ML{etapa(i) === 'voce' ? ' e responder' : ''}
+              </a>
+              {i.motivo_devolucao && <span className="med-motivo">{i.motivo_devolucao}</span>}
+            </div>
+          </article>
+        )
+      }
+      const totalTratativa = mediacoes.length
+      return (
+        <div className="med-esteira">
+          {!totalTratativa ? (
+            <div className="empty compact">
+              <h2>Nenhuma mediação em aberto</h2>
+              <p>Quando uma devolução virar mediação, ela entra aqui para tratativa.</p>
+            </div>
+          ) : (
+            <div className="med-colunas">
+              {cols.map(col => {
+                const itens = porEtapa(col.chave)
+                return (
+                  <section className={`med-coluna med-col-${col.chave}`} key={col.chave}>
+                    <header>
+                      <h3>{col.titulo} <span className="med-count">{itens.length}</span></h3>
+                      <small>{col.sub}</small>
+                    </header>
+                    <div className="med-coluna-lista">
+                      {itens.length ? itens.map(cardMed)
+                        : <p className="mediacoes-empty">Nada aqui.</p>}
+                    </div>
+                  </section>
+                )
+              })}
+            </div>
+          )}
+        </div>
+      )
+    }
     if (painel.tipo === 'recebidos') {
       if (recebidosLoad && !recebidosData) {
         return <div className="empty compact"><p>Carregando recebidos…</p></div>
@@ -851,8 +929,8 @@ export function Devolucoes() {
                   <div className="summary-header-actions">
                     <div className="summary-shortcuts">
                       <button type="button" className="shortcut-chip"
-                              onClick={() => setPainel({ tipo: 'mediacoes', titulo: 'Acompanhamento de mediações' })}>
-                        Chamados <b>{chamados}</b>
+                              onClick={() => setPainel({ tipo: 'mediacao', titulo: 'Esteira de tratativa — mediações' })}>
+                        Mediações <b>{chamados}</b>
                       </button>
                       <button type="button" className="shortcut-chip"
                               onClick={() => setPainel({ tipo: 'reembolso', titulo: 'Aguardando reembolso' })}>

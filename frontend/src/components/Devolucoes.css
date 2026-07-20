@@ -3800,3 +3800,49 @@ body.meli-page {
 .devolucoes-page .recebido-confirma-x {
   border:0; background:none; color:#94a3b8; font-size:20px; cursor:pointer; line-height:1; padding:0 4px;
 }
+
+/* ===================== Esteira de tratativa — mediações ===================== */
+.devolucoes-page .med-colunas {
+  display:grid; grid-template-columns:repeat(3, minmax(0,1fr)); gap:14px; align-items:start;
+}
+.devolucoes-page .med-coluna {
+  background:#f8fafc; border:1px solid #e2e8f0; border-radius:12px; overflow:hidden;
+  display:flex; flex-direction:column; min-height:120px;
+}
+.devolucoes-page .med-coluna > header { padding:12px 14px; border-bottom:1px solid #e2e8f0; background:#fff; }
+.devolucoes-page .med-coluna > header h3 { margin:0; font-size:14px; display:flex; align-items:center; gap:8px; }
+.devolucoes-page .med-coluna > header small { color:#94a3b8; font-size:11.5px; }
+.devolucoes-page .med-count {
+  background:#e2e8f0; color:#475569; border-radius:999px; padding:1px 9px; font-size:12px; font-weight:800;
+}
+.devolucoes-page .med-col-voce { border-top:3px solid #dc2626; }
+.devolucoes-page .med-col-voce .med-count { background:#fee2e2; color:#dc2626; }
+.devolucoes-page .med-col-ml { border-top:3px solid #2563eb; }
+.devolucoes-page .med-col-ml .med-count { background:#dbeafe; color:#2563eb; }
+.devolucoes-page .med-col-fim { border-top:3px solid #16a34a; }
+.devolucoes-page .med-col-fim .med-count { background:#dcfce7; color:#16a34a; }
+.devolucoes-page .med-coluna-lista { padding:10px; display:flex; flex-direction:column; gap:10px; max-height:60vh; overflow-y:auto; }
+.devolucoes-page .med-card {
+  background:#fff; border:1px solid #e2e8f0; border-radius:10px; padding:10px; display:flex; flex-direction:column; gap:8px;
+}
+.devolucoes-page .med-card-top { display:flex; gap:10px; align-items:flex-start; }
+.devolucoes-page .med-card-top img { width:44px; height:44px; border-radius:7px; object-fit:cover; flex:0 0 44px; background:#f1f5f9; }
+.devolucoes-page .med-card-h { display:flex; flex-direction:column; gap:1px; min-width:0; flex:1; }
+.devolucoes-page .med-card-h b { font-size:11px; color:#94a3b8; }
+.devolucoes-page .med-card-h strong { font-size:13px; color:#0f172a; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.devolucoes-page .med-card-h small { font-size:11.5px; color:#64748b; }
+.devolucoes-page .med-prazo { font-size:10.5px; font-weight:800; padding:2px 7px; border-radius:6px; white-space:nowrap; height:fit-content; }
+.devolucoes-page .med-prazo.urg-critica { background:#fee2e2; color:#dc2626; }
+.devolucoes-page .med-prazo.urg-alta { background:#fef3c7; color:#b45309; }
+.devolucoes-page .med-prazo.urg-media { background:#e0f2fe; color:#0369a1; }
+.devolucoes-page .med-prazo.urg-baixa, .devolucoes-page .med-prazo.urg-finalizado { background:#f1f5f9; color:#64748b; }
+.devolucoes-page .med-msg {
+  font-size:12px; color:#475569; font-style:italic; background:#f8fafc;
+  border-left:3px solid #cbd5e1; padding:6px 10px; border-radius:0 6px 6px 0; margin:0;
+}
+.devolucoes-page .med-acoes { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+.devolucoes-page .med-btn.primary {
+  background:#3483fa; color:#fff; border-radius:7px; padding:6px 12px; font-size:12px; font-weight:700; text-decoration:none;
+}
+.devolucoes-page .med-motivo { font-size:11px; color:#94a3b8; }
+@media (max-width:820px){ .devolucoes-page .med-colunas { grid-template-columns:1fr; } }
