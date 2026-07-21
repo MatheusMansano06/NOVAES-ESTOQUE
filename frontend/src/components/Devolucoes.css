@@ -3847,6 +3847,25 @@ body.meli-page {
 .devolucoes-page .med-motivo { font-size:11px; color:#94a3b8; }
 @media (max-width:820px){ .devolucoes-page .med-colunas { grid-template-columns:1fr; } }
 
+/* --- Layout enxuto: barra de ações + menu "Mais" --- */
+.devolucoes-page .summary-header-actions.lean { display:flex; align-items:center; gap:8px;
+  position:relative; flex-wrap:wrap; }
+.devolucoes-page .mais-menu { position:relative; }
+.devolucoes-page .mais-menu > summary { list-style:none; cursor:pointer; user-select:none;
+  padding:6px 12px; border:1px solid #e2e8f0; border-radius:8px; background:#fff;
+  font-size:13px; color:#334155; display:inline-flex; align-items:center; gap:4px; }
+.devolucoes-page .mais-menu > summary::-webkit-details-marker { display:none; }
+.devolucoes-page .mais-menu > summary::after { content:'▾'; font-size:11px; color:#94a3b8; }
+.devolucoes-page .mais-menu[open] > summary { background:#f1f5f9; border-color:#cbd5e1; }
+.devolucoes-page .mais-pop { position:absolute; right:0; top:calc(100% + 6px); z-index:30;
+  background:#fff; border:1px solid #e2e8f0; border-radius:10px; box-shadow:0 10px 30px rgba(15,23,42,.12);
+  padding:6px; display:flex; flex-direction:column; min-width:200px; }
+.devolucoes-page .mais-pop button { text-align:left; background:none; border:none; cursor:pointer;
+  padding:9px 12px; border-radius:7px; font-size:13px; color:#334155; display:flex;
+  justify-content:space-between; align-items:center; gap:12px; }
+.devolucoes-page .mais-pop button:hover { background:#f1f5f9; }
+.devolucoes-page .mais-pop button b { color:#0f172a; font-size:12px; }
+
 /* --- Fase 3/4/5: Custos, Divergência, Avaliação --- */
 .devolucoes-page .custos-cfg { display:flex; flex-direction:column; gap:4px; background:#f8fafc;
   border:1px solid #e2e8f0; border-radius:10px; padding:12px 14px; margin-bottom:14px; }

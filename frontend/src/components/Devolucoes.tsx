@@ -603,9 +603,6 @@ export function Devolucoes() {
   const riscos = painelDados?.riscos ?? 0
   const totalTarifas = painelDados?.total_tarifas ?? 0
   const nChecklistsAtivos = painelDados?.checklists_ativos ?? 0
-  const aguardando = painelDados?.aguardando ?? 0
-  const perto = painelDados?.perto ?? 0
-  const pctPendencias = painelDados?.pct_pendencias ?? 0
 
   /** Só para o painel flutuante de pendências — depende da lista carregada. */
   const checklistsAtivos = useMemo(
@@ -1240,25 +1237,7 @@ export function Devolucoes() {
                     <p>Organize e priorize suas pendências</p>
                   </div>
                   <strong className="sr-total">{resumo?.total ?? 0}</strong>
-                  <div className="summary-header-actions">
-                    <div className="summary-shortcuts">
-                      <button type="button" className="shortcut-chip"
-                              onClick={() => setPainel({ tipo: 'mediacao', titulo: 'Esteira de tratativa — mediações' })}>
-                        Mediações <b>{chamados}</b>
-                      </button>
-                      <button type="button" className="shortcut-chip"
-                              onClick={() => setPainel({ tipo: 'reembolso', titulo: 'Aguardando reembolso' })}>
-                        Reembolso <b>{reembolsos}</b>
-                      </button>
-                      <button type="button" className="shortcut-chip"
-                              onClick={() => setPainel({ tipo: 'reputacao', titulo: 'Risco de reputação' })}>
-                        Reputação <b>{riscos}</b>
-                      </button>
-                    </div>
-                    <button type="button" className="summary-link"
-                            onClick={() => setPainel({ tipo: 'todas', titulo: 'Todas as devolucoes' })}>
-                      Ver todas
-                    </button>
+                  <div className="summary-header-actions lean">
                     <button type="button" className="summary-link" onClick={abrirRecebidos}>
                       Recebidos
                     </button>
@@ -1266,14 +1245,40 @@ export function Devolucoes() {
                             onClick={() => setPainel({ tipo: 'custos', titulo: 'Custos e prejuízos do mês' })}>
                       Custos
                     </button>
-                    <button type="button" className="summary-link"
-                            onClick={() => setPainel({ tipo: 'divergencia', titulo: 'Divergência — previstas × recebidas' })}>
-                      Divergência
-                    </button>
-                    <button type="button" className="summary-link"
-                            onClick={() => setPainel({ tipo: 'diff', titulo: 'Conferir vs Seller Center' })}>
-                      Conferir ML
-                    </button>
+                    <details className="mais-menu">
+                      <summary>Mais</summary>
+                      <div className="mais-pop"
+                           onClick={e => (e.currentTarget.closest('details') as HTMLDetailsElement | null)?.removeAttribute('open')}>
+                        <button type="button"
+                                onClick={() => setPainel({ tipo: 'divergencia', titulo: 'Divergência — previstas × recebidas' })}>
+                          Divergência
+                        </button>
+                        <button type="button"
+                                onClick={() => setPainel({ tipo: 'mediacao', titulo: 'Esteira de tratativa — mediações' })}>
+                          Mediações <b>{chamados}</b>
+                        </button>
+                        <button type="button"
+                                onClick={() => setPainel({ tipo: 'reembolso', titulo: 'Aguardando reembolso' })}>
+                          Reembolso <b>{reembolsos}</b>
+                        </button>
+                        <button type="button"
+                                onClick={() => setPainel({ tipo: 'reputacao', titulo: 'Risco de reputação' })}>
+                          Reputação <b>{riscos}</b>
+                        </button>
+                        <button type="button"
+                                onClick={() => setPainel({ tipo: 'pendencias', titulo: 'Checklists em andamento' })}>
+                          Pendências <b>{nChecklistsAtivos}</b>
+                        </button>
+                        <button type="button"
+                                onClick={() => setPainel({ tipo: 'todas', titulo: 'Todas as devoluções' })}>
+                          Ver todas
+                        </button>
+                        <button type="button"
+                                onClick={() => setPainel({ tipo: 'diff', titulo: 'Conferir vs Seller Center' })}>
+                          Conferir ML
+                        </button>
+                      </div>
+                    </details>
                   </div>
                 </div>
               </div>
@@ -1305,39 +1310,6 @@ export function Devolucoes() {
             </div>
           </section>
 
-          <section className="pending-card">
-            <div className="pending-col left">
-              <h3>Pendências</h3>
-              <p>Checklists iniciados</p>
-              <button type="button" className="ghost-outline"
-                      onClick={() => setPainel({ tipo: 'pendencias', titulo: 'Checklists em andamento' })}>
-                Visualizar pendências
-              </button>
-            </div>
-            <div className="pending-col center">
-              <div className="progress-ring"><span>{pctPendencias}%</span></div>
-              <div>
-                <h4>Em andamento</h4>
-                <p>Checklists iniciados</p>
-                <small>
-                  {carregando ? 'Carregando…'
-                    : nChecklistsAtivos
-                      ? `${nChecklistsAtivos} checklist(s) em andamento.`
-                      : 'Nenhum checklist em andamento no momento.'}
-                </small>
-              </div>
-            </div>
-            <div className="pending-col right">
-              <article><strong>{nChecklistsAtivos}</strong><span>Checklists ativos</span></article>
-              <article><strong>{aguardando}</strong><span>Aguardando sua ação</span></article>
-              <article><strong>{perto}</strong><span>Perto do vencimento</span></article>
-            </div>
-          </section>
-
-          <footer className="dashboard-footer">
-            <p>Precisa de ajuda? Nossa central de ajuda está disponível 24/7.</p>
-            <button type="button" className="ghost-outline">Abrir suporte</button>
-          </footer>
         </section>
       </main>
 
