@@ -496,6 +496,8 @@ class OlistIntegration:
                     "nome": prod.get("descricao") or prod.get("nome", ""),
                     "preco": float(prod.get("precos", {}).get("preco", 0) if isinstance(prod.get("precos"), dict) else prod.get("preco", 0) or 0),
                     "codigo_produto": prod.get("sku", ""),
+                    "tipo": prod.get("tipo") or "",
+                    "situacao": prod.get("situacao") or "",
                 })
             if out:
                 print(f"[OLIST] Busca por codigo '{codigo}': {len(out)} resultado(s) via API")
@@ -503,6 +505,64 @@ class OlistIntegration:
         except Exception as e:
             print(f"[OLIST] Busca por codigo '{codigo}' falhou: {e}")
             return []
+
+    def _buscar_por_codigo_v2(self, codigo: str) -> List[Dict]:
+        """Fallback via API v2 (token simples) para achar produtos por codigo.
+        Necessario porque a v3 ?codigo= as vezes resolve o produto EXCLUIDO
+        duplicado (mesmo codigo) em vez do produto ATIVO; a v2 traz o ativo.
+        Retorna [{id, sku, situacao}]."""
+        if not self.token_v2:
+            return []
+        try:
+            url = (f"https://api.tiny.com.br/api2/produtos.pesquisa.php"
+                   f"?token={self.token_v2}&formato=json&pesquisa={urllib.parse.quote(codigo)}")
+            req = urllib.request.Request(url, headers={"Accept": "application/json"}, method="GET")
+            with urllib.request.urlopen(req, timeout=15) as r:
+                dados = json.loads(r.read().decode("utf-8"))
+            prods = ((dados.get("retorno") or {}).get("produtos") or [])
+            out = []
+            for wrap in prods:
+                p = wrap.get("produto", wrap) or {}
+                out.append({
+                    "id": str(p.get("id") or ""),
+                    "sku": p.get("codigo") or "",
+                    "situacao": p.get("situacao") or "",
+                })
+            return out
+        except Exception as e:
+            print(f"[OLIST] v2 pesquisa por codigo '{codigo}' falhou: {e}")
+            return []
+
+    def buscar_kit_por_codigo(self, codigo: str, id_preferencial: Optional[str] = None):
+        """Entre TODOS os produtos que compartilham o mesmo codigo na Olist, acha
+        um que seja KIT (tipo 'K' com composicao) e devolve seu detalhe v3.
+
+        Existe porque a Olist pode ter DOIS produtos com o mesmo codigo: um kit
+        ativo e uma duplicata Simples/excluida. A v3 ?codigo= costuma resolver a
+        duplicata errada; aqui reunimos os ids candidatos de v3 + v2 e testamos
+        o detalhe de cada um ate achar o kit real.
+        Retorna (detalhe_v3: dict|None, kit_id: str|None).
+        """
+        codigo = (codigo or "").strip()
+        if not codigo:
+            return None, None
+        ids: List[str] = []
+        if id_preferencial:
+            ids.append(str(id_preferencial))
+        for p in (self._buscar_por_codigo_api(codigo) or []):
+            pid = str(p.get("id") or "")
+            if pid and pid not in ids:
+                ids.append(pid)
+        for p in (self._buscar_por_codigo_v2(codigo) or []):
+            pid = str(p.get("id") or "")
+            if pid and pid not in ids:
+                ids.append(pid)
+        for pid in ids:
+            det = self.obter_detalhes_completo(pid) or {}
+            if det.get("tipo") == "K" and (det.get("kit") or []):
+                print(f"[OLIST] Kit resolvido por codigo '{codigo}': id {pid}")
+                return det, pid
+        return None, None
 
     def _normalizar_sku_busca(self, valor: str) -> str:
         return re.sub(r'[^a-z0-9]', '', (valor or '').lower())
@@ -682,9 +742,17 @@ class OlistIntegration:
         # Verifica se é kit (tipo = "K")
         tipo = detalhes.get("tipo", "")
 
-        if tipo != "K":
-            # Não é kit
-            return {"eh_kit": False, "tipo": tipo, "produto": produto}
+        if tipo != "K" or not (detalhes.get("kit") or []):
+            # Pode ser uma duplicata Simples/excluída com o mesmo código do kit ativo.
+            # Procura o kit real pelo código (v3 + v2) antes de desistir.
+            codigo = produto.get("sku") or produto.get("codigo_produto") or detalhes.get("sku") or termo
+            alt, alt_id = self.buscar_kit_por_codigo(codigo, id_preferencial=produto_id)
+            if alt:
+                detalhes = alt
+                produto_id = alt_id
+                tipo = "K"
+            else:
+                return {"eh_kit": False, "tipo": tipo, "produto": produto}
 
         # É um kit! Busca componentes
         kit_data = detalhes.get("kit", [])

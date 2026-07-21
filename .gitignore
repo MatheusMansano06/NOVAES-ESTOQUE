@@ -11,6 +11,9 @@ logs/
 # Database
 *.db
 *.db.vazio
+# Temporários do SQLite em modo WAL (criados pelo backend rodando)
+*.db-wal
+*.db-shm
 # Exceção: o seed.db (dados reais) precisa ir pro repo p/ o Railway ter os dados
 !backend/seed.db
 

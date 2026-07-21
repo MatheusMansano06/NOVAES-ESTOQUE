@@ -1,0 +1,3757 @@
+{
+ "_leia_me": "Golden das regras CONGELADAS de classificação de devoluções ML. Ver docs/devolucoes/REGRAS_CONGELADAS.md. Se este arquivo mudou num diff, as regras congeladas mudaram — isso exige aprovação.",
+ "total_casos": 1344000,
+ "hash_total": "dc138e3897181779012bd8e94bd977c521bd536888bbccd8c0e7194e33140405",
+ "regras_distintas": [
+  "closed_resolved_not_next_attention",
+  "detail_pickup_correios",
+  "mediation_message_to_mediator_not_next_attention",
+  "mediation_waiting_ml_resolution",
+  "message_to_mediator_non_mediation",
+  "ml_internal_review_or_updated_date",
+  "ml_internal_review_waiting_mediator",
+  "ml_waiting_platform_response",
+  "no_matching_queue_rule",
+  "return_in_progress_not_next_attention",
+  "return_label_generated_not_target_filter",
+  "return_problem_status_not_target_filter",
+  "return_updated_date_in_transit",
+  "return_updated_date_title",
+  "seller_available_action",
+  "seller_pickup_review_due"
+ ],
+ "amostras": [
+  {
+   "entrada": {
+    "acoes": [],
+    "claim_type": "returns",
+    "stage": "claim",
+    "claim_status": "closed",
+    "return_status": "delivered",
+    "shipment_status": "",
+    "destination": "",
+    "related": [],
+    "title": "",
+    "responsible": "",
+    "com_resolucao": true,
+    "com_due": true
+   },
+   "bucket": "fora_da_fila",
+   "regra": "closed_resolved_not_next_attention"
+  },
+  {
+   "entrada": {
+    "acoes": [],
+    "claim_type": "returns",
+    "stage": "claim",
+    "claim_status": "closed",
+    "return_status": "delivered",
+    "shipment_status": "",
+    "destination": "",
+    "related": [],
+    "title": "",
+    "responsible": "",
+    "com_resolucao": true,
+    "com_due": false
+   },
+   "bucket": "fora_da_fila",
+   "regra": "closed_resolved_not_next_attention"
+  },
+  {
+   "entrada": {
+    "acoes": [],
+    "claim_type": "returns",
+    "stage": "claim",
+    "claim_status": "closed",
+    "return_status": "delivered",
+    "shipment_status": "",
+    "destination": "",
+    "related": [],
+    "title": "",
+    "responsible": "respondent",
+    "com_resolucao": true,
+    "com_due": true
+   },
+   "bucket": "fora_da_fila",
+   "regra": "closed_resolved_not_next_attention"
+  },
+  {
+   "entrada": {
+    "acoes": [],
+    "claim_type": "returns",
+    "stage": "claim",
+    "claim_status": "closed",
+    "return_status": "delivered",
+    "shipment_status": "",
+    "destination": "",
+    "related": [],
+    "title": "",
+    "responsible": "respondent",
+    "com_resolucao": true,
+    "com_due": false
+   },
+   "bucket": "fora_da_fila",
+   "regra": "closed_resolved_not_next_attention"
+  },
+  {
+   "entrada": {
+    "acoes": [],
+    "claim_type": "returns",
+    "stage": "claim",
+    "claim_status": "closed",
+    "return_status": "delivered",
+    "shipment_status": "",
+    "destination": "",
+    "related": [],
+    "title": "",
+    "responsible": "seller",
+    "com_resolucao": true,
+    "com_due": true
+   },
+   "bucket": "fora_da_fila",
+   "regra": "closed_resolved_not_next_attention"
+  },
+  {
+   "entrada": {
+    "acoes": [],
+    "claim_type": "returns",
+    "stage": "claim",
+    "claim_status": "closed",
+    "return_status": "delivered",
+    "shipment_status": "",
+    "destination": "",
+    "related": [],
+    "title": "",
+    "responsible": "seller",
+    "com_resolucao": true,
+    "com_due": false
+   },
+   "bucket": "fora_da_fila",
+   "regra": "closed_resolved_not_next_attention"
+  },
+  {
+   "entrada": {
+    "acoes": [],
+    "claim_type": "returns",
+    "stage": "claim",
+    "claim_status": "closed",
+    "return_status": "delivered",
+    "shipment_status": "",
+    "destination": "",
+    "related": [],
+    "title": "",
+    "responsible": "mediator",
+    "com_resolucao": true,
+    "com_due": true
+   },
+   "bucket": "fora_da_fila",
+   "regra": "closed_resolved_not_next_attention"
+  },
+  {
+   "entrada": {
+    "acoes": [],
+    "claim_type": "returns",
+    "stage": "claim",
+    "claim_status": "closed",
+    "return_status": "delivered",
+    "shipment_status": "",
+    "destination": "",
+    "related": [],
+    "title": "",
+    "responsible": "mediator",
+    "com_resolucao": true,
+    "com_due": false
+   },
+   "bucket": "fora_da_fila",
+   "regra": "closed_resolved_not_next_attention"
+  },
+  {
+   "entrada": {
+    "acoes": [],
+    "claim_type": "returns",
+    "stage": "claim",
+    "claim_status": "closed",
+    "return_status": "delivered",
+    "shipment_status": "",
+    "destination": "",
+    "related": [],
+    "title": "",
+    "responsible": "complainant",
+    "com_resolucao": true,
+    "com_due": true
+   },
+   "bucket": "fora_da_fila",
+   "regra": "closed_resolved_not_next_attention"
+  },
+  {
+   "entrada": {
+    "acoes": [],
+    "claim_type": "returns",
+    "stage": "claim",
+    "claim_status": "closed",
+    "return_status": "delivered",
+    "shipment_status": "",
+    "destination": "",
+    "related": [],
+    "title": "",
+    "responsible": "complainant",
+    "com_resolucao": true,
+    "com_due": false
+   },
+   "bucket": "fora_da_fila",
+   "regra": "closed_resolved_not_next_attention"
+  },
+  {
+   "entrada": {
+    "acoes": [],
+    "claim_type": "returns",
+    "stage": "claim",
+    "claim_status": "closed",
+    "return_status": "delivered",
+    "shipment_status": "",
+    "destination": "",
+    "related": [],
+    "title": "retirar na correios",
+    "responsible": "",
+    "com_resolucao": true,
+    "com_due": true
+   },
+   "bucket": "fora_da_fila",
+   "regra": "closed_resolved_not_next_attention"
+  },
+  {
+   "entrada": {
+    "acoes": [],
+    "claim_type": "returns",
+    "stage": "claim",
+    "claim_status": "closed",
+    "return_status": "delivered",
+    "shipment_status": "",
+    "destination": "",
+    "related": [],
+    "title": "retirar na correios",
+    "responsible": "",
+    "com_resolucao": true,
+    "com_due": false
+   },
+   "bucket": "fora_da_fila",
+   "regra": "closed_resolved_not_next_attention"
+  },
+  {
+   "entrada": {
+    "acoes": [
+     "return_review_unified_ok"
+    ],
+    "claim_type": "returns",
+    "stage": "claim",
+    "claim_status": "opened",
+    "return_status": "delivered",
+    "shipment_status": "delivered",
+    "destination": "seller_address",
+    "related": [],
+    "title": "retirar na correios",
+    "responsible": "respondent",
+    "com_resolucao": true,
+    "com_due": true
+   },
+   "bucket": "para_retirar",
+   "regra": "detail_pickup_correios:delivered:delivered:seller_address"
+  },
+  {
+   "entrada": {
+    "acoes": [
+     "return_review_unified_ok"
+    ],
+    "claim_type": "returns",
+    "stage": "claim",
+    "claim_status": "opened",
+    "return_status": "delivered",
+    "shipment_status": "delivered",
+    "destination": "seller_address",
+    "related": [],
+    "title": "retirar na correios",
+    "responsible": "respondent",
+    "com_resolucao": true,
+    "com_due": false
+   },
+   "bucket": "para_retirar",
+   "regra": "detail_pickup_correios:delivered:delivered:seller_address"
+  },
+  {
+   "entrada": {
+    "acoes": [
+     "return_review_unified_ok"
+    ],
+    "claim_type": "returns",
+    "stage": "claim",
+    "claim_status": "opened",
+    "return_status": "delivered",
+    "shipment_status": "delivered",
+    "destination": "seller_address",
+    "related": [],
+    "title": "retirar na correios",
+    "responsible": "respondent",
+    "com_resolucao": false,
+    "com_due": true
+   },
+   "bucket": "para_retirar",
+   "regra": "detail_pickup_correios:delivered:delivered:seller_address"
+  },
+  {
+   "entrada": {
+    "acoes": [
+     "return_review_unified_ok"
+    ],
+    "claim_type": "returns",
+    "stage": "claim",
+    "claim_status": "opened",
+    "return_status": "delivered",
+    "shipment_status": "delivered",
+    "destination": "seller_address",
+    "related": [],
+    "title": "retirar na correios",
+    "responsible": "respondent",
+    "com_resolucao": false,
+    "com_due": false
+   },
+   "bucket": "para_retirar",
+   "regra": "detail_pickup_correios:delivered:delivered:seller_address"
+  },
+  {
+   "entrada": {
+    "acoes": [
+     "return_review_unified_ok"
+    ],
+    "claim_type": "returns",
+    "stage": "claim",
+    "claim_status": "opened",
+    "return_status": "delivered",
+    "shipment_status": "delivered",
+    "destination": "seller_address",
+    "related": [],
+    "title": "retirar na correios",
+    "responsible": "seller",
+    "com_resolucao": true,
+    "com_due": true
+   },
+   "bucket": "para_retirar",
+   "regra": "detail_pickup_correios:delivered:delivered:seller_address"
+  },
+  {
+   "entrada": {
+    "acoes": [
+     "return_review_unified_ok"
+    ],
+    "claim_type": "returns",
+    "stage": "claim",
+    "claim_status": "opened",
+    "return_status": "delivered",
+    "shipment_status": "delivered",
+    "destination": "seller_address",
+    "related": [],
+    "title": "retirar na correios",
+    "responsible": "seller",
+    "com_resolucao": true,
+    "com_due": false
+   },
+   "bucket": "para_retirar",
+   "regra": "detail_pickup_correios:delivered:delivered:seller_address"
+  },
+  {
+   "entrada": {
+    "acoes": [
+     "return_review_unified_ok"
+    ],
+    "claim_type": "returns",
+    "stage": "claim",
+    "claim_status": "opened",
+    "return_status": "delivered",
+    "shipment_status": "delivered",
+    "destination": "seller_address",
+    "related": [],
+    "title": "retirar na correios",
+    "responsible": "seller",
+    "com_resolucao": false,
+    "com_due": true
+   },
+   "bucket": "para_retirar",
+   "regra": "detail_pickup_correios:delivered:delivered:seller_address"
+  },
+  {
+   "entrada": {
+    "acoes": [
+     "return_review_unified_ok"
+    ],
+    "claim_type": "returns",
+    "stage": "claim",
+    "claim_status": "opened",
+    "return_status": "delivered",
+    "shipment_status": "delivered",
+    "destination": "seller_address",
+    "related": [],
+    "title": "retirar na correios",
+    "responsible": "seller",
+    "com_resolucao": false,
+    "com_due": false
+   },
+   "bucket": "para_retirar",
+   "regra": "detail_pickup_correios:delivered:delivered:seller_address"
+  },
+  {
+   "entrada": {
+    "acoes": [
+     "return_review_unified_ok"
+    ],
+    "claim_type": "returns",
+    "stage": "claim",
+    "claim_status": "opened",
+    "return_status": "delivered",
+    "shipment_status": "delivered",
+    "destination": "seller_address",
+    "related": [
+     "reviews"
+    ],
+    "title": "retirar na correios",
+    "responsible": "respondent",
+    "com_resolucao": true,
+    "com_due": true
+   },
+   "bucket": "para_retirar",
+   "regra": "detail_pickup_correios:delivered:delivered:seller_address"
+  },
+  {
+   "entrada": {
+    "acoes": [
+     "return_review_unified_ok"
+    ],
+    "claim_type": "returns",
+    "stage": "claim",
+    "claim_status": "opened",
+    "return_status": "delivered",
+    "shipment_status": "delivered",
+    "destination": "seller_address",
+    "related": [
+     "reviews"
+    ],
+    "title": "retirar na correios",
+    "responsible": "respondent",
+    "com_resolucao": true,
+    "com_due": false
+   },
+   "bucket": "para_retirar",
+   "regra": "detail_pickup_correios:delivered:delivered:seller_address"
+  },
+  {
+   "entrada": {
+    "acoes": [
+     "return_review_unified_ok"
+    ],
+    "claim_type": "returns",
+    "stage": "claim",
+    "claim_status": "opened",
+    "return_status": "delivered",
+    "shipment_status": "delivered",
+    "destination": "seller_address",
+    "related": [
+     "reviews"
+    ],
+    "title": "retirar na correios",
+    "responsible": "respondent",
+    "com_resolucao": false,
+    "com_due": true
+   },
+   "bucket": "para_retirar",
+   "regra": "detail_pickup_correios:delivered:delivered:seller_address"
+  },
+  {
+   "entrada": {
+    "acoes": [
+     "return_review_unified_ok"
+    ],
+    "claim_type": "returns",
+    "stage": "claim",
+    "claim_status": "opened",
+    "return_status": "delivered",
+    "shipment_status": "delivered",
+    "destination": "seller_address",
+    "related": [
+     "reviews"
+    ],
+    "title": "retirar na correios",
+    "responsible": "respondent",
+    "com_resolucao": false,
+    "com_due": false
+   },
+   "bucket": "para_retirar",
+   "regra": "detail_pickup_correios:delivered:delivered:seller_address"
+  },
+  {
+   "entrada": {
+    "acoes": [
+     "send_message_to_mediator"
+    ],
+    "claim_type": "returns",
+    "stage": "dispute",
+    "claim_status": "opened",
+    "return_status": "",
+    "shipment_status": "",
+    "destination": "",
+    "related": [],
+    "title": "",
+    "responsible": "",
+    "com_resolucao": true,
+    "com_due": true
+   },
+   "bucket": "fora_da_fila",
+   "regra": "mediation_message_to_mediator_not_next_attention:::"
+  },
+  {
+   "entrada": {
+    "acoes": [
+     "send_message_to_mediator"
+    ],
+    "claim_type": "returns",
+    "stage": "dispute",
+    "claim_status": "opened",
+    "return_status": "",
+    "shipment_status": "",
+    "destination": "",
+    "related": [],
+    "title": "",
+    "responsible": "",
+    "com_resolucao": true,
+    "com_due": false
+   },
+   "bucket": "fora_da_fila",
+   "regra": "mediation_message_to_mediator_not_next_attention:::"
+  },
+  {
+   "entrada": {
+    "acoes": [
+     "send_message_to_mediator"
+    ],
+    "claim_type": "returns",
+    "stage": "dispute",
+    "claim_status": "opened",
+    "return_status": "",
+    "shipment_status": "",
+    "destination": "",
+    "related": [],
+    "title": "",
+    "responsible": "",
+    "com_resolucao": false,
+    "com_due": true
+   },
+   "bucket": "fora_da_fila",
+   "regra": "mediation_message_to_mediator_not_next_attention:::"
+  },
+  {
+   "entrada": {
+    "acoes": [
+     "send_message_to_mediator"
+    ],
+    "claim_type": "returns",
+    "stage": "dispute",
+    "claim_status": "opened",
+    "return_status": "",
+    "shipment_status": "",
+    "destination": "",
+    "related": [],
+    "title": "",
+    "responsible": "",
+    "com_resolucao": false,
+    "com_due": false
+   },
+   "bucket": "fora_da_fila",
+   "regra": "mediation_message_to_mediator_not_next_attention:::"
+  },
+  {
+   "entrada": {
+    "acoes": [
+     "send_message_to_mediator"
+    ],
+    "claim_type": "returns",
+    "stage": "dispute",
+    "claim_status": "opened",
+    "return_status": "",
+    "shipment_status": "",
+    "destination": "",
+    "related": [],
+    "title": "",
+    "responsible": "respondent",
+    "com_resolucao": true,
+    "com_due": true
+   },
+   "bucket": "fora_da_fila",
+   "regra": "mediation_message_to_mediator_not_next_attention:::"
+  },
+  {
+   "entrada": {
+    "acoes": [
+     "send_message_to_mediator"
+    ],
+    "claim_type": "returns",
+    "stage": "dispute",
+    "claim_status": "opened",
+    "return_status": "",
+    "shipment_status": "",
+    "destination": "",
+    "related": [],
+    "title": "",
+    "responsible": "respondent",
+    "com_resolucao": true,
+    "com_due": false
+   },
+   "bucket": "fora_da_fila",
+   "regra": "mediation_message_to_mediator_not_next_attention:::"
+  },
+  {
+   "entrada": {
+    "acoes": [
+     "send_message_to_mediator"
+    ],
+    "claim_type": "returns",
+    "stage": "dispute",
+    "claim_status": "opened",
+    "return_status": "",
+    "shipment_status": "",
+    "destination": "",
+    "related": [],
+    "title": "",
+    "responsible": "respondent",
+    "com_resolucao": false,
+    "com_due": true
+   },
+   "bucket": "fora_da_fila",
+   "regra": "mediation_message_to_mediator_not_next_attention:::"
+  },
+  {
+   "entrada": {
+    "acoes": [
+     "send_message_to_mediator"
+    ],
+    "claim_type": "returns",
+    "stage": "dispute",
+    "claim_status": "opened",
+    "return_status": "",
+    "shipment_status": "",
+    "destination": "",
+    "related": [],
+    "title": "",
+    "responsible": "respondent",
+    "com_resolucao": false,
+    "com_due": false
+   },
+   "bucket": "fora_da_fila",
+   "regra": "mediation_message_to_mediator_not_next_attention:::"
+  },
+  {
+   "entrada": {
+    "acoes": [
+     "send_message_to_mediator"
+    ],
+    "claim_type": "returns",
+    "stage": "dispute",
+    "claim_status": "opened",
+    "return_status": "",
+    "shipment_status": "",
+    "destination": "",
+    "related": [],
+    "title": "",
+    "responsible": "seller",
+    "com_resolucao": true,
+    "com_due": true
+   },
+   "bucket": "fora_da_fila",
+   "regra": "mediation_message_to_mediator_not_next_attention:::"
+  },
+  {
+   "entrada": {
+    "acoes": [
+     "send_message_to_mediator"
+    ],
+    "claim_type": "returns",
+    "stage": "dispute",
+    "claim_status": "opened",
+    "return_status": "",
+    "shipment_status": "",
+    "destination": "",
+    "related": [],
+    "title": "",
+    "responsible": "seller",
+    "com_resolucao": true,
+    "com_due": false
+   },
+   "bucket": "fora_da_fila",
+   "regra": "mediation_message_to_mediator_not_next_attention:::"
+  },
+  {
+   "entrada": {
+    "acoes": [
+     "send_message_to_mediator"
+    ],
+    "claim_type": "returns",
+    "stage": "dispute",
+    "claim_status": "opened",
+    "return_status": "",
+    "shipment_status": "",
+    "destination": "",
+    "related": [],
+    "title": "",
+    "responsible": "seller",
+    "com_resolucao": false,
+    "com_due": true
+   },
+   "bucket": "fora_da_fila",
+   "regra": "mediation_message_to_mediator_not_next_attention:::"
+  },
+  {
+   "entrada": {
+    "acoes": [
+     "send_message_to_mediator"
+    ],
+    "claim_type": "returns",
+    "stage": "dispute",
+    "claim_status": "opened",
+    "return_status": "",
+    "shipment_status": "",
+    "destination": "",
+    "related": [],
+    "title": "",
+    "responsible": "seller",
+    "com_resolucao": false,
+    "com_due": false
+   },
+   "bucket": "fora_da_fila",
+   "regra": "mediation_message_to_mediator_not_next_attention:::"
+  },
+  {
+   "entrada": {
+    "acoes": [
+     "send_message_to_mediator"
+    ],
+    "claim_type": "returns",
+    "stage": "dispute",
+    "claim_status": "opened",
+    "return_status": "expired",
+    "shipment_status": "cancelled",
+    "destination": "seller_address",
+    "related": [],
+    "title": "",
+    "responsible": "",
+    "com_resolucao": true,
+    "com_due": true
+   },
+   "bucket": "fora_da_fila",
+   "regra": "mediation_waiting_ml_resolution:expired:cancelled:seller_address"
+  },
+  {
+   "entrada": {
+    "acoes": [
+     "send_message_to_mediator"
+    ],
+    "claim_type": "returns",
+    "stage": "dispute",
+    "claim_status": "opened",
+    "return_status": "expired",
+    "shipment_status": "cancelled",
+    "destination": "seller_address",
+    "related": [],
+    "title": "",
+    "responsible": "",
+    "com_resolucao": true,
+    "com_due": false
+   },
+   "bucket": "fora_da_fila",
+   "regra": "mediation_waiting_ml_resolution:expired:cancelled:seller_address"
+  },
+  {
+   "entrada": {
+    "acoes": [
+     "send_message_to_mediator"
+    ],
+    "claim_type": "returns",
+    "stage": "dispute",
+    "claim_status": "opened",
+    "return_status": "expired",
+    "shipment_status": "cancelled",
+    "destination": "seller_address",
+    "related": [],
+    "title": "",
+    "responsible": "",
+    "com_resolucao": false,
+    "com_due": true
+   },
+   "bucket": "fora_da_fila",
+   "regra": "mediation_waiting_ml_resolution:expired:cancelled:seller_address"
+  },
+  {
+   "entrada": {
+    "acoes": [
+     "send_message_to_mediator"
+    ],
+    "claim_type": "returns",
+    "stage": "dispute",
+    "claim_status": "opened",
+    "return_status": "expired",
+    "shipment_status": "cancelled",
+    "destination": "seller_address",
+    "related": [],
+    "title": "",
+    "responsible": "",
+    "com_resolucao": false,
+    "com_due": false
+   },
+   "bucket": "fora_da_fila",
+   "regra": "mediation_waiting_ml_resolution:expired:cancelled:seller_address"
+  },
+  {
+   "entrada": {
+    "acoes": [
+     "send_message_to_mediator"
+    ],
+    "claim_type": "returns",
+    "stage": "dispute",
+    "claim_status": "opened",
+    "return_status": "expired",
+    "shipment_status": "cancelled",
+    "destination": "seller_address",
+    "related": [],
+    "title": "",
+    "responsible": "respondent",
+    "com_resolucao": true,
+    "com_due": true
+   },
+   "bucket": "fora_da_fila",
+   "regra": "mediation_waiting_ml_resolution:expired:cancelled:seller_address"
+  },
+  {
+   "entrada": {
+    "acoes": [
+     "send_message_to_mediator"
+    ],
+    "claim_type": "returns",
+    "stage": "dispute",
+    "claim_status": "opened",
+    "return_status": "expired",
+    "shipment_status": "cancelled",
+    "destination": "seller_address",
+    "related": [],
+    "title": "",
+    "responsible": "respondent",
+    "com_resolucao": true,
+    "com_due": false
+   },
+   "bucket": "fora_da_fila",
+   "regra": "mediation_waiting_ml_resolution:expired:cancelled:seller_address"
+  },
+  {
+   "entrada": {
+    "acoes": [
+     "send_message_to_mediator"
+    ],
+    "claim_type": "returns",
+    "stage": "dispute",
+    "claim_status": "opened",
+    "return_status": "expired",
+    "shipment_status": "cancelled",
+    "destination": "seller_address",
+    "related": [],
+    "title": "",
+    "responsible": "respondent",
+    "com_resolucao": false,
+    "com_due": true
+   },
+   "bucket": "fora_da_fila",
+   "regra": "mediation_waiting_ml_resolution:expired:cancelled:seller_address"
+  },
+  {
+   "entrada": {
+    "acoes": [
+     "send_message_to_mediator"
+    ],
+    "claim_type": "returns",
+    "stage": "dispute",
+    "claim_status": "opened",
+    "return_status": "expired",
+    "shipment_status": "cancelled",
+    "destination": "seller_address",
+    "related": [],
+    "title": "",
+    "responsible": "respondent",
+    "com_resolucao": false,
+    "com_due": false
+   },
+   "bucket": "fora_da_fila",
+   "regra": "mediation_waiting_ml_resolution:expired:cancelled:seller_address"
+  },
+  {
+   "entrada": {
+    "acoes": [
+     "send_message_to_mediator"
+    ],
+    "claim_type": "returns",
+    "stage": "dispute",
+    "claim_status": "opened",
+    "return_status": "expired",
+    "shipment_status": "cancelled",
+    "destination": "seller_address",
+    "related": [],
+    "title": "",
+    "responsible": "seller",
+    "com_resolucao": true,
+    "com_due": true
+   },
+   "bucket": "fora_da_fila",
+   "regra": "mediation_waiting_ml_resolution:expired:cancelled:seller_address"
+  },
+  {
+   "entrada": {
+    "acoes": [
+     "send_message_to_mediator"
+    ],
+    "claim_type": "returns",
+    "stage": "dispute",
+    "claim_status": "opened",
+    "return_status": "expired",
+    "shipment_status": "cancelled",
+    "destination": "seller_address",
+    "related": [],
+    "title": "",
+    "responsible": "seller",
+    "com_resolucao": true,
+    "com_due": false
+   },
+   "bucket": "fora_da_fila",
+   "regra": "mediation_waiting_ml_resolution:expired:cancelled:seller_address"
+  },
+  {
+   "entrada": {
+    "acoes": [
+     "send_message_to_mediator"
+    ],
+    "claim_type": "returns",
+    "stage": "dispute",
+    "claim_status": "opened",
+    "return_status": "expired",
+    "shipment_status": "cancelled",
+    "destination": "seller_address",
+    "related": [],
+    "title": "",
+    "responsible": "seller",
+    "com_resolucao": false,
+    "com_due": true
+   },
+   "bucket": "fora_da_fila",
+   "regra": "mediation_waiting_ml_resolution:expired:cancelled:seller_address"
+  },
+  {
+   "entrada": {
+    "acoes": [
+     "send_message_to_mediator"
+    ],
+    "claim_type": "returns",
+    "stage": "dispute",
+    "claim_status": "opened",
+    "return_status": "expired",
+    "shipment_status": "cancelled",
+    "destination": "seller_address",
+    "related": [],
+    "title": "",
+    "responsible": "seller",
+    "com_resolucao": false,
+    "com_due": false
+   },
+   "bucket": "fora_da_fila",
+   "regra": "mediation_waiting_ml_resolution:expired:cancelled:seller_address"
+  },
+  {
+   "entrada": {
+    "acoes": [
+     "send_message_to_mediator"
+    ],
+    "claim_type": "returns",
+    "stage": "claim",
+    "claim_status": "opened",
+    "return_status": "",
+    "shipment_status": "",
+    "destination": "",
+    "related": [],
+    "title": "",
+    "responsible": "",
+    "com_resolucao": true,
+    "com_due": true
+   },
+   "bucket": "fora_da_fila",
+   "regra": "message_to_mediator_non_mediation:::"
+  },
+  {
+   "entrada": {
+    "acoes": [
+     "send_message_to_mediator"
+    ],
+    "claim_type": "returns",
+    "stage": "claim",
+    "claim_status": "opened",
+    "return_status": "",
+    "shipment_status": "",
+    "destination": "",
+    "related": [],
+    "title": "",
+    "responsible": "",
+    "com_resolucao": true,
+    "com_due": false
+   },
+   "bucket": "fora_da_fila",
+   "regra": "message_to_mediator_non_mediation:::"
+  },
+  {
+   "entrada": {
+    "acoes": [
+     "send_message_to_mediator"
+    ],
+    "claim_type": "returns",
+    "stage": "claim",
+    "claim_status": "opened",
+    "return_status": "",
+    "shipment_status": "",
+    "destination": "",
+    "related": [],
+    "title": "",
+    "responsible": "",
+    "com_resolucao": false,
+    "com_due": true
+   },
+   "bucket": "fora_da_fila",
+   "regra": "message_to_mediator_non_mediation:::"
+  },
+  {
+   "entrada": {
+    "acoes": [
+     "send_message_to_mediator"
+    ],
+    "claim_type": "returns",
+    "stage": "claim",
+    "claim_status": "opened",
+    "return_status": "",
+    "shipment_status": "",
+    "destination": "",
+    "related": [],
+    "title": "",
+    "responsible": "",
+    "com_resolucao": false,
+    "com_due": false
+   },
+   "bucket": "fora_da_fila",
+   "regra": "message_to_mediator_non_mediation:::"
+  },
+  {
+   "entrada": {
+    "acoes": [
+     "send_message_to_mediator"
+    ],
+    "claim_type": "returns",
+    "stage": "claim",
+    "claim_status": "opened",
+    "return_status": "",
+    "shipment_status": "",
+    "destination": "",
+    "related": [],
+    "title": "",
+    "responsible": "respondent",
+    "com_resolucao": true,
+    "com_due": true
+   },
+   "bucket": "fora_da_fila",
+   "regra": "message_to_mediator_non_mediation:::"
+  },
+  {
+   "entrada": {
+    "acoes": [
+     "send_message_to_mediator"
+    ],
+    "claim_type": "returns",
+    "stage": "claim",
+    "claim_status": "opened",
+    "return_status": "",
+    "shipment_status": "",
+    "destination": "",
+    "related": [],
+    "title": "",
+    "responsible": "respondent",
+    "com_resolucao": true,
+    "com_due": false
+   },
+   "bucket": "fora_da_fila",
+   "regra": "message_to_mediator_non_mediation:::"
+  },
+  {
+   "entrada": {
+    "acoes": [
+     "send_message_to_mediator"
+    ],
+    "claim_type": "returns",
+    "stage": "claim",
+    "claim_status": "opened",
+    "return_status": "",
+    "shipment_status": "",
+    "destination": "",
+    "related": [],
+    "title": "",
+    "responsible": "respondent",
+    "com_resolucao": false,
+    "com_due": true
+   },
+   "bucket": "fora_da_fila",
+   "regra": "message_to_mediator_non_mediation:::"
+  },
+  {
+   "entrada": {
+    "acoes": [
+     "send_message_to_mediator"
+    ],
+    "claim_type": "returns",
+    "stage": "claim",
+    "claim_status": "opened",
+    "return_status": "",
+    "shipment_status": "",
+    "destination": "",
+    "related": [],
+    "title": "",
+    "responsible": "respondent",
+    "com_resolucao": false,
+    "com_due": false
+   },
+   "bucket": "fora_da_fila",
+   "regra": "message_to_mediator_non_mediation:::"
+  },
+  {
+   "entrada": {
+    "acoes": [
+     "send_message_to_mediator"
+    ],
+    "claim_type": "returns",
+    "stage": "claim",
+    "claim_status": "opened",
+    "return_status": "",
+    "shipment_status": "",
+    "destination": "",
+    "related": [],
+    "title": "",
+    "responsible": "seller",
+    "com_resolucao": true,
+    "com_due": true
+   },
+   "bucket": "fora_da_fila",
+   "regra": "message_to_mediator_non_mediation:::"
+  },
+  {
+   "entrada": {
+    "acoes": [
+     "send_message_to_mediator"
+    ],
+    "claim_type": "returns",
+    "stage": "claim",
+    "claim_status": "opened",
+    "return_status": "",
+    "shipment_status": "",
+    "destination": "",
+    "related": [],
+    "title": "",
+    "responsible": "seller",
+    "com_resolucao": true,
+    "com_due": false
+   },
+   "bucket": "fora_da_fila",
+   "regra": "message_to_mediator_non_mediation:::"
+  },
+  {
+   "entrada": {
+    "acoes": [
+     "send_message_to_mediator"
+    ],
+    "claim_type": "returns",
+    "stage": "claim",
+    "claim_status": "opened",
+    "return_status": "",
+    "shipment_status": "",
+    "destination": "",
+    "related": [],
+    "title": "",
+    "responsible": "seller",
+    "com_resolucao": false,
+    "com_due": true
+   },
+   "bucket": "fora_da_fila",
+   "regra": "message_to_mediator_non_mediation:::"
+  },
+  {
+   "entrada": {
+    "acoes": [
+     "send_message_to_mediator"
+    ],
+    "claim_type": "returns",
+    "stage": "claim",
+    "claim_status": "opened",
+    "return_status": "",
+    "shipment_status": "",
+    "destination": "",
+    "related": [],
+    "title": "",
+    "responsible": "seller",
+    "com_resolucao": false,
+    "com_due": false
+   },
+   "bucket": "fora_da_fila",
+   "regra": "message_to_mediator_non_mediation:::"
+  },
+  {
+   "entrada": {
+    "acoes": [
+     "send_message_to_mediator"
+    ],
+    "claim_type": "returns",
+    "stage": "dispute",
+    "claim_status": "opened",
+    "return_status": "delivered",
+    "shipment_status": "delivered",
+    "destination": "warehouse",
+    "related": [],
+    "title": "",
+    "responsible": "",
+    "com_resolucao": true,
+    "com_due": true
+   },
+   "bucket": "fora_da_fila",
+   "regra": "ml_internal_review_or_updated_date:delivered:delivered:warehouse"
+  },
+  {
+   "entrada": {
+    "acoes": [
+     "send_message_to_mediator"
+    ],
+    "claim_type": "returns",
+    "stage": "dispute",
+    "claim_status": "opened",
+    "return_status": "delivered",
+    "shipment_status": "delivered",
+    "destination": "warehouse",
+    "related": [],
+    "title": "",
+    "responsible": "",
+    "com_resolucao": true,
+    "com_due": false
+   },
+   "bucket": "fora_da_fila",
+   "regra": "ml_internal_review_or_updated_date:delivered:delivered:warehouse"
+  },
+  {
+   "entrada": {
+    "acoes": [
+     "send_message_to_mediator"
+    ],
+    "claim_type": "returns",
+    "stage": "dispute",
+    "claim_status": "opened",
+    "return_status": "delivered",
+    "shipment_status": "delivered",
+    "destination": "warehouse",
+    "related": [],
+    "title": "",
+    "responsible": "",
+    "com_resolucao": false,
+    "com_due": true
+   },
+   "bucket": "fora_da_fila",
+   "regra": "ml_internal_review_or_updated_date:delivered:delivered:warehouse"
+  },
+  {
+   "entrada": {
+    "acoes": [
+     "send_message_to_mediator"
+    ],
+    "claim_type": "returns",
+    "stage": "dispute",
+    "claim_status": "opened",
+    "return_status": "delivered",
+    "shipment_status": "delivered",
+    "destination": "warehouse",
+    "related": [],
+    "title": "",
+    "responsible": "",
+    "com_resolucao": false,
+    "com_due": false
+   },
+   "bucket": "fora_da_fila",
+   "regra": "ml_internal_review_or_updated_date:delivered:delivered:warehouse"
+  },
+  {
+   "entrada": {
+    "acoes": [
+     "send_message_to_mediator"
+    ],
+    "claim_type": "returns",
+    "stage": "dispute",
+    "claim_status": "opened",
+    "return_status": "delivered",
+    "shipment_status": "delivered",
+    "destination": "warehouse",
+    "related": [],
+    "title": "",
+    "responsible": "respondent",
+    "com_resolucao": true,
+    "com_due": true
+   },
+   "bucket": "fora_da_fila",
+   "regra": "ml_internal_review_or_updated_date:delivered:delivered:warehouse"
+  },
+  {
+   "entrada": {
+    "acoes": [
+     "send_message_to_mediator"
+    ],
+    "claim_type": "returns",
+    "stage": "dispute",
+    "claim_status": "opened",
+    "return_status": "delivered",
+    "shipment_status": "delivered",
+    "destination": "warehouse",
+    "related": [],
+    "title": "",
+    "responsible": "respondent",
+    "com_resolucao": true,
+    "com_due": false
+   },
+   "bucket": "fora_da_fila",
+   "regra": "ml_internal_review_or_updated_date:delivered:delivered:warehouse"
+  },
+  {
+   "entrada": {
+    "acoes": [
+     "send_message_to_mediator"
+    ],
+    "claim_type": "returns",
+    "stage": "dispute",
+    "claim_status": "opened",
+    "return_status": "delivered",
+    "shipment_status": "delivered",
+    "destination": "warehouse",
+    "related": [],
+    "title": "",
+    "responsible": "respondent",
+    "com_resolucao": false,
+    "com_due": true
+   },
+   "bucket": "fora_da_fila",
+   "regra": "ml_internal_review_or_updated_date:delivered:delivered:warehouse"
+  },
+  {
+   "entrada": {
+    "acoes": [
+     "send_message_to_mediator"
+    ],
+    "claim_type": "returns",
+    "stage": "dispute",
+    "claim_status": "opened",
+    "return_status": "delivered",
+    "shipment_status": "delivered",
+    "destination": "warehouse",
+    "related": [],
+    "title": "",
+    "responsible": "respondent",
+    "com_resolucao": false,
+    "com_due": false
+   },
+   "bucket": "fora_da_fila",
+   "regra": "ml_internal_review_or_updated_date:delivered:delivered:warehouse"
+  },
+  {
+   "entrada": {
+    "acoes": [
+     "send_message_to_mediator"
+    ],
+    "claim_type": "returns",
+    "stage": "dispute",
+    "claim_status": "opened",
+    "return_status": "delivered",
+    "shipment_status": "delivered",
+    "destination": "warehouse",
+    "related": [],
+    "title": "",
+    "responsible": "seller",
+    "com_resolucao": true,
+    "com_due": true
+   },
+   "bucket": "fora_da_fila",
+   "regra": "ml_internal_review_or_updated_date:delivered:delivered:warehouse"
+  },
+  {
+   "entrada": {
+    "acoes": [
+     "send_message_to_mediator"
+    ],
+    "claim_type": "returns",
+    "stage": "dispute",
+    "claim_status": "opened",
+    "return_status": "delivered",
+    "shipment_status": "delivered",
+    "destination": "warehouse",
+    "related": [],
+    "title": "",
+    "responsible": "seller",
+    "com_resolucao": true,
+    "com_due": false
+   },
+   "bucket": "fora_da_fila",
+   "regra": "ml_internal_review_or_updated_date:delivered:delivered:warehouse"
+  },
+  {
+   "entrada": {
+    "acoes": [
+     "send_message_to_mediator"
+    ],
+    "claim_type": "returns",
+    "stage": "dispute",
+    "claim_status": "opened",
+    "return_status": "delivered",
+    "shipment_status": "delivered",
+    "destination": "warehouse",
+    "related": [],
+    "title": "",
+    "responsible": "seller",
+    "com_resolucao": false,
+    "com_due": true
+   },
+   "bucket": "fora_da_fila",
+   "regra": "ml_internal_review_or_updated_date:delivered:delivered:warehouse"
+  },
+  {
+   "entrada": {
+    "acoes": [
+     "send_message_to_mediator"
+    ],
+    "claim_type": "returns",
+    "stage": "dispute",
+    "claim_status": "opened",
+    "return_status": "delivered",
+    "shipment_status": "delivered",
+    "destination": "warehouse",
+    "related": [],
+    "title": "",
+    "responsible": "seller",
+    "com_resolucao": false,
+    "com_due": false
+   },
+   "bucket": "fora_da_fila",
+   "regra": "ml_internal_review_or_updated_date:delivered:delivered:warehouse"
+  },
+  {
+   "entrada": {
+    "acoes": [],
+    "claim_type": "returns",
+    "stage": "claim",
+    "claim_status": "opened",
+    "return_status": "delivered",
+    "shipment_status": "delivered",
+    "destination": "warehouse",
+    "related": [],
+    "title": "devolucao em revisao",
+    "responsible": "mediator",
+    "com_resolucao": true,
+    "com_due": true
+   },
+   "bucket": "outros_problemas",
+   "regra": "ml_internal_review_waiting_mediator:delivered:delivered:warehouse"
+  },
+  {
+   "entrada": {
+    "acoes": [],
+    "claim_type": "returns",
+    "stage": "claim",
+    "claim_status": "opened",
+    "return_status": "delivered",
+    "shipment_status": "delivered",
+    "destination": "warehouse",
+    "related": [],
+    "title": "devolucao em revisao",
+    "responsible": "mediator",
+    "com_resolucao": true,
+    "com_due": false
+   },
+   "bucket": "outros_problemas",
+   "regra": "ml_internal_review_waiting_mediator:delivered:delivered:warehouse"
+  },
+  {
+   "entrada": {
+    "acoes": [],
+    "claim_type": "returns",
+    "stage": "claim",
+    "claim_status": "opened",
+    "return_status": "delivered",
+    "shipment_status": "delivered",
+    "destination": "warehouse",
+    "related": [],
+    "title": "devolucao em revisao",
+    "responsible": "mediator",
+    "com_resolucao": false,
+    "com_due": true
+   },
+   "bucket": "outros_problemas",
+   "regra": "ml_internal_review_waiting_mediator:delivered:delivered:warehouse"
+  },
+  {
+   "entrada": {
+    "acoes": [],
+    "claim_type": "returns",
+    "stage": "claim",
+    "claim_status": "opened",
+    "return_status": "delivered",
+    "shipment_status": "delivered",
+    "destination": "warehouse",
+    "related": [],
+    "title": "devolucao em revisao",
+    "responsible": "mediator",
+    "com_resolucao": false,
+    "com_due": false
+   },
+   "bucket": "outros_problemas",
+   "regra": "ml_internal_review_waiting_mediator:delivered:delivered:warehouse"
+  },
+  {
+   "entrada": {
+    "acoes": [],
+    "claim_type": "returns",
+    "stage": "claim",
+    "claim_status": "opened",
+    "return_status": "delivered",
+    "shipment_status": "delivered",
+    "destination": "warehouse",
+    "related": [
+     "reviews"
+    ],
+    "title": "devolucao em revisao",
+    "responsible": "mediator",
+    "com_resolucao": true,
+    "com_due": true
+   },
+   "bucket": "outros_problemas",
+   "regra": "ml_internal_review_waiting_mediator:delivered:delivered:warehouse"
+  },
+  {
+   "entrada": {
+    "acoes": [],
+    "claim_type": "returns",
+    "stage": "claim",
+    "claim_status": "opened",
+    "return_status": "delivered",
+    "shipment_status": "delivered",
+    "destination": "warehouse",
+    "related": [
+     "reviews"
+    ],
+    "title": "devolucao em revisao",
+    "responsible": "mediator",
+    "com_resolucao": true,
+    "com_due": false
+   },
+   "bucket": "outros_problemas",
+   "regra": "ml_internal_review_waiting_mediator:delivered:delivered:warehouse"
+  },
+  {
+   "entrada": {
+    "acoes": [],
+    "claim_type": "returns",
+    "stage": "claim",
+    "claim_status": "opened",
+    "return_status": "delivered",
+    "shipment_status": "delivered",
+    "destination": "warehouse",
+    "related": [
+     "reviews"
+    ],
+    "title": "devolucao em revisao",
+    "responsible": "mediator",
+    "com_resolucao": false,
+    "com_due": true
+   },
+   "bucket": "outros_problemas",
+   "regra": "ml_internal_review_waiting_mediator:delivered:delivered:warehouse"
+  },
+  {
+   "entrada": {
+    "acoes": [],
+    "claim_type": "returns",
+    "stage": "claim",
+    "claim_status": "opened",
+    "return_status": "delivered",
+    "shipment_status": "delivered",
+    "destination": "warehouse",
+    "related": [
+     "reviews"
+    ],
+    "title": "devolucao em revisao",
+    "responsible": "mediator",
+    "com_resolucao": false,
+    "com_due": false
+   },
+   "bucket": "outros_problemas",
+   "regra": "ml_internal_review_waiting_mediator:delivered:delivered:warehouse"
+  },
+  {
+   "entrada": {
+    "acoes": [],
+    "claim_type": "returns",
+    "stage": "claim",
+    "claim_status": "closed",
+    "return_status": "delivered",
+    "shipment_status": "delivered",
+    "destination": "warehouse",
+    "related": [],
+    "title": "devolucao em revisao",
+    "responsible": "mediator",
+    "com_resolucao": true,
+    "com_due": true
+   },
+   "bucket": "outros_problemas",
+   "regra": "ml_internal_review_waiting_mediator:delivered:delivered:warehouse"
+  },
+  {
+   "entrada": {
+    "acoes": [],
+    "claim_type": "returns",
+    "stage": "claim",
+    "claim_status": "closed",
+    "return_status": "delivered",
+    "shipment_status": "delivered",
+    "destination": "warehouse",
+    "related": [],
+    "title": "devolucao em revisao",
+    "responsible": "mediator",
+    "com_resolucao": true,
+    "com_due": false
+   },
+   "bucket": "outros_problemas",
+   "regra": "ml_internal_review_waiting_mediator:delivered:delivered:warehouse"
+  },
+  {
+   "entrada": {
+    "acoes": [],
+    "claim_type": "returns",
+    "stage": "claim",
+    "claim_status": "closed",
+    "return_status": "delivered",
+    "shipment_status": "delivered",
+    "destination": "warehouse",
+    "related": [],
+    "title": "devolucao em revisao",
+    "responsible": "mediator",
+    "com_resolucao": false,
+    "com_due": true
+   },
+   "bucket": "outros_problemas",
+   "regra": "ml_internal_review_waiting_mediator:delivered:delivered:warehouse"
+  },
+  {
+   "entrada": {
+    "acoes": [],
+    "claim_type": "returns",
+    "stage": "claim",
+    "claim_status": "closed",
+    "return_status": "delivered",
+    "shipment_status": "delivered",
+    "destination": "warehouse",
+    "related": [],
+    "title": "devolucao em revisao",
+    "responsible": "mediator",
+    "com_resolucao": false,
+    "com_due": false
+   },
+   "bucket": "outros_problemas",
+   "regra": "ml_internal_review_waiting_mediator:delivered:delivered:warehouse"
+  },
+  {
+   "entrada": {
+    "acoes": [
+     "send_message_to_mediator"
+    ],
+    "claim_type": "returns",
+    "stage": "dispute",
+    "claim_status": "opened",
+    "return_status": "",
+    "shipment_status": "",
+    "destination": "",
+    "related": [],
+    "title": "mediacao em espera de resposta do mercado livre",
+    "responsible": "mediator",
+    "com_resolucao": true,
+    "com_due": true
+   },
+   "bucket": "fora_da_fila",
+   "regra": "ml_waiting_platform_response:mediator::"
+  },
+  {
+   "entrada": {
+    "acoes": [
+     "send_message_to_mediator"
+    ],
+    "claim_type": "returns",
+    "stage": "dispute",
+    "claim_status": "opened",
+    "return_status": "",
+    "shipment_status": "",
+    "destination": "",
+    "related": [],
+    "title": "mediacao em espera de resposta do mercado livre",
+    "responsible": "mediator",
+    "com_resolucao": true,
+    "com_due": false
+   },
+   "bucket": "fora_da_fila",
+   "regra": "ml_waiting_platform_response:mediator::"
+  },
+  {
+   "entrada": {
+    "acoes": [
+     "send_message_to_mediator"
+    ],
+    "claim_type": "returns",
+    "stage": "dispute",
+    "claim_status": "opened",
+    "return_status": "",
+    "shipment_status": "",
+    "destination": "",
+    "related": [],
+    "title": "mediacao em espera de resposta do mercado livre",
+    "responsible": "mediator",
+    "com_resolucao": false,
+    "com_due": true
+   },
+   "bucket": "fora_da_fila",
+   "regra": "ml_waiting_platform_response:mediator::"
+  },
+  {
+   "entrada": {
+    "acoes": [
+     "send_message_to_mediator"
+    ],
+    "claim_type": "returns",
+    "stage": "dispute",
+    "claim_status": "opened",
+    "return_status": "",
+    "shipment_status": "",
+    "destination": "",
+    "related": [],
+    "title": "mediacao em espera de resposta do mercado livre",
+    "responsible": "mediator",
+    "com_resolucao": false,
+    "com_due": false
+   },
+   "bucket": "fora_da_fila",
+   "regra": "ml_waiting_platform_response:mediator::"
+  },
+  {
+   "entrada": {
+    "acoes": [
+     "send_message_to_mediator"
+    ],
+    "claim_type": "returns",
+    "stage": "dispute",
+    "claim_status": "opened",
+    "return_status": "",
+    "shipment_status": "",
+    "destination": "",
+    "related": [],
+    "title": "mediacao em espera de resposta do mercado livre",
+    "responsible": "complainant",
+    "com_resolucao": true,
+    "com_due": true
+   },
+   "bucket": "fora_da_fila",
+   "regra": "ml_waiting_platform_response:complainant::"
+  },
+  {
+   "entrada": {
+    "acoes": [
+     "send_message_to_mediator"
+    ],
+    "claim_type": "returns",
+    "stage": "dispute",
+    "claim_status": "opened",
+    "return_status": "",
+    "shipment_status": "",
+    "destination": "",
+    "related": [],
+    "title": "mediacao em espera de resposta do mercado livre",
+    "responsible": "complainant",
+    "com_resolucao": true,
+    "com_due": false
+   },
+   "bucket": "fora_da_fila",
+   "regra": "ml_waiting_platform_response:complainant::"
+  },
+  {
+   "entrada": {
+    "acoes": [
+     "send_message_to_mediator"
+    ],
+    "claim_type": "returns",
+    "stage": "dispute",
+    "claim_status": "opened",
+    "return_status": "",
+    "shipment_status": "",
+    "destination": "",
+    "related": [],
+    "title": "mediacao em espera de resposta do mercado livre",
+    "responsible": "complainant",
+    "com_resolucao": false,
+    "com_due": true
+   },
+   "bucket": "fora_da_fila",
+   "regra": "ml_waiting_platform_response:complainant::"
+  },
+  {
+   "entrada": {
+    "acoes": [
+     "send_message_to_mediator"
+    ],
+    "claim_type": "returns",
+    "stage": "dispute",
+    "claim_status": "opened",
+    "return_status": "",
+    "shipment_status": "",
+    "destination": "",
+    "related": [],
+    "title": "mediacao em espera de resposta do mercado livre",
+    "responsible": "complainant",
+    "com_resolucao": false,
+    "com_due": false
+   },
+   "bucket": "fora_da_fila",
+   "regra": "ml_waiting_platform_response:complainant::"
+  },
+  {
+   "entrada": {
+    "acoes": [
+     "send_message_to_mediator"
+    ],
+    "claim_type": "returns",
+    "stage": "dispute",
+    "claim_status": "opened",
+    "return_status": "",
+    "shipment_status": "",
+    "destination": "",
+    "related": [
+     "reviews"
+    ],
+    "title": "mediacao em espera de resposta do mercado livre",
+    "responsible": "mediator",
+    "com_resolucao": true,
+    "com_due": true
+   },
+   "bucket": "fora_da_fila",
+   "regra": "ml_waiting_platform_response:mediator::"
+  },
+  {
+   "entrada": {
+    "acoes": [
+     "send_message_to_mediator"
+    ],
+    "claim_type": "returns",
+    "stage": "dispute",
+    "claim_status": "opened",
+    "return_status": "",
+    "shipment_status": "",
+    "destination": "",
+    "related": [
+     "reviews"
+    ],
+    "title": "mediacao em espera de resposta do mercado livre",
+    "responsible": "mediator",
+    "com_resolucao": true,
+    "com_due": false
+   },
+   "bucket": "fora_da_fila",
+   "regra": "ml_waiting_platform_response:mediator::"
+  },
+  {
+   "entrada": {
+    "acoes": [
+     "send_message_to_mediator"
+    ],
+    "claim_type": "returns",
+    "stage": "dispute",
+    "claim_status": "opened",
+    "return_status": "",
+    "shipment_status": "",
+    "destination": "",
+    "related": [
+     "reviews"
+    ],
+    "title": "mediacao em espera de resposta do mercado livre",
+    "responsible": "mediator",
+    "com_resolucao": false,
+    "com_due": true
+   },
+   "bucket": "fora_da_fila",
+   "regra": "ml_waiting_platform_response:mediator::"
+  },
+  {
+   "entrada": {
+    "acoes": [
+     "send_message_to_mediator"
+    ],
+    "claim_type": "returns",
+    "stage": "dispute",
+    "claim_status": "opened",
+    "return_status": "",
+    "shipment_status": "",
+    "destination": "",
+    "related": [
+     "reviews"
+    ],
+    "title": "mediacao em espera de resposta do mercado livre",
+    "responsible": "mediator",
+    "com_resolucao": false,
+    "com_due": false
+   },
+   "bucket": "fora_da_fila",
+   "regra": "ml_waiting_platform_response:mediator::"
+  },
+  {
+   "entrada": {
+    "acoes": [],
+    "claim_type": "returns",
+    "stage": "claim",
+    "claim_status": "opened",
+    "return_status": "",
+    "shipment_status": "",
+    "destination": "",
+    "related": [],
+    "title": "",
+    "responsible": "",
+    "com_resolucao": true,
+    "com_due": true
+   },
+   "bucket": "fora_da_fila",
+   "regra": "no_matching_queue_rule::"
+  },
+  {
+   "entrada": {
+    "acoes": [],
+    "claim_type": "returns",
+    "stage": "claim",
+    "claim_status": "opened",
+    "return_status": "",
+    "shipment_status": "",
+    "destination": "",
+    "related": [],
+    "title": "",
+    "responsible": "",
+    "com_resolucao": true,
+    "com_due": false
+   },
+   "bucket": "fora_da_fila",
+   "regra": "no_matching_queue_rule::"
+  },
+  {
+   "entrada": {
+    "acoes": [],
+    "claim_type": "returns",
+    "stage": "claim",
+    "claim_status": "opened",
+    "return_status": "",
+    "shipment_status": "",
+    "destination": "",
+    "related": [],
+    "title": "",
+    "responsible": "",
+    "com_resolucao": false,
+    "com_due": true
+   },
+   "bucket": "fora_da_fila",
+   "regra": "no_matching_queue_rule::"
+  },
+  {
+   "entrada": {
+    "acoes": [],
+    "claim_type": "returns",
+    "stage": "claim",
+    "claim_status": "opened",
+    "return_status": "",
+    "shipment_status": "",
+    "destination": "",
+    "related": [],
+    "title": "",
+    "responsible": "",
+    "com_resolucao": false,
+    "com_due": false
+   },
+   "bucket": "fora_da_fila",
+   "regra": "no_matching_queue_rule::"
+  },
+  {
+   "entrada": {
+    "acoes": [],
+    "claim_type": "returns",
+    "stage": "claim",
+    "claim_status": "opened",
+    "return_status": "",
+    "shipment_status": "",
+    "destination": "",
+    "related": [],
+    "title": "",
+    "responsible": "respondent",
+    "com_resolucao": true,
+    "com_due": true
+   },
+   "bucket": "fora_da_fila",
+   "regra": "no_matching_queue_rule::"
+  },
+  {
+   "entrada": {
+    "acoes": [],
+    "claim_type": "returns",
+    "stage": "claim",
+    "claim_status": "opened",
+    "return_status": "",
+    "shipment_status": "",
+    "destination": "",
+    "related": [],
+    "title": "",
+    "responsible": "respondent",
+    "com_resolucao": true,
+    "com_due": false
+   },
+   "bucket": "fora_da_fila",
+   "regra": "no_matching_queue_rule::"
+  },
+  {
+   "entrada": {
+    "acoes": [],
+    "claim_type": "returns",
+    "stage": "claim",
+    "claim_status": "opened",
+    "return_status": "",
+    "shipment_status": "",
+    "destination": "",
+    "related": [],
+    "title": "",
+    "responsible": "respondent",
+    "com_resolucao": false,
+    "com_due": true
+   },
+   "bucket": "fora_da_fila",
+   "regra": "no_matching_queue_rule::"
+  },
+  {
+   "entrada": {
+    "acoes": [],
+    "claim_type": "returns",
+    "stage": "claim",
+    "claim_status": "opened",
+    "return_status": "",
+    "shipment_status": "",
+    "destination": "",
+    "related": [],
+    "title": "",
+    "responsible": "respondent",
+    "com_resolucao": false,
+    "com_due": false
+   },
+   "bucket": "fora_da_fila",
+   "regra": "no_matching_queue_rule::"
+  },
+  {
+   "entrada": {
+    "acoes": [],
+    "claim_type": "returns",
+    "stage": "claim",
+    "claim_status": "opened",
+    "return_status": "",
+    "shipment_status": "",
+    "destination": "",
+    "related": [],
+    "title": "",
+    "responsible": "seller",
+    "com_resolucao": true,
+    "com_due": true
+   },
+   "bucket": "fora_da_fila",
+   "regra": "no_matching_queue_rule::"
+  },
+  {
+   "entrada": {
+    "acoes": [],
+    "claim_type": "returns",
+    "stage": "claim",
+    "claim_status": "opened",
+    "return_status": "",
+    "shipment_status": "",
+    "destination": "",
+    "related": [],
+    "title": "",
+    "responsible": "seller",
+    "com_resolucao": true,
+    "com_due": false
+   },
+   "bucket": "fora_da_fila",
+   "regra": "no_matching_queue_rule::"
+  },
+  {
+   "entrada": {
+    "acoes": [],
+    "claim_type": "returns",
+    "stage": "claim",
+    "claim_status": "opened",
+    "return_status": "",
+    "shipment_status": "",
+    "destination": "",
+    "related": [],
+    "title": "",
+    "responsible": "seller",
+    "com_resolucao": false,
+    "com_due": true
+   },
+   "bucket": "fora_da_fila",
+   "regra": "no_matching_queue_rule::"
+  },
+  {
+   "entrada": {
+    "acoes": [],
+    "claim_type": "returns",
+    "stage": "claim",
+    "claim_status": "opened",
+    "return_status": "",
+    "shipment_status": "",
+    "destination": "",
+    "related": [],
+    "title": "",
+    "responsible": "seller",
+    "com_resolucao": false,
+    "com_due": false
+   },
+   "bucket": "fora_da_fila",
+   "regra": "no_matching_queue_rule::"
+  },
+  {
+   "entrada": {
+    "acoes": [],
+    "claim_type": "returns",
+    "stage": "claim",
+    "claim_status": "opened",
+    "return_status": "shipped",
+    "shipment_status": "",
+    "destination": "",
+    "related": [],
+    "title": "",
+    "responsible": "",
+    "com_resolucao": true,
+    "com_due": true
+   },
+   "bucket": "fora_da_fila",
+   "regra": "return_in_progress_not_next_attention:shipped::"
+  },
+  {
+   "entrada": {
+    "acoes": [],
+    "claim_type": "returns",
+    "stage": "claim",
+    "claim_status": "opened",
+    "return_status": "shipped",
+    "shipment_status": "",
+    "destination": "",
+    "related": [],
+    "title": "",
+    "responsible": "",
+    "com_resolucao": true,
+    "com_due": false
+   },
+   "bucket": "fora_da_fila",
+   "regra": "return_in_progress_not_next_attention:shipped::"
+  },
+  {
+   "entrada": {
+    "acoes": [],
+    "claim_type": "returns",
+    "stage": "claim",
+    "claim_status": "opened",
+    "return_status": "shipped",
+    "shipment_status": "",
+    "destination": "",
+    "related": [],
+    "title": "",
+    "responsible": "",
+    "com_resolucao": false,
+    "com_due": true
+   },
+   "bucket": "fora_da_fila",
+   "regra": "return_in_progress_not_next_attention:shipped::"
+  },
+  {
+   "entrada": {
+    "acoes": [],
+    "claim_type": "returns",
+    "stage": "claim",
+    "claim_status": "opened",
+    "return_status": "shipped",
+    "shipment_status": "",
+    "destination": "",
+    "related": [],
+    "title": "",
+    "responsible": "",
+    "com_resolucao": false,
+    "com_due": false
+   },
+   "bucket": "fora_da_fila",
+   "regra": "return_in_progress_not_next_attention:shipped::"
+  },
+  {
+   "entrada": {
+    "acoes": [],
+    "claim_type": "returns",
+    "stage": "claim",
+    "claim_status": "opened",
+    "return_status": "shipped",
+    "shipment_status": "",
+    "destination": "",
+    "related": [],
+    "title": "",
+    "responsible": "respondent",
+    "com_resolucao": true,
+    "com_due": true
+   },
+   "bucket": "fora_da_fila",
+   "regra": "return_in_progress_not_next_attention:shipped::"
+  },
+  {
+   "entrada": {
+    "acoes": [],
+    "claim_type": "returns",
+    "stage": "claim",
+    "claim_status": "opened",
+    "return_status": "shipped",
+    "shipment_status": "",
+    "destination": "",
+    "related": [],
+    "title": "",
+    "responsible": "respondent",
+    "com_resolucao": true,
+    "com_due": false
+   },
+   "bucket": "fora_da_fila",
+   "regra": "return_in_progress_not_next_attention:shipped::"
+  },
+  {
+   "entrada": {
+    "acoes": [],
+    "claim_type": "returns",
+    "stage": "claim",
+    "claim_status": "opened",
+    "return_status": "shipped",
+    "shipment_status": "",
+    "destination": "",
+    "related": [],
+    "title": "",
+    "responsible": "respondent",
+    "com_resolucao": false,
+    "com_due": true
+   },
+   "bucket": "fora_da_fila",
+   "regra": "return_in_progress_not_next_attention:shipped::"
+  },
+  {
+   "entrada": {
+    "acoes": [],
+    "claim_type": "returns",
+    "stage": "claim",
+    "claim_status": "opened",
+    "return_status": "shipped",
+    "shipment_status": "",
+    "destination": "",
+    "related": [],
+    "title": "",
+    "responsible": "respondent",
+    "com_resolucao": false,
+    "com_due": false
+   },
+   "bucket": "fora_da_fila",
+   "regra": "return_in_progress_not_next_attention:shipped::"
+  },
+  {
+   "entrada": {
+    "acoes": [],
+    "claim_type": "returns",
+    "stage": "claim",
+    "claim_status": "opened",
+    "return_status": "shipped",
+    "shipment_status": "",
+    "destination": "",
+    "related": [],
+    "title": "",
+    "responsible": "seller",
+    "com_resolucao": true,
+    "com_due": true
+   },
+   "bucket": "fora_da_fila",
+   "regra": "return_in_progress_not_next_attention:shipped::"
+  },
+  {
+   "entrada": {
+    "acoes": [],
+    "claim_type": "returns",
+    "stage": "claim",
+    "claim_status": "opened",
+    "return_status": "shipped",
+    "shipment_status": "",
+    "destination": "",
+    "related": [],
+    "title": "",
+    "responsible": "seller",
+    "com_resolucao": true,
+    "com_due": false
+   },
+   "bucket": "fora_da_fila",
+   "regra": "return_in_progress_not_next_attention:shipped::"
+  },
+  {
+   "entrada": {
+    "acoes": [],
+    "claim_type": "returns",
+    "stage": "claim",
+    "claim_status": "opened",
+    "return_status": "shipped",
+    "shipment_status": "",
+    "destination": "",
+    "related": [],
+    "title": "",
+    "responsible": "seller",
+    "com_resolucao": false,
+    "com_due": true
+   },
+   "bucket": "fora_da_fila",
+   "regra": "return_in_progress_not_next_attention:shipped::"
+  },
+  {
+   "entrada": {
+    "acoes": [],
+    "claim_type": "returns",
+    "stage": "claim",
+    "claim_status": "opened",
+    "return_status": "shipped",
+    "shipment_status": "",
+    "destination": "",
+    "related": [],
+    "title": "",
+    "responsible": "seller",
+    "com_resolucao": false,
+    "com_due": false
+   },
+   "bucket": "fora_da_fila",
+   "regra": "return_in_progress_not_next_attention:shipped::"
+  },
+  {
+   "entrada": {
+    "acoes": [],
+    "claim_type": "returns",
+    "stage": "claim",
+    "claim_status": "opened",
+    "return_status": "label_generated",
+    "shipment_status": "",
+    "destination": "",
+    "related": [],
+    "title": "",
+    "responsible": "",
+    "com_resolucao": true,
+    "com_due": true
+   },
+   "bucket": "fora_da_fila",
+   "regra": "return_label_generated_not_target_filter::"
+  },
+  {
+   "entrada": {
+    "acoes": [],
+    "claim_type": "returns",
+    "stage": "claim",
+    "claim_status": "opened",
+    "return_status": "label_generated",
+    "shipment_status": "",
+    "destination": "",
+    "related": [],
+    "title": "",
+    "responsible": "",
+    "com_resolucao": true,
+    "com_due": false
+   },
+   "bucket": "fora_da_fila",
+   "regra": "return_label_generated_not_target_filter::"
+  },
+  {
+   "entrada": {
+    "acoes": [],
+    "claim_type": "returns",
+    "stage": "claim",
+    "claim_status": "opened",
+    "return_status": "label_generated",
+    "shipment_status": "",
+    "destination": "",
+    "related": [],
+    "title": "",
+    "responsible": "",
+    "com_resolucao": false,
+    "com_due": true
+   },
+   "bucket": "fora_da_fila",
+   "regra": "return_label_generated_not_target_filter::"
+  },
+  {
+   "entrada": {
+    "acoes": [],
+    "claim_type": "returns",
+    "stage": "claim",
+    "claim_status": "opened",
+    "return_status": "label_generated",
+    "shipment_status": "",
+    "destination": "",
+    "related": [],
+    "title": "",
+    "responsible": "",
+    "com_resolucao": false,
+    "com_due": false
+   },
+   "bucket": "fora_da_fila",
+   "regra": "return_label_generated_not_target_filter::"
+  },
+  {
+   "entrada": {
+    "acoes": [],
+    "claim_type": "returns",
+    "stage": "claim",
+    "claim_status": "opened",
+    "return_status": "label_generated",
+    "shipment_status": "",
+    "destination": "",
+    "related": [],
+    "title": "",
+    "responsible": "respondent",
+    "com_resolucao": true,
+    "com_due": true
+   },
+   "bucket": "fora_da_fila",
+   "regra": "return_label_generated_not_target_filter::"
+  },
+  {
+   "entrada": {
+    "acoes": [],
+    "claim_type": "returns",
+    "stage": "claim",
+    "claim_status": "opened",
+    "return_status": "label_generated",
+    "shipment_status": "",
+    "destination": "",
+    "related": [],
+    "title": "",
+    "responsible": "respondent",
+    "com_resolucao": true,
+    "com_due": false
+   },
+   "bucket": "fora_da_fila",
+   "regra": "return_label_generated_not_target_filter::"
+  },
+  {
+   "entrada": {
+    "acoes": [],
+    "claim_type": "returns",
+    "stage": "claim",
+    "claim_status": "opened",
+    "return_status": "label_generated",
+    "shipment_status": "",
+    "destination": "",
+    "related": [],
+    "title": "",
+    "responsible": "respondent",
+    "com_resolucao": false,
+    "com_due": true
+   },
+   "bucket": "fora_da_fila",
+   "regra": "return_label_generated_not_target_filter::"
+  },
+  {
+   "entrada": {
+    "acoes": [],
+    "claim_type": "returns",
+    "stage": "claim",
+    "claim_status": "opened",
+    "return_status": "label_generated",
+    "shipment_status": "",
+    "destination": "",
+    "related": [],
+    "title": "",
+    "responsible": "respondent",
+    "com_resolucao": false,
+    "com_due": false
+   },
+   "bucket": "fora_da_fila",
+   "regra": "return_label_generated_not_target_filter::"
+  },
+  {
+   "entrada": {
+    "acoes": [],
+    "claim_type": "returns",
+    "stage": "claim",
+    "claim_status": "opened",
+    "return_status": "label_generated",
+    "shipment_status": "",
+    "destination": "",
+    "related": [],
+    "title": "",
+    "responsible": "seller",
+    "com_resolucao": true,
+    "com_due": true
+   },
+   "bucket": "fora_da_fila",
+   "regra": "return_label_generated_not_target_filter::"
+  },
+  {
+   "entrada": {
+    "acoes": [],
+    "claim_type": "returns",
+    "stage": "claim",
+    "claim_status": "opened",
+    "return_status": "label_generated",
+    "shipment_status": "",
+    "destination": "",
+    "related": [],
+    "title": "",
+    "responsible": "seller",
+    "com_resolucao": true,
+    "com_due": false
+   },
+   "bucket": "fora_da_fila",
+   "regra": "return_label_generated_not_target_filter::"
+  },
+  {
+   "entrada": {
+    "acoes": [],
+    "claim_type": "returns",
+    "stage": "claim",
+    "claim_status": "opened",
+    "return_status": "label_generated",
+    "shipment_status": "",
+    "destination": "",
+    "related": [],
+    "title": "",
+    "responsible": "seller",
+    "com_resolucao": false,
+    "com_due": true
+   },
+   "bucket": "fora_da_fila",
+   "regra": "return_label_generated_not_target_filter::"
+  },
+  {
+   "entrada": {
+    "acoes": [],
+    "claim_type": "returns",
+    "stage": "claim",
+    "claim_status": "opened",
+    "return_status": "label_generated",
+    "shipment_status": "",
+    "destination": "",
+    "related": [],
+    "title": "",
+    "responsible": "seller",
+    "com_resolucao": false,
+    "com_due": false
+   },
+   "bucket": "fora_da_fila",
+   "regra": "return_label_generated_not_target_filter::"
+  },
+  {
+   "entrada": {
+    "acoes": [],
+    "claim_type": "returns",
+    "stage": "claim",
+    "claim_status": "opened",
+    "return_status": "failed",
+    "shipment_status": "",
+    "destination": "",
+    "related": [],
+    "title": "",
+    "responsible": "",
+    "com_resolucao": true,
+    "com_due": true
+   },
+   "bucket": "fora_da_fila",
+   "regra": "return_problem_status_not_target_filter:failed::"
+  },
+  {
+   "entrada": {
+    "acoes": [],
+    "claim_type": "returns",
+    "stage": "claim",
+    "claim_status": "opened",
+    "return_status": "failed",
+    "shipment_status": "",
+    "destination": "",
+    "related": [],
+    "title": "",
+    "responsible": "",
+    "com_resolucao": true,
+    "com_due": false
+   },
+   "bucket": "fora_da_fila",
+   "regra": "return_problem_status_not_target_filter:failed::"
+  },
+  {
+   "entrada": {
+    "acoes": [],
+    "claim_type": "returns",
+    "stage": "claim",
+    "claim_status": "opened",
+    "return_status": "failed",
+    "shipment_status": "",
+    "destination": "",
+    "related": [],
+    "title": "",
+    "responsible": "",
+    "com_resolucao": false,
+    "com_due": true
+   },
+   "bucket": "fora_da_fila",
+   "regra": "return_problem_status_not_target_filter:failed::"
+  },
+  {
+   "entrada": {
+    "acoes": [],
+    "claim_type": "returns",
+    "stage": "claim",
+    "claim_status": "opened",
+    "return_status": "failed",
+    "shipment_status": "",
+    "destination": "",
+    "related": [],
+    "title": "",
+    "responsible": "",
+    "com_resolucao": false,
+    "com_due": false
+   },
+   "bucket": "fora_da_fila",
+   "regra": "return_problem_status_not_target_filter:failed::"
+  },
+  {
+   "entrada": {
+    "acoes": [],
+    "claim_type": "returns",
+    "stage": "claim",
+    "claim_status": "opened",
+    "return_status": "failed",
+    "shipment_status": "",
+    "destination": "",
+    "related": [],
+    "title": "",
+    "responsible": "respondent",
+    "com_resolucao": true,
+    "com_due": true
+   },
+   "bucket": "fora_da_fila",
+   "regra": "return_problem_status_not_target_filter:failed::"
+  },
+  {
+   "entrada": {
+    "acoes": [],
+    "claim_type": "returns",
+    "stage": "claim",
+    "claim_status": "opened",
+    "return_status": "failed",
+    "shipment_status": "",
+    "destination": "",
+    "related": [],
+    "title": "",
+    "responsible": "respondent",
+    "com_resolucao": true,
+    "com_due": false
+   },
+   "bucket": "fora_da_fila",
+   "regra": "return_problem_status_not_target_filter:failed::"
+  },
+  {
+   "entrada": {
+    "acoes": [],
+    "claim_type": "returns",
+    "stage": "claim",
+    "claim_status": "opened",
+    "return_status": "failed",
+    "shipment_status": "",
+    "destination": "",
+    "related": [],
+    "title": "",
+    "responsible": "respondent",
+    "com_resolucao": false,
+    "com_due": true
+   },
+   "bucket": "fora_da_fila",
+   "regra": "return_problem_status_not_target_filter:failed::"
+  },
+  {
+   "entrada": {
+    "acoes": [],
+    "claim_type": "returns",
+    "stage": "claim",
+    "claim_status": "opened",
+    "return_status": "failed",
+    "shipment_status": "",
+    "destination": "",
+    "related": [],
+    "title": "",
+    "responsible": "respondent",
+    "com_resolucao": false,
+    "com_due": false
+   },
+   "bucket": "fora_da_fila",
+   "regra": "return_problem_status_not_target_filter:failed::"
+  },
+  {
+   "entrada": {
+    "acoes": [],
+    "claim_type": "returns",
+    "stage": "claim",
+    "claim_status": "opened",
+    "return_status": "failed",
+    "shipment_status": "",
+    "destination": "",
+    "related": [],
+    "title": "",
+    "responsible": "seller",
+    "com_resolucao": true,
+    "com_due": true
+   },
+   "bucket": "fora_da_fila",
+   "regra": "return_problem_status_not_target_filter:failed::"
+  },
+  {
+   "entrada": {
+    "acoes": [],
+    "claim_type": "returns",
+    "stage": "claim",
+    "claim_status": "opened",
+    "return_status": "failed",
+    "shipment_status": "",
+    "destination": "",
+    "related": [],
+    "title": "",
+    "responsible": "seller",
+    "com_resolucao": true,
+    "com_due": false
+   },
+   "bucket": "fora_da_fila",
+   "regra": "return_problem_status_not_target_filter:failed::"
+  },
+  {
+   "entrada": {
+    "acoes": [],
+    "claim_type": "returns",
+    "stage": "claim",
+    "claim_status": "opened",
+    "return_status": "failed",
+    "shipment_status": "",
+    "destination": "",
+    "related": [],
+    "title": "",
+    "responsible": "seller",
+    "com_resolucao": false,
+    "com_due": true
+   },
+   "bucket": "fora_da_fila",
+   "regra": "return_problem_status_not_target_filter:failed::"
+  },
+  {
+   "entrada": {
+    "acoes": [],
+    "claim_type": "returns",
+    "stage": "claim",
+    "claim_status": "opened",
+    "return_status": "failed",
+    "shipment_status": "",
+    "destination": "",
+    "related": [],
+    "title": "",
+    "responsible": "seller",
+    "com_resolucao": false,
+    "com_due": false
+   },
+   "bucket": "fora_da_fila",
+   "regra": "return_problem_status_not_target_filter:failed::"
+  },
+  {
+   "entrada": {
+    "acoes": [
+     "return_review_unified_ok"
+    ],
+    "claim_type": "returns",
+    "stage": "claim",
+    "claim_status": "opened",
+    "return_status": "shipped",
+    "shipment_status": "shipped",
+    "destination": "warehouse",
+    "related": [],
+    "title": "",
+    "responsible": "",
+    "com_resolucao": true,
+    "com_due": true
+   },
+   "bucket": "fora_da_fila",
+   "regra": "return_updated_date_in_transit:shipped:shipped:warehouse"
+  },
+  {
+   "entrada": {
+    "acoes": [
+     "return_review_unified_ok"
+    ],
+    "claim_type": "returns",
+    "stage": "claim",
+    "claim_status": "opened",
+    "return_status": "shipped",
+    "shipment_status": "shipped",
+    "destination": "warehouse",
+    "related": [],
+    "title": "",
+    "responsible": "",
+    "com_resolucao": true,
+    "com_due": false
+   },
+   "bucket": "fora_da_fila",
+   "regra": "return_updated_date_in_transit:shipped:shipped:warehouse"
+  },
+  {
+   "entrada": {
+    "acoes": [
+     "return_review_unified_ok"
+    ],
+    "claim_type": "returns",
+    "stage": "claim",
+    "claim_status": "opened",
+    "return_status": "shipped",
+    "shipment_status": "shipped",
+    "destination": "warehouse",
+    "related": [],
+    "title": "",
+    "responsible": "",
+    "com_resolucao": false,
+    "com_due": true
+   },
+   "bucket": "fora_da_fila",
+   "regra": "return_updated_date_in_transit:shipped:shipped:warehouse"
+  },
+  {
+   "entrada": {
+    "acoes": [
+     "return_review_unified_ok"
+    ],
+    "claim_type": "returns",
+    "stage": "claim",
+    "claim_status": "opened",
+    "return_status": "shipped",
+    "shipment_status": "shipped",
+    "destination": "warehouse",
+    "related": [],
+    "title": "",
+    "responsible": "",
+    "com_resolucao": false,
+    "com_due": false
+   },
+   "bucket": "fora_da_fila",
+   "regra": "return_updated_date_in_transit:shipped:shipped:warehouse"
+  },
+  {
+   "entrada": {
+    "acoes": [
+     "return_review_unified_ok"
+    ],
+    "claim_type": "returns",
+    "stage": "claim",
+    "claim_status": "opened",
+    "return_status": "shipped",
+    "shipment_status": "shipped",
+    "destination": "warehouse",
+    "related": [],
+    "title": "",
+    "responsible": "respondent",
+    "com_resolucao": true,
+    "com_due": true
+   },
+   "bucket": "fora_da_fila",
+   "regra": "return_updated_date_in_transit:shipped:shipped:warehouse"
+  },
+  {
+   "entrada": {
+    "acoes": [
+     "return_review_unified_ok"
+    ],
+    "claim_type": "returns",
+    "stage": "claim",
+    "claim_status": "opened",
+    "return_status": "shipped",
+    "shipment_status": "shipped",
+    "destination": "warehouse",
+    "related": [],
+    "title": "",
+    "responsible": "respondent",
+    "com_resolucao": true,
+    "com_due": false
+   },
+   "bucket": "fora_da_fila",
+   "regra": "return_updated_date_in_transit:shipped:shipped:warehouse"
+  },
+  {
+   "entrada": {
+    "acoes": [
+     "return_review_unified_ok"
+    ],
+    "claim_type": "returns",
+    "stage": "claim",
+    "claim_status": "opened",
+    "return_status": "shipped",
+    "shipment_status": "shipped",
+    "destination": "warehouse",
+    "related": [],
+    "title": "",
+    "responsible": "respondent",
+    "com_resolucao": false,
+    "com_due": true
+   },
+   "bucket": "fora_da_fila",
+   "regra": "return_updated_date_in_transit:shipped:shipped:warehouse"
+  },
+  {
+   "entrada": {
+    "acoes": [
+     "return_review_unified_ok"
+    ],
+    "claim_type": "returns",
+    "stage": "claim",
+    "claim_status": "opened",
+    "return_status": "shipped",
+    "shipment_status": "shipped",
+    "destination": "warehouse",
+    "related": [],
+    "title": "",
+    "responsible": "respondent",
+    "com_resolucao": false,
+    "com_due": false
+   },
+   "bucket": "fora_da_fila",
+   "regra": "return_updated_date_in_transit:shipped:shipped:warehouse"
+  },
+  {
+   "entrada": {
+    "acoes": [
+     "return_review_unified_ok"
+    ],
+    "claim_type": "returns",
+    "stage": "claim",
+    "claim_status": "opened",
+    "return_status": "shipped",
+    "shipment_status": "shipped",
+    "destination": "warehouse",
+    "related": [],
+    "title": "",
+    "responsible": "seller",
+    "com_resolucao": true,
+    "com_due": true
+   },
+   "bucket": "fora_da_fila",
+   "regra": "return_updated_date_in_transit:shipped:shipped:warehouse"
+  },
+  {
+   "entrada": {
+    "acoes": [
+     "return_review_unified_ok"
+    ],
+    "claim_type": "returns",
+    "stage": "claim",
+    "claim_status": "opened",
+    "return_status": "shipped",
+    "shipment_status": "shipped",
+    "destination": "warehouse",
+    "related": [],
+    "title": "",
+    "responsible": "seller",
+    "com_resolucao": true,
+    "com_due": false
+   },
+   "bucket": "fora_da_fila",
+   "regra": "return_updated_date_in_transit:shipped:shipped:warehouse"
+  },
+  {
+   "entrada": {
+    "acoes": [
+     "return_review_unified_ok"
+    ],
+    "claim_type": "returns",
+    "stage": "claim",
+    "claim_status": "opened",
+    "return_status": "shipped",
+    "shipment_status": "shipped",
+    "destination": "warehouse",
+    "related": [],
+    "title": "",
+    "responsible": "seller",
+    "com_resolucao": false,
+    "com_due": true
+   },
+   "bucket": "fora_da_fila",
+   "regra": "return_updated_date_in_transit:shipped:shipped:warehouse"
+  },
+  {
+   "entrada": {
+    "acoes": [
+     "return_review_unified_ok"
+    ],
+    "claim_type": "returns",
+    "stage": "claim",
+    "claim_status": "opened",
+    "return_status": "shipped",
+    "shipment_status": "shipped",
+    "destination": "warehouse",
+    "related": [],
+    "title": "",
+    "responsible": "seller",
+    "com_resolucao": false,
+    "com_due": false
+   },
+   "bucket": "fora_da_fila",
+   "regra": "return_updated_date_in_transit:shipped:shipped:warehouse"
+  },
+  {
+   "entrada": {
+    "acoes": [
+     "return_review_unified_ok"
+    ],
+    "claim_type": "returns",
+    "stage": "claim",
+    "claim_status": "opened",
+    "return_status": "",
+    "shipment_status": "",
+    "destination": "",
+    "related": [],
+    "title": "devolucao com data atualizada",
+    "responsible": "",
+    "com_resolucao": true,
+    "com_due": true
+   },
+   "bucket": "fora_da_fila",
+   "regra": "return_updated_date_title:::"
+  },
+  {
+   "entrada": {
+    "acoes": [
+     "return_review_unified_ok"
+    ],
+    "claim_type": "returns",
+    "stage": "claim",
+    "claim_status": "opened",
+    "return_status": "",
+    "shipment_status": "",
+    "destination": "",
+    "related": [],
+    "title": "devolucao com data atualizada",
+    "responsible": "",
+    "com_resolucao": true,
+    "com_due": false
+   },
+   "bucket": "fora_da_fila",
+   "regra": "return_updated_date_title:::"
+  },
+  {
+   "entrada": {
+    "acoes": [
+     "return_review_unified_ok"
+    ],
+    "claim_type": "returns",
+    "stage": "claim",
+    "claim_status": "opened",
+    "return_status": "",
+    "shipment_status": "",
+    "destination": "",
+    "related": [],
+    "title": "devolucao com data atualizada",
+    "responsible": "",
+    "com_resolucao": false,
+    "com_due": true
+   },
+   "bucket": "fora_da_fila",
+   "regra": "return_updated_date_title:::"
+  },
+  {
+   "entrada": {
+    "acoes": [
+     "return_review_unified_ok"
+    ],
+    "claim_type": "returns",
+    "stage": "claim",
+    "claim_status": "opened",
+    "return_status": "",
+    "shipment_status": "",
+    "destination": "",
+    "related": [],
+    "title": "devolucao com data atualizada",
+    "responsible": "",
+    "com_resolucao": false,
+    "com_due": false
+   },
+   "bucket": "fora_da_fila",
+   "regra": "return_updated_date_title:::"
+  },
+  {
+   "entrada": {
+    "acoes": [
+     "return_review_unified_ok"
+    ],
+    "claim_type": "returns",
+    "stage": "claim",
+    "claim_status": "opened",
+    "return_status": "",
+    "shipment_status": "",
+    "destination": "",
+    "related": [],
+    "title": "devolucao com data atualizada",
+    "responsible": "respondent",
+    "com_resolucao": true,
+    "com_due": true
+   },
+   "bucket": "fora_da_fila",
+   "regra": "return_updated_date_title:respondent::"
+  },
+  {
+   "entrada": {
+    "acoes": [
+     "return_review_unified_ok"
+    ],
+    "claim_type": "returns",
+    "stage": "claim",
+    "claim_status": "opened",
+    "return_status": "",
+    "shipment_status": "",
+    "destination": "",
+    "related": [],
+    "title": "devolucao com data atualizada",
+    "responsible": "respondent",
+    "com_resolucao": true,
+    "com_due": false
+   },
+   "bucket": "fora_da_fila",
+   "regra": "return_updated_date_title:respondent::"
+  },
+  {
+   "entrada": {
+    "acoes": [
+     "return_review_unified_ok"
+    ],
+    "claim_type": "returns",
+    "stage": "claim",
+    "claim_status": "opened",
+    "return_status": "",
+    "shipment_status": "",
+    "destination": "",
+    "related": [],
+    "title": "devolucao com data atualizada",
+    "responsible": "respondent",
+    "com_resolucao": false,
+    "com_due": true
+   },
+   "bucket": "fora_da_fila",
+   "regra": "return_updated_date_title:respondent::"
+  },
+  {
+   "entrada": {
+    "acoes": [
+     "return_review_unified_ok"
+    ],
+    "claim_type": "returns",
+    "stage": "claim",
+    "claim_status": "opened",
+    "return_status": "",
+    "shipment_status": "",
+    "destination": "",
+    "related": [],
+    "title": "devolucao com data atualizada",
+    "responsible": "respondent",
+    "com_resolucao": false,
+    "com_due": false
+   },
+   "bucket": "fora_da_fila",
+   "regra": "return_updated_date_title:respondent::"
+  },
+  {
+   "entrada": {
+    "acoes": [
+     "return_review_unified_ok"
+    ],
+    "claim_type": "returns",
+    "stage": "claim",
+    "claim_status": "opened",
+    "return_status": "",
+    "shipment_status": "",
+    "destination": "",
+    "related": [],
+    "title": "devolucao com data atualizada",
+    "responsible": "seller",
+    "com_resolucao": true,
+    "com_due": true
+   },
+   "bucket": "fora_da_fila",
+   "regra": "return_updated_date_title:seller::"
+  },
+  {
+   "entrada": {
+    "acoes": [
+     "return_review_unified_ok"
+    ],
+    "claim_type": "returns",
+    "stage": "claim",
+    "claim_status": "opened",
+    "return_status": "",
+    "shipment_status": "",
+    "destination": "",
+    "related": [],
+    "title": "devolucao com data atualizada",
+    "responsible": "seller",
+    "com_resolucao": true,
+    "com_due": false
+   },
+   "bucket": "fora_da_fila",
+   "regra": "return_updated_date_title:seller::"
+  },
+  {
+   "entrada": {
+    "acoes": [
+     "return_review_unified_ok"
+    ],
+    "claim_type": "returns",
+    "stage": "claim",
+    "claim_status": "opened",
+    "return_status": "",
+    "shipment_status": "",
+    "destination": "",
+    "related": [],
+    "title": "devolucao com data atualizada",
+    "responsible": "seller",
+    "com_resolucao": false,
+    "com_due": true
+   },
+   "bucket": "fora_da_fila",
+   "regra": "return_updated_date_title:seller::"
+  },
+  {
+   "entrada": {
+    "acoes": [
+     "return_review_unified_ok"
+    ],
+    "claim_type": "returns",
+    "stage": "claim",
+    "claim_status": "opened",
+    "return_status": "",
+    "shipment_status": "",
+    "destination": "",
+    "related": [],
+    "title": "devolucao com data atualizada",
+    "responsible": "seller",
+    "com_resolucao": false,
+    "com_due": false
+   },
+   "bucket": "fora_da_fila",
+   "regra": "return_updated_date_title:seller::"
+  },
+  {
+   "entrada": {
+    "acoes": [
+     "return_review_unified_ok"
+    ],
+    "claim_type": "returns",
+    "stage": "claim",
+    "claim_status": "opened",
+    "return_status": "",
+    "shipment_status": "",
+    "destination": "",
+    "related": [],
+    "title": "",
+    "responsible": "",
+    "com_resolucao": true,
+    "com_due": true
+   },
+   "bucket": "para_revisao",
+   "regra": "seller_available_action:return_review"
+  },
+  {
+   "entrada": {
+    "acoes": [
+     "return_review_unified_ok"
+    ],
+    "claim_type": "returns",
+    "stage": "claim",
+    "claim_status": "opened",
+    "return_status": "",
+    "shipment_status": "",
+    "destination": "",
+    "related": [],
+    "title": "",
+    "responsible": "",
+    "com_resolucao": true,
+    "com_due": false
+   },
+   "bucket": "para_revisao",
+   "regra": "seller_available_action:return_review"
+  },
+  {
+   "entrada": {
+    "acoes": [
+     "return_review_unified_ok"
+    ],
+    "claim_type": "returns",
+    "stage": "claim",
+    "claim_status": "opened",
+    "return_status": "",
+    "shipment_status": "",
+    "destination": "",
+    "related": [],
+    "title": "",
+    "responsible": "",
+    "com_resolucao": false,
+    "com_due": true
+   },
+   "bucket": "para_revisao",
+   "regra": "seller_available_action:return_review"
+  },
+  {
+   "entrada": {
+    "acoes": [
+     "return_review_unified_ok"
+    ],
+    "claim_type": "returns",
+    "stage": "claim",
+    "claim_status": "opened",
+    "return_status": "",
+    "shipment_status": "",
+    "destination": "",
+    "related": [],
+    "title": "",
+    "responsible": "",
+    "com_resolucao": false,
+    "com_due": false
+   },
+   "bucket": "para_revisao",
+   "regra": "seller_available_action:return_review"
+  },
+  {
+   "entrada": {
+    "acoes": [
+     "return_review_unified_ok"
+    ],
+    "claim_type": "returns",
+    "stage": "claim",
+    "claim_status": "opened",
+    "return_status": "",
+    "shipment_status": "",
+    "destination": "",
+    "related": [],
+    "title": "",
+    "responsible": "respondent",
+    "com_resolucao": true,
+    "com_due": true
+   },
+   "bucket": "para_revisao",
+   "regra": "seller_available_action:return_review"
+  },
+  {
+   "entrada": {
+    "acoes": [
+     "return_review_unified_ok"
+    ],
+    "claim_type": "returns",
+    "stage": "claim",
+    "claim_status": "opened",
+    "return_status": "",
+    "shipment_status": "",
+    "destination": "",
+    "related": [],
+    "title": "",
+    "responsible": "respondent",
+    "com_resolucao": true,
+    "com_due": false
+   },
+   "bucket": "para_revisao",
+   "regra": "seller_available_action:return_review"
+  },
+  {
+   "entrada": {
+    "acoes": [
+     "return_review_unified_ok"
+    ],
+    "claim_type": "returns",
+    "stage": "claim",
+    "claim_status": "opened",
+    "return_status": "",
+    "shipment_status": "",
+    "destination": "",
+    "related": [],
+    "title": "",
+    "responsible": "respondent",
+    "com_resolucao": false,
+    "com_due": true
+   },
+   "bucket": "para_revisao",
+   "regra": "seller_available_action:return_review"
+  },
+  {
+   "entrada": {
+    "acoes": [
+     "return_review_unified_ok"
+    ],
+    "claim_type": "returns",
+    "stage": "claim",
+    "claim_status": "opened",
+    "return_status": "",
+    "shipment_status": "",
+    "destination": "",
+    "related": [],
+    "title": "",
+    "responsible": "respondent",
+    "com_resolucao": false,
+    "com_due": false
+   },
+   "bucket": "para_revisao",
+   "regra": "seller_available_action:return_review"
+  },
+  {
+   "entrada": {
+    "acoes": [
+     "return_review_unified_ok"
+    ],
+    "claim_type": "returns",
+    "stage": "claim",
+    "claim_status": "opened",
+    "return_status": "",
+    "shipment_status": "",
+    "destination": "",
+    "related": [],
+    "title": "",
+    "responsible": "seller",
+    "com_resolucao": true,
+    "com_due": true
+   },
+   "bucket": "para_revisao",
+   "regra": "seller_available_action:return_review"
+  },
+  {
+   "entrada": {
+    "acoes": [
+     "return_review_unified_ok"
+    ],
+    "claim_type": "returns",
+    "stage": "claim",
+    "claim_status": "opened",
+    "return_status": "",
+    "shipment_status": "",
+    "destination": "",
+    "related": [],
+    "title": "",
+    "responsible": "seller",
+    "com_resolucao": true,
+    "com_due": false
+   },
+   "bucket": "para_revisao",
+   "regra": "seller_available_action:return_review"
+  },
+  {
+   "entrada": {
+    "acoes": [
+     "return_review_unified_ok"
+    ],
+    "claim_type": "returns",
+    "stage": "claim",
+    "claim_status": "opened",
+    "return_status": "",
+    "shipment_status": "",
+    "destination": "",
+    "related": [],
+    "title": "",
+    "responsible": "seller",
+    "com_resolucao": false,
+    "com_due": true
+   },
+   "bucket": "para_revisao",
+   "regra": "seller_available_action:return_review"
+  },
+  {
+   "entrada": {
+    "acoes": [
+     "return_review_unified_ok"
+    ],
+    "claim_type": "returns",
+    "stage": "claim",
+    "claim_status": "opened",
+    "return_status": "",
+    "shipment_status": "",
+    "destination": "",
+    "related": [],
+    "title": "",
+    "responsible": "seller",
+    "com_resolucao": false,
+    "com_due": false
+   },
+   "bucket": "para_revisao",
+   "regra": "seller_available_action:return_review"
+  },
+  {
+   "entrada": {
+    "acoes": [
+     "return_review_ok"
+    ],
+    "claim_type": "returns",
+    "stage": "claim",
+    "claim_status": "opened",
+    "return_status": "delivered",
+    "shipment_status": "delivered",
+    "destination": "seller_address",
+    "related": [],
+    "title": "retirar na correios",
+    "responsible": "",
+    "com_resolucao": true,
+    "com_due": true
+   },
+   "bucket": "para_retirar",
+   "regra": "seller_pickup_review_due:return_review_ok"
+  },
+  {
+   "entrada": {
+    "acoes": [
+     "return_review_ok"
+    ],
+    "claim_type": "returns",
+    "stage": "claim",
+    "claim_status": "opened",
+    "return_status": "delivered",
+    "shipment_status": "delivered",
+    "destination": "seller_address",
+    "related": [],
+    "title": "retirar na correios",
+    "responsible": "",
+    "com_resolucao": false,
+    "com_due": true
+   },
+   "bucket": "para_retirar",
+   "regra": "seller_pickup_review_due:return_review_ok"
+  },
+  {
+   "entrada": {
+    "acoes": [
+     "return_review_ok"
+    ],
+    "claim_type": "returns",
+    "stage": "claim",
+    "claim_status": "opened",
+    "return_status": "delivered",
+    "shipment_status": "delivered",
+    "destination": "seller_address",
+    "related": [],
+    "title": "retirar na correios",
+    "responsible": "mediator",
+    "com_resolucao": true,
+    "com_due": true
+   },
+   "bucket": "para_retirar",
+   "regra": "seller_pickup_review_due:return_review_ok"
+  },
+  {
+   "entrada": {
+    "acoes": [
+     "return_review_ok"
+    ],
+    "claim_type": "returns",
+    "stage": "claim",
+    "claim_status": "opened",
+    "return_status": "delivered",
+    "shipment_status": "delivered",
+    "destination": "seller_address",
+    "related": [],
+    "title": "retirar na correios",
+    "responsible": "mediator",
+    "com_resolucao": false,
+    "com_due": true
+   },
+   "bucket": "para_retirar",
+   "regra": "seller_pickup_review_due:return_review_ok"
+  },
+  {
+   "entrada": {
+    "acoes": [
+     "return_review_ok"
+    ],
+    "claim_type": "returns",
+    "stage": "claim",
+    "claim_status": "opened",
+    "return_status": "delivered",
+    "shipment_status": "delivered",
+    "destination": "seller_address",
+    "related": [],
+    "title": "retirar na correios",
+    "responsible": "complainant",
+    "com_resolucao": true,
+    "com_due": true
+   },
+   "bucket": "para_retirar",
+   "regra": "seller_pickup_review_due:return_review_ok"
+  },
+  {
+   "entrada": {
+    "acoes": [
+     "return_review_ok"
+    ],
+    "claim_type": "returns",
+    "stage": "claim",
+    "claim_status": "opened",
+    "return_status": "delivered",
+    "shipment_status": "delivered",
+    "destination": "seller_address",
+    "related": [],
+    "title": "retirar na correios",
+    "responsible": "complainant",
+    "com_resolucao": false,
+    "com_due": true
+   },
+   "bucket": "para_retirar",
+   "regra": "seller_pickup_review_due:return_review_ok"
+  },
+  {
+   "entrada": {
+    "acoes": [
+     "return_review_ok"
+    ],
+    "claim_type": "returns",
+    "stage": "claim",
+    "claim_status": "opened",
+    "return_status": "delivered",
+    "shipment_status": "delivered",
+    "destination": "seller_address",
+    "related": [
+     "reviews"
+    ],
+    "title": "retirar na correios",
+    "responsible": "",
+    "com_resolucao": true,
+    "com_due": true
+   },
+   "bucket": "para_retirar",
+   "regra": "seller_pickup_review_due:return_review_ok"
+  },
+  {
+   "entrada": {
+    "acoes": [
+     "return_review_ok"
+    ],
+    "claim_type": "returns",
+    "stage": "claim",
+    "claim_status": "opened",
+    "return_status": "delivered",
+    "shipment_status": "delivered",
+    "destination": "seller_address",
+    "related": [
+     "reviews"
+    ],
+    "title": "retirar na correios",
+    "responsible": "",
+    "com_resolucao": false,
+    "com_due": true
+   },
+   "bucket": "para_retirar",
+   "regra": "seller_pickup_review_due:return_review_ok"
+  },
+  {
+   "entrada": {
+    "acoes": [
+     "return_review_ok"
+    ],
+    "claim_type": "returns",
+    "stage": "claim",
+    "claim_status": "opened",
+    "return_status": "delivered",
+    "shipment_status": "delivered",
+    "destination": "seller_address",
+    "related": [
+     "reviews"
+    ],
+    "title": "retirar na correios",
+    "responsible": "mediator",
+    "com_resolucao": true,
+    "com_due": true
+   },
+   "bucket": "para_retirar",
+   "regra": "seller_pickup_review_due:return_review_ok"
+  },
+  {
+   "entrada": {
+    "acoes": [
+     "return_review_ok"
+    ],
+    "claim_type": "returns",
+    "stage": "claim",
+    "claim_status": "opened",
+    "return_status": "delivered",
+    "shipment_status": "delivered",
+    "destination": "seller_address",
+    "related": [
+     "reviews"
+    ],
+    "title": "retirar na correios",
+    "responsible": "mediator",
+    "com_resolucao": false,
+    "com_due": true
+   },
+   "bucket": "para_retirar",
+   "regra": "seller_pickup_review_due:return_review_ok"
+  },
+  {
+   "entrada": {
+    "acoes": [
+     "return_review_ok"
+    ],
+    "claim_type": "returns",
+    "stage": "claim",
+    "claim_status": "opened",
+    "return_status": "delivered",
+    "shipment_status": "delivered",
+    "destination": "seller_address",
+    "related": [
+     "reviews"
+    ],
+    "title": "retirar na correios",
+    "responsible": "complainant",
+    "com_resolucao": true,
+    "com_due": true
+   },
+   "bucket": "para_retirar",
+   "regra": "seller_pickup_review_due:return_review_ok"
+  },
+  {
+   "entrada": {
+    "acoes": [
+     "return_review_ok"
+    ],
+    "claim_type": "returns",
+    "stage": "claim",
+    "claim_status": "opened",
+    "return_status": "delivered",
+    "shipment_status": "delivered",
+    "destination": "seller_address",
+    "related": [
+     "reviews"
+    ],
+    "title": "retirar na correios",
+    "responsible": "complainant",
+    "com_resolucao": false,
+    "com_due": true
+   },
+   "bucket": "para_retirar",
+   "regra": "seller_pickup_review_due:return_review_ok"
+  }
+ ]
+}

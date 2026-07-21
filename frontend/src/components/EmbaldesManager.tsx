@@ -146,6 +146,14 @@ export function EmbaldesManager({ modoSeparacao = false }: { modoSeparacao?: boo
   // Filtro do picker: mostrar só os itens que tiveram a qtd do FULL alterada
   const [soEditados, setSoEditados] = useState(false)
   const [soEmEspera, setSoEmEspera] = useState(false)
+  // Accordion para expandir/colapsar produtos
+  const [produtosExpandidos, setProdutosExpandidos] = useState<Set<string>>(new Set())
+  const toggleProduto = (chave: string) => {
+    const novo = new Set(produtosExpandidos)
+    if (novo.has(chave)) novo.delete(chave)
+    else novo.add(chave)
+    setProdutosExpandidos(novo)
+  }
   // Kit por item (cache da detecção), quantidade por componente e estado da baixa
   const [kitPorItem, setKitPorItem] = useState<Record<number, KitEstado>>({})
   const [kitQtds, setKitQtds] = useState<Record<string, string>>({})
@@ -1596,174 +1604,232 @@ export function EmbaldesManager({ modoSeparacao = false }: { modoSeparacao?: boo
                         <div style={{ textAlign: 'center' }}>Ação</div>
                       </div>
                       <div style={{ maxHeight: '560px', overflowY: 'auto', border: '1px solid #eee', borderTop: 'none' }}>
-                        {revisao.itens.filter((it) => {
-                          const baixado = it.baixa_aplicada === 1 || !!itensBaixados[it.item_id]
-                          const vinc = it.vinculado === 1 || !!it.olist_produto_id
-                          if (filtroRevisao === 'vinculados') return vinc
-                          if (filtroRevisao === 'nao_vinculados') return !vinc
-                          if (filtroRevisao === 'baixados') return baixado
-                          if (filtroRevisao === 'nao_baixados') return !baixado
-                          if (filtroRevisao === 'full_alterado') return !!it.tem_historico_full
-                          return true
-                        }).map((it) => {
-                          const naoAchado = !it.olist_encontrado
-                          const semEstoque = it.olist_encontrado && it.estoque_indisponivel
-                          const bg = naoAchado ? '#fff8f0' : it.tem_falta ? '#ffebee' : '#fff'
-                          const jaBaixado = it.baixa_aplicada === 1 || !!itensBaixados[it.item_id]
-                          const vinculado = it.vinculado === 1 || !!it.olist_produto_id
-                          const podeBaixar = it.olist_encontrado && !semEstoque && !jaBaixado
-                          const podeBalancear = it.olist_encontrado && !semEstoque && !jaBaixado
-                          const quantidadeEditavel = quantidadesFull[it.item_id] ?? String(Math.round(it.quantidade_full || 0))
-                          return (
-                            <div
-                              key={it.item_id}
-                              style={{ display: 'grid', gridTemplateColumns: '2.4fr 1fr 1.2fr 0.9fr 1.1fr 0.8fr 0.6fr 1.5fr', gap: '0.5rem', padding: '0.8rem 0.9rem', background: jaBaixado ? '#eef7ee' : bg, borderBottom: '1px solid #f0f0f0', fontSize: '0.9rem', alignItems: 'center', opacity: itensEmEspera[it.item_id] ? 0.5 : (jaBaixado ? 0.8 : 1) }}
-                            >
-                              <div>
-                                <div style={{ fontWeight: 600, lineHeight: 1.3 }}>{it.titulo_anuncio}</div>
-                                <div style={{ fontSize: '0.8rem', color: '#666', marginTop: '0.2rem', display: 'flex', alignItems: 'center', gap: '0.4rem', flexWrap: 'wrap' }}>
-                                  <span>SKU: {it.sku_inbound || '—'}</span>
-                                  <span style={{
-                                    padding: '0.1rem 0.45rem', borderRadius: '999px', fontSize: '0.7rem', fontWeight: 700,
-                                    background: vinculado ? '#e8f5e9' : '#fff3e0',
-                                    color: vinculado ? '#2e7d32' : '#ef6c00',
-                                    border: `1px solid ${vinculado ? '#a5d6a7' : '#ffcc80'}`
-                                  }}>
-                                    {vinculado ? '✓ vinculado' : 'sem vínculo'}
-                                  </span>
-                                  {jaBaixado && (
-                                    <span style={{ padding: '0.1rem 0.45rem', borderRadius: '999px', fontSize: '0.7rem', fontWeight: 700, background: '#e3f2fd', color: '#1565c0', border: '1px solid #90caf9' }}>
-                                      ↓ estoque retirado
-                                    </span>
-                                  )}
-                                </div>
-                                {vinculado && (
-                                  <div style={{ marginTop: '0.3rem', display: 'flex', gap: '0.4rem', alignItems: 'center', flexWrap: 'wrap' }}>
-                                    <span style={{ fontSize: '0.76rem', color: '#555' }}>
-                                      🔗 <strong style={{ color: '#2e7d32' }}>{it.olist_nome || it.olist_produto_id || '—'}</strong>
-                                    </span>
-                                    <button
-                                      onClick={() => abrirVinculo(it)}
-                                      style={{ padding: '0.1rem 0.5rem', fontSize: '0.72rem', fontWeight: 700, color: '#ef6c00', background: '#fff', border: '1px solid #ffcc80', borderRadius: '999px', cursor: 'pointer' }}
-                                    >
-                                      Trocar vínculo
-                                    </button>
-                                  </div>
-                                )}
-                              </div>
-                              <div style={{ textAlign: 'center', fontWeight: 'bold' }}>
-                                {naoAchado ? '—' : semEstoque ? '?' : it.estoque_atual}
-                              </div>
-                              <div style={{ textAlign: 'center' }}>
-                                {jaBaixado ? (
-                                  <strong>{Math.round(it.quantidade_full)}</strong>
-                                ) : (
-                                  <div style={{ display: 'grid', gap: '0.25rem', justifyItems: 'center' }}>
-                                    <input
-                                      type="number"
-                                      min="0"
-                                      step="1"
-                                      value={quantidadeEditavel}
-                                      onChange={(e) => setQuantidadesFull({ ...quantidadesFull, [it.item_id]: e.target.value })}
-                                      onBlur={() => salvarQuantidadeFull(it)}
-                                      onKeyDown={(e) => { if (e.key === 'Enter') salvarQuantidadeFull(it) }}
-                                      disabled={itensEmEspera[it.item_id]}
-                                      style={{ width: '78px', padding: '0.32rem', borderRadius: '4px', border: '1px solid #bbb', textAlign: 'center', fontSize: '0.9rem', fontWeight: 700, backgroundColor: itensEmEspera[it.item_id] ? '#f0f0f0' : '#fff', color: itensEmEspera[it.item_id] ? '#999' : '#000', cursor: itensEmEspera[it.item_id] ? 'not-allowed' : 'auto' }}
-                                    />
-                                    {salvandoQuantidadeId === it.item_id && (
-                                      <span style={{ fontSize: '0.68rem', color: '#1976D2', fontWeight: 700 }}>salvando...</span>
-                                    )}
-                                  </div>
-                                )}
-                              </div>
-                              <div style={{ textAlign: 'center', fontWeight: 'bold', color: '#2e7d32' }}>
-                                {naoAchado || semEstoque ? '—' : it.tem_falta ? '—' : it.resultado}
-                              </div>
-                              <div style={{ textAlign: 'center' }}>
-                                {naoAchado ? (
-                                  <span style={{ color: '#ef6c00', fontWeight: 'bold', fontSize: '0.8rem' }}>Não achado na Olist</span>
-                                ) : semEstoque ? (
-                                  <span style={{ color: '#999', fontSize: '0.8rem' }}>Estoque indisponível</span>
-                                ) : it.tem_falta ? (
-                                  <span style={{ color: '#c62828', fontWeight: 'bold', fontSize: '0.8rem' }}>Falta {Math.round(it.falta || 0)}</span>
-                                ) : (
-                                  <span style={{ color: '#2e7d32', fontWeight: 'bold', fontSize: '0.8rem' }}>OK</span>
-                                )}
-                              </div>
-                              <div style={{ textAlign: 'center' }}>
-                                {it.tem_falta && !jaBaixado ? (
-                                  <input
-                                    type="number"
-                                    min="0"
-                                    max={it.estoque_atual || 0}
-                                    value={declaracoes[it.item_id] ?? Math.round(it.estoque_atual || 0)}
-                                    onChange={(e) => setDeclaracoes({ ...declaracoes, [it.item_id]: parseFloat(e.target.value) || 0 })}
-                                    disabled={itensEmEspera[it.item_id]}
-                                    style={{ width: '60px', padding: '0.3rem', borderRadius: '3px', border: '1px solid #ddd', textAlign: 'center', fontSize: '0.85rem', backgroundColor: itensEmEspera[it.item_id] ? '#f0f0f0' : '#fff', color: itensEmEspera[it.item_id] ? '#999' : '#000', cursor: itensEmEspera[it.item_id] ? 'not-allowed' : 'auto' }}
-                                  />
-                                ) : (
-                                  <span style={{ color: '#999', fontSize: '0.8rem' }}>—</span>
-                                )}
-                              </div>
-                              <div style={{ textAlign: 'center' }}>
-                                {jaBaixado ? (
-                                  <span style={{ color: '#ccc', fontSize: '0.8rem' }}>—</span>
-                                ) : (
-                                  <input
-                                    type="checkbox"
-                                    checked={itensEmEspera[it.item_id] || false}
-                                    onChange={(e) => {
-                                      const novo = { ...itensEmEspera, [it.item_id]: e.target.checked }
-                                      setItensEmEspera(novo)
-                                      if (revisao) {
-                                        setMarcandoEmEspera(it.item_id)
-                                        api.post(`/embaldes/${revisao.embale_id}/itens/${it.item_id}/em-espera`, { em_espera: e.target.checked ? 1 : 0 }).finally(() => setMarcandoEmEspera(null))
-                                      }
+                        {(() => {
+                          const itemsFiltrados = revisao.itens.filter((it) => {
+                            const baixado = it.baixa_aplicada === 1 || !!itensBaixados[it.item_id]
+                            const vinc = it.vinculado === 1 || !!it.olist_produto_id
+                            if (filtroRevisao === 'vinculados') return vinc
+                            if (filtroRevisao === 'nao_vinculados') return !vinc
+                            if (filtroRevisao === 'baixados') return baixado
+                            if (filtroRevisao === 'nao_baixados') return !baixado
+                            if (filtroRevisao === 'full_alterado') return !!it.tem_historico_full
+                            return true
+                          })
+
+                          const gruposPorSku: Record<string, typeof itemsFiltrados> = {}
+                          itemsFiltrados.forEach((it) => {
+                            const sku = it.sku_inbound || it.titulo_anuncio || 'sem-sku'
+                            if (!gruposPorSku[sku]) gruposPorSku[sku] = []
+                            gruposPorSku[sku].push(it)
+                          })
+
+                          return Object.entries(gruposPorSku).map(([sku, items]) => {
+                            const estaExpandido = produtosExpandidos.has(sku)
+                            const primeiroItem = items[0]
+                            const temMaisDeUm = items.length > 1
+
+                            return (
+                              <div key={sku}>
+                                {/* Header do grupo */}
+                                {temMaisDeUm && (
+                                  <div
+                                    onClick={() => temMaisDeUm && toggleProduto(sku)}
+                                    style={{
+                                      padding: '0.6rem 0.9rem',
+                                      background: '#f9f9f9',
+                                      borderBottom: '1px solid #e0e0e0',
+                                      display: 'grid',
+                                      gridTemplateColumns: '2.4fr 1fr 1.2fr 0.9fr 1.1fr 0.8fr 0.6fr 1.5fr',
+                                      gap: '0.5rem',
+                                      alignItems: 'center',
+                                      fontSize: '0.9rem',
+                                      fontWeight: 600,
+                                      cursor: 'pointer',
+                                      userSelect: 'none',
                                     }}
-                                    disabled={marcandoEmEspera === it.item_id}
-                                    style={{ cursor: 'pointer', width: '18px', height: '18px' }}
-                                  />
-                                )}
-                              </div>
-                              <div style={{ textAlign: 'center', display: 'flex', gap: '0.3rem', justifyContent: 'center', flexWrap: 'wrap' }}>
-                                {itensEmEspera[it.item_id] ? (
-                                  <span style={{ color: '#999', fontWeight: 'bold', fontSize: '0.8rem' }}>Bloqueado</span>
-                                ) : jaBaixado ? (
-                                  <span style={{ color: '#2e7d32', fontWeight: 'bold', fontSize: '0.8rem' }}>✓ Baixado</span>
-                                ) : naoAchado ? (
-                                  <button
-                                    onClick={() => abrirVinculo(it)}
-                                    style={{ padding: '0.3rem 0.7rem', background: '#fff', color: '#ef6c00', border: '1px solid #ef6c00', borderRadius: '4px', cursor: 'pointer', fontSize: '0.8rem', fontWeight: 'bold' }}
                                   >
-                                    Vincular
-                                  </button>
-                                ) : (
-                                  <>
-                                    {podeBalancear && (
-                                      <button
-                                        onClick={() => abrirBalanceamento(it)}
-                                        style={{ padding: '0.3rem 0.7rem', background: '#fff', color: '#d32f2f', border: '1px solid #d32f2f', borderRadius: '4px', cursor: 'pointer', fontSize: '0.8rem', fontWeight: 'bold' }}
-                                      >
-                                        Balanço
-                                      </button>
-                                    )}
-                                    {podeBaixar ? (
-                                      <button
-                                        onClick={() => baixarItem(it)}
-                                        disabled={baixandoItemId === it.item_id}
-                                        style={{ padding: '0.3rem 0.7rem', background: '#fff', color: '#1976D2', border: '1px solid #1976D2', borderRadius: '4px', cursor: baixandoItemId === it.item_id ? 'wait' : 'pointer', fontSize: '0.8rem', fontWeight: 'bold' }}
-                                      >
-                                        {baixandoItemId === it.item_id ? '...' : 'Baixar'}
-                                      </button>
-                                    ) : (
-                                      <span style={{ color: '#ccc', fontSize: '0.8rem' }}>—</span>
-                                    )}
-                                  </>
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                                      <span style={{ fontSize: '1rem', color: '#555' }}>
+                                        {estaExpandido ? '▼' : '▶'}
+                                      </span>
+                                      <span>SKU: {sku}</span>
+                                      <span style={{ fontSize: '0.8rem', color: '#999' }}>({items.length})</span>
+                                    </div>
+                                    <div></div>
+                                    <div></div>
+                                    <div></div>
+                                    <div></div>
+                                    <div></div>
+                                    <div></div>
+                                    <div></div>
+                                  </div>
                                 )}
+
+                                {/* Items do grupo */}
+                                {(!temMaisDeUm || estaExpandido) && items.map((it) => {
+                                  const naoAchado = !it.olist_encontrado
+                                  const semEstoque = it.olist_encontrado && it.estoque_indisponivel
+                                  const bg = naoAchado ? '#fff8f0' : it.tem_falta ? '#ffebee' : '#fff'
+                                  const jaBaixado = it.baixa_aplicada === 1 || !!itensBaixados[it.item_id]
+                                  const vinculado = it.vinculado === 1 || !!it.olist_produto_id
+                                  const podeBaixar = it.olist_encontrado && !semEstoque && !jaBaixado
+                                  const podeBalancear = it.olist_encontrado && !semEstoque && !jaBaixado
+                                  const quantidadeEditavel = quantidadesFull[it.item_id] ?? String(Math.round(it.quantidade_full || 0))
+
+                                  return (
+                                    <div
+                                      key={it.item_id}
+                                      style={{ display: 'grid', gridTemplateColumns: '2.4fr 1fr 1.2fr 0.9fr 1.1fr 0.8fr 0.6fr 1.5fr', gap: '0.5rem', padding: '0.8rem 0.9rem', background: jaBaixado ? '#eef7ee' : bg, borderBottom: '1px solid #f0f0f0', fontSize: '0.9rem', alignItems: 'center', opacity: itensEmEspera[it.item_id] ? 0.5 : (jaBaixado ? 0.8 : 1), marginLeft: temMaisDeUm ? '1.5rem' : 0 }}
+                                    >
+                                      <div>
+                                        <div style={{ fontWeight: 600, lineHeight: 1.3 }}>{it.titulo_anuncio}</div>
+                                        <div style={{ fontSize: '0.8rem', color: '#666', marginTop: '0.2rem', display: 'flex', alignItems: 'center', gap: '0.4rem', flexWrap: 'wrap' }}>
+                                          <span>SKU: {it.sku_inbound || '—'}</span>
+                                          <span style={{
+                                            padding: '0.1rem 0.45rem', borderRadius: '999px', fontSize: '0.7rem', fontWeight: 700,
+                                            background: vinculado ? '#e8f5e9' : '#fff3e0',
+                                            color: vinculado ? '#2e7d32' : '#ef6c00',
+                                            border: `1px solid ${vinculado ? '#a5d6a7' : '#ffcc80'}`
+                                          }}>
+                                            {vinculado ? '✓ vinculado' : 'sem vínculo'}
+                                          </span>
+                                          {jaBaixado && (
+                                            <span style={{ padding: '0.1rem 0.45rem', borderRadius: '999px', fontSize: '0.7rem', fontWeight: 700, background: '#e3f2fd', color: '#1565c0', border: '1px solid #90caf9' }}>
+                                              ↓ estoque retirado
+                                            </span>
+                                          )}
+                                        </div>
+                                        {vinculado && (
+                                          <div style={{ marginTop: '0.3rem', display: 'flex', gap: '0.4rem', alignItems: 'center', flexWrap: 'wrap' }}>
+                                            <span style={{ fontSize: '0.76rem', color: '#555' }}>
+                                              🔗 <strong style={{ color: '#2e7d32' }}>{it.olist_nome || it.olist_produto_id || '—'}</strong>
+                                            </span>
+                                            <button
+                                              onClick={() => abrirVinculo(it)}
+                                              style={{ padding: '0.1rem 0.5rem', fontSize: '0.72rem', fontWeight: 700, color: '#ef6c00', background: '#fff', border: '1px solid #ffcc80', borderRadius: '999px', cursor: 'pointer' }}
+                                            >
+                                              Trocar vínculo
+                                            </button>
+                                          </div>
+                                        )}
+                                      </div>
+                                      <div style={{ textAlign: 'center', fontWeight: 'bold' }}>
+                                        {naoAchado ? '—' : semEstoque ? '?' : it.estoque_atual}
+                                      </div>
+                                      <div style={{ textAlign: 'center' }}>
+                                        {jaBaixado ? (
+                                          <strong>{Math.round(it.quantidade_full)}</strong>
+                                        ) : (
+                                          <div style={{ display: 'grid', gap: '0.25rem', justifyItems: 'center' }}>
+                                            <input
+                                              type="number"
+                                              min="0"
+                                              step="1"
+                                              value={quantidadeEditavel}
+                                              onChange={(e) => setQuantidadesFull({ ...quantidadesFull, [it.item_id]: e.target.value })}
+                                              onBlur={() => salvarQuantidadeFull(it)}
+                                              onKeyDown={(e) => { if (e.key === 'Enter') salvarQuantidadeFull(it) }}
+                                              disabled={itensEmEspera[it.item_id]}
+                                              style={{ width: '78px', padding: '0.32rem', borderRadius: '4px', border: '1px solid #bbb', textAlign: 'center', fontSize: '0.9rem', fontWeight: 700, backgroundColor: itensEmEspera[it.item_id] ? '#f0f0f0' : '#fff', color: itensEmEspera[it.item_id] ? '#999' : '#000', cursor: itensEmEspera[it.item_id] ? 'not-allowed' : 'auto' }}
+                                            />
+                                            {salvandoQuantidadeId === it.item_id && (
+                                              <span style={{ fontSize: '0.68rem', color: '#1976D2', fontWeight: 700 }}>salvando...</span>
+                                            )}
+                                          </div>
+                                        )}
+                                      </div>
+                                      <div style={{ textAlign: 'center', fontWeight: 'bold', color: '#2e7d32' }}>
+                                        {naoAchado || semEstoque ? '—' : it.tem_falta ? '—' : it.resultado}
+                                      </div>
+                                      <div style={{ textAlign: 'center' }}>
+                                        {naoAchado ? (
+                                          <span style={{ color: '#ef6c00', fontWeight: 'bold', fontSize: '0.8rem' }}>Não achado na Olist</span>
+                                        ) : semEstoque ? (
+                                          <span style={{ color: '#999', fontSize: '0.8rem' }}>Estoque indisponível</span>
+                                        ) : it.tem_falta ? (
+                                          <span style={{ color: '#c62828', fontWeight: 'bold', fontSize: '0.8rem' }}>Falta {Math.round(it.falta || 0)}</span>
+                                        ) : (
+                                          <span style={{ color: '#2e7d32', fontWeight: 'bold', fontSize: '0.8rem' }}>OK</span>
+                                        )}
+                                      </div>
+                                      <div style={{ textAlign: 'center' }}>
+                                        {it.tem_falta && !jaBaixado ? (
+                                          <input
+                                            type="number"
+                                            min="0"
+                                            max={it.estoque_atual || 0}
+                                            value={declaracoes[it.item_id] ?? Math.round(it.estoque_atual || 0)}
+                                            onChange={(e) => setDeclaracoes({ ...declaracoes, [it.item_id]: parseFloat(e.target.value) || 0 })}
+                                            disabled={itensEmEspera[it.item_id]}
+                                            style={{ width: '60px', padding: '0.3rem', borderRadius: '3px', border: '1px solid #ddd', textAlign: 'center', fontSize: '0.85rem', backgroundColor: itensEmEspera[it.item_id] ? '#f0f0f0' : '#fff', color: itensEmEspera[it.item_id] ? '#999' : '#000', cursor: itensEmEspera[it.item_id] ? 'not-allowed' : 'auto' }}
+                                          />
+                                        ) : (
+                                          <span style={{ color: '#999', fontSize: '0.8rem' }}>—</span>
+                                        )}
+                                      </div>
+                                      <div style={{ textAlign: 'center' }}>
+                                        {jaBaixado ? (
+                                          <span style={{ color: '#ccc', fontSize: '0.8rem' }}>—</span>
+                                        ) : (
+                                          <input
+                                            type="checkbox"
+                                            checked={itensEmEspera[it.item_id] || false}
+                                            onChange={(e) => {
+                                              const novo = { ...itensEmEspera, [it.item_id]: e.target.checked }
+                                              setItensEmEspera(novo)
+                                              if (revisao) {
+                                                setMarcandoEmEspera(it.item_id)
+                                                api.post(`/embaldes/${revisao.embale_id}/itens/${it.item_id}/em-espera`, { em_espera: e.target.checked ? 1 : 0 }).finally(() => setMarcandoEmEspera(null))
+                                              }
+                                            }}
+                                            disabled={marcandoEmEspera === it.item_id}
+                                            style={{ cursor: 'pointer', width: '18px', height: '18px' }}
+                                          />
+                                        )}
+                                      </div>
+                                      <div style={{ textAlign: 'center', display: 'flex', gap: '0.3rem', justifyContent: 'center', flexWrap: 'wrap' }}>
+                                        {itensEmEspera[it.item_id] ? (
+                                          <span style={{ color: '#999', fontWeight: 'bold', fontSize: '0.8rem' }}>Bloqueado</span>
+                                        ) : jaBaixado ? (
+                                          <span style={{ color: '#2e7d32', fontWeight: 'bold', fontSize: '0.8rem' }}>✓ Baixado</span>
+                                        ) : naoAchado ? (
+                                          <button
+                                            onClick={() => abrirVinculo(it)}
+                                            style={{ padding: '0.3rem 0.7rem', background: '#fff', color: '#ef6c00', border: '1px solid #ef6c00', borderRadius: '4px', cursor: 'pointer', fontSize: '0.8rem', fontWeight: 'bold' }}
+                                          >
+                                            Vincular
+                                          </button>
+                                        ) : (
+                                          <>
+                                            {podeBalancear && (
+                                              <button
+                                                onClick={() => abrirBalanceamento(it)}
+                                                style={{ padding: '0.3rem 0.7rem', background: '#fff', color: '#d32f2f', border: '1px solid #d32f2f', borderRadius: '4px', cursor: 'pointer', fontSize: '0.8rem', fontWeight: 'bold' }}
+                                              >
+                                                Balanço
+                                              </button>
+                                            )}
+                                            {podeBaixar ? (
+                                              <button
+                                                onClick={() => baixarItem(it)}
+                                                disabled={baixandoItemId === it.item_id}
+                                                style={{ padding: '0.3rem 0.7rem', background: '#fff', color: '#1976D2', border: '1px solid #1976D2', borderRadius: '4px', cursor: baixandoItemId === it.item_id ? 'wait' : 'pointer', fontSize: '0.8rem', fontWeight: 'bold' }}
+                                              >
+                                                {baixandoItemId === it.item_id ? '...' : 'Baixar'}
+                                              </button>
+                                            ) : (
+                                              <span style={{ color: '#ccc', fontSize: '0.8rem' }}>—</span>
+                                            )}
+                                          </>
+                                        )}
+                                      </div>
+                                    </div>
+                                  )
+                                })}
                               </div>
-                            </div>
-                          )
-                        })}
+                            )
+                          })
+                        })()}
                       </div>
 
                       {/* Botão Confirmar Baixa em massa */}

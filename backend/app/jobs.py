@@ -259,6 +259,44 @@ def sincronizar_vendas_ml():
         logger.error(f"[JOB][VENDAS] enriquecimento de envios falhou: {e}")
 
 
+def sincronizar_devolucoes_ml():
+    """
+    Sync agendado da fila de devoluções do ML (Post-Purchase).
+
+    Até aqui o sync só rodava quando o operador ABRIA a tela de Devoluções — fora
+    do horário de operação os dados envelheciam. Este job mantém a fila em dia
+    sozinho. Reusa o MESMO orquestrador da rota manual (_rodar_sync_rapido) e a
+    MESMA guarda de concorrência (_sync_em_curso): se um sync manual ou um job
+    anterior ainda roda, sai sem colidir — dois refreshs simultâneos brigariam
+    pelo active=0/1 do cache de classificação.
+    """
+    try:
+        from app.integracoes_ml import ml
+    except Exception as e:
+        logger.error(f"[JOB][DEVOL] import falhou: {e}")
+        return
+
+    if not ml.user_id or not ml.get_access_token():
+        return  # sem credenciais/autorização: nada a sincronizar
+
+    try:
+        from app.handlers_devolucoes import _sync_em_curso, _rodar_sync_rapido
+        from app.devolucoes_sync import start_ml_sync_run, novo_trace_id
+
+        if _sync_em_curso("classification_cache"):
+            logger.info("[JOB][DEVOL] sync já em curso — pulando esta rodada")
+            return
+
+        trace_id = novo_trace_id()
+        sync_run_id = start_ml_sync_run(
+            "classification_cache",
+            {"user_id": ml.user_id, "trace_id": trace_id, "origem": "job_agendado"})
+        _rodar_sync_rapido(ml.user_id, sync_run_id, trace_id)
+        logger.info(f"[JOB][DEVOL] fila de devoluções sincronizada (run={sync_run_id})")
+    except Exception as e:
+        logger.error(f"[JOB][DEVOL] erro inesperado: {e}")
+
+
 def iniciar_scheduler():
     """
     Inicia o scheduler com a tarefa diária às 8am
@@ -322,8 +360,26 @@ def iniciar_scheduler():
                 max_instances=1, coalesce=True, misfire_grace_time=3600,
             )
 
+        # Sync agendado da fila de devoluções (intervalo configurável). Mais
+        # espaçado que o de anúncios: cada rodada custa vários requests por claim.
+        try:
+            dev_intervalo = max(5, int(os.getenv("ML_DEVOLUCOES_POLL_MINUTES", "20")))
+        except (TypeError, ValueError):
+            dev_intervalo = 20
+        scheduler.add_job(
+            sincronizar_devolucoes_ml,
+            'interval',
+            minutes=dev_intervalo,
+            id='ml_sync_devolucoes',
+            name='Sincronização da fila de devoluções do Mercado Livre',
+            max_instances=1,
+            coalesce=True,
+            misfire_grace_time=3600,
+        )
+
         scheduler.start()
         logger.info("[SCHEDULER] Agendador iniciado com sucesso")
+        logger.info(f"[SCHEDULER] Job 'ml_sync_devolucoes' agendado a cada {dev_intervalo} min")
         logger.info("[SCHEDULER] Job 'check_estoque_minimo' agendado para 08:00 todos os dias")
         logger.info("[SCHEDULER] Job 'encerrar_inbounds_vencidos' agendado a cada 1 hora")
         logger.info(f"[SCHEDULER] Job 'ml_sync_catalogo' agendado a cada {ml_intervalo} min")
