@@ -124,6 +124,34 @@ interface Painel {
   pct_pendencias: number
 }
 
+/** Fase 3 — dashboard de custos/prejuízos do mês. */
+interface CustosResp {
+  mes: string
+  resumo: {
+    lancamentos: number; frete_reverso: number; custo_produto: number
+    custo_embalagem: number; total: number; danificados: number
+    prejuizo_mediacao: number; recuperado_mediacao: number
+  }
+  serie_mensal: { mes: string; total: number }[]
+  itens: {
+    id: number; devolucao_id: number; produto_nome?: string; pedido_id?: string
+    ml_claim_id?: string; ml_tipo_logistica?: string; mes: string; sku?: string
+    danificado: number; frete_reverso: number; custo_produto: number
+    custo_embalagem: number; total: number; resultado?: string; observacao?: string
+  }[]
+}
+
+/** Fase 4 — divergência previstas × entregue × bipadas. */
+interface DivergenciaResp {
+  previstas: number; entregue_transportadora: number; bipadas: number
+  divergencia: number; a_caminho: number
+  suspeitos: {
+    claim_id: string; pedido_id: string; pack_id?: string; produto_nome: string
+    produto_imagem: string; shipment_id?: string; tracking_number?: string
+    due_date?: string; motivo_label?: string
+  }[]
+}
+
 const IMG_VAZIA =
   "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='96' height='96' viewBox='0 0 96 96'%3E%3Crect width='96' height='96' rx='8' fill='%23f1f5f9'/%3E%3Cpath d='M25 64h46L58 43l-10 13-7-9-16 17Z' fill='%23cbd5e1'/%3E%3Ccircle cx='35' cy='34' r='8' fill='%23dbe4ef'/%3E%3C/svg%3E"
 
@@ -192,6 +220,9 @@ type PainelFlutuante =
   | { tipo: 'recebidos'; titulo: string }
   | { tipo: 'mediacao'; titulo: string }
   | { tipo: 'bucket'; titulo: string; bucket: Bucket; prazo?: 'urgente' | 'retirar' }
+  | { tipo: 'custos'; titulo: string }
+  | { tipo: 'divergencia'; titulo: string }
+  | { tipo: 'avaliar'; titulo: string; claimId: string; pedidoId?: string; produtoNome?: string }
   | null
 
 export function Devolucoes() {
@@ -280,7 +311,115 @@ export function Devolucoes() {
     }
   }, [listaCarregada, carregandoLista])
 
+  // Fase 3/4/5
+  const [custosData, setCustosData] = useState<CustosResp | null>(null)
+  const [custoEmbalagem, setCustoEmbalagem] = useState<number>(0.5)
+  const [divData, setDivData] = useState<DivergenciaResp | null>(null)
+  const [avaliarDev, setAvaliarDev] = useState<Devolucao | null>(null)
+  const [avaliarMsg, setAvaliarMsg] = useState<string>('')
+  const [avaliarBusy, setAvaliarBusy] = useState(false)
+  const [danificado, setDanificado] = useState(false)
+  const [obsAval, setObsAval] = useState('')
+
+  const carregarCustos = useCallback(async () => {
+    try {
+      const [c, cfg] = await Promise.all([
+        fetch(`${API_BASE}/api/devolucoes/custos`, { cache: 'no-store' }).then(x => x.json()),
+        fetch(`${API_BASE}/api/devolucoes/config-custos`, { cache: 'no-store' }).then(x => x.json()),
+      ])
+      setCustosData(c)
+      setCustoEmbalagem(Number(cfg?.custo_embalagem ?? 0.5))
+    } catch (e) { setErro(String(e instanceof Error ? e.message : e)) }
+  }, [])
+
+  const salvarEmbalagem = useCallback(async (valor: number) => {
+    setCustoEmbalagem(valor)
+    try {
+      await fetch(`${API_BASE}/api/devolucoes/config-custos`, {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ custo_embalagem: valor }),
+      })
+    } catch { /* mantém local */ }
+  }, [])
+
+  const carregarDivergencia = useCallback(async () => {
+    try {
+      const d = await fetch(`${API_BASE}/api/devolucoes/divergencia`, { cache: 'no-store' }).then(x => x.json())
+      setDivData(d)
+    } catch (e) { setErro(String(e instanceof Error ? e.message : e)) }
+  }, [])
+
+  const abrirAvaliar = useCallback(async (claimId: string, produtoNome?: string, pedidoId?: string) => {
+    setPainel({ tipo: 'avaliar', titulo: 'Avaliar devolução', claimId, produtoNome, pedidoId })
+    setAvaliarDev(null); setAvaliarMsg(''); setDanificado(false); setObsAval('')
+    try {
+      const lista: Devolucao[] = await fetch(
+        `${API_BASE}/api/devolucoes?busca=${encodeURIComponent(claimId)}&incluir_inativos=true`,
+        { cache: 'no-store' }).then(x => x.json())
+      const dev = (Array.isArray(lista) ? lista : []).find(
+        d => String(d.ml_claim_id || '') === String(claimId)) || lista?.[0] || null
+      setAvaliarDev(dev)
+    } catch (e) { setAvaliarMsg(String(e instanceof Error ? e.message : e)) }
+  }, [])
+
+  const finalizarAvaliacao = useCallback(async (resultado: 'concluido' | 'ocorrencia') => {
+    if (!avaliarDev) return
+    setAvaliarBusy(true); setAvaliarMsg('')
+    try {
+      const r = await fetch(`${API_BASE}/api/devolucoes/${avaliarDev.id}/finalizar`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ resultado, danificado, observacao: obsAval }),
+      })
+      const d = await r.json()
+      if (!r.ok) throw new Error(d?.mensagem || 'Falha ao finalizar')
+      setAvaliarMsg(resultado === 'concluido'
+        ? `✓ Concluída. Custo lançado: ${money(d?.custo?.total)}`
+        : `Ocorrência registrada. Custo lançado: ${money(d?.custo?.total)}`)
+      carregar()
+    } catch (e) {
+      setAvaliarMsg('⚠️ ' + String(e instanceof Error ? e.message : e))
+    } finally { setAvaliarBusy(false) }
+  }, [avaliarDev, danificado, obsAval, carregar])
+
+  const enviarReviewML = useCallback(async (aprovado: boolean) => {
+    if (!avaliarDev) return
+    setAvaliarBusy(true); setAvaliarMsg('')
+    try {
+      const r = await fetch(`${API_BASE}/api/devolucoes/${avaliarDev.id}/ml-review`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ aprovado }),
+      })
+      const d = await r.json()
+      if (!r.ok) throw new Error(d?.erro || d?.mensagem || 'Falha ao enviar revisão')
+      setAvaliarMsg('✓ Revisão enviada ao Mercado Livre.')
+    } catch (e) {
+      setAvaliarMsg('⚠️ ' + String(e instanceof Error ? e.message : e))
+    } finally { setAvaliarBusy(false) }
+  }, [avaliarDev])
+
+  const enviarFotoAvaliacao = useCallback(async (file: File) => {
+    if (!avaliarDev) return
+    setAvaliarBusy(true)
+    try {
+      const fd = new FormData()
+      fd.append('file', file)
+      const r = await fetch(`${API_BASE}/api/devolucoes/${avaliarDev.id}/evidencias`, {
+        method: 'POST', body: fd,
+      })
+      const d = await r.json()
+      setAvaliarMsg(r.ok ? '✓ Foto anexada.' : ('⚠️ ' + (d?.mensagem || 'Falha no upload')))
+    } catch (e) {
+      setAvaliarMsg('⚠️ ' + String(e instanceof Error ? e.message : e))
+    } finally { setAvaliarBusy(false) }
+  }, [avaliarDev])
+
   useEffect(() => { carregar() }, [carregar])
+
+  // Painéis novos carregam sob demanda ao abrir.
+  useEffect(() => {
+    if (painel?.tipo === 'custos') carregarCustos()
+    if (painel?.tipo === 'divergencia') carregarDivergencia()
+  }, [painel, carregarCustos, carregarDivergencia])
 
   // Sync automático em background ao abrir (apenas uma vez)
   useEffect(() => {
@@ -312,7 +451,7 @@ export function Devolucoes() {
     if (painel && !d.open) d.showModal()
     if (!painel && d.open) d.close()
     // buckets/diff/recebidos usam dados próprios; o resto (mediação, todas, busca…) precisa da lista.
-    if (painel && !['bucket', 'diff', 'recebidos'].includes(painel.tipo)) carregarLista()
+    if (painel && !['bucket', 'diff', 'recebidos', 'custos', 'divergencia', 'avaliar'].includes(painel.tipo)) carregarLista()
   }, [painel, carregarLista])
 
   /** Polling do progresso — a conexão do POST não sobrevive ao sync inteiro. */
@@ -649,6 +788,12 @@ export function Devolucoes() {
                 <span className={`rec-urg rec-urg-${urgenciaDe(i.due_date)}`}>
                   {URG_LABEL[urgenciaDe(i.due_date)]}
                 </span>
+                <span className="floating-card-actions">
+                  <button type="button" className="summary-link"
+                          onClick={() => abrirAvaliar(i.claim_id, i.produto_nome, i.pedido_id)}>
+                    Avaliar ›
+                  </button>
+                </span>
               </article>
             ))}
           </div>
@@ -783,6 +928,175 @@ export function Devolucoes() {
               </article>
             )
           })}
+        </div>
+      )
+    }
+    if (painel.tipo === 'custos') {
+      if (!custosData) return <div className="empty compact"><p>Carregando custos…</p></div>
+      const r = custosData.resumo
+      const maxSerie = Math.max(1, ...custosData.serie_mensal.map(s => s.total))
+      return (
+        <div className="custos-panel">
+          <div className="custos-cfg">
+            <label>Custo de embalagem por devolução (R$)</label>
+            <input type="number" step="0.05" min="0" value={custoEmbalagem}
+                   onChange={e => setCustoEmbalagem(Number(e.target.value))}
+                   onBlur={e => salvarEmbalagem(Number(e.target.value))} />
+            <small>Somado ao prejuízo de cada devolução finalizada. Padrão R$ 0,50.</small>
+          </div>
+          <div className="custos-cards">
+            <article><span>Frete reverso</span><strong>{money(r.frete_reverso)}</strong></article>
+            <article><span>Produto danificado</span><strong>{money(r.custo_produto)}</strong></article>
+            <article><span>Embalagem</span><strong>{money(r.custo_embalagem)}</strong></article>
+            <article className="tot"><span>Prejuízo total ({custosData.mes})</span><strong>{money(r.total)}</strong></article>
+          </div>
+          <div className="custos-cards secund">
+            <article><span>Lançamentos</span><strong>{r.lancamentos}</strong></article>
+            <article><span>Danificados</span><strong>{r.danificados}</strong></article>
+            <article><span>Perda em mediação</span><strong>{money(r.prejuizo_mediacao)}</strong></article>
+            <article><span>Recuperado em mediação</span><strong>{money(r.recuperado_mediacao)}</strong></article>
+          </div>
+          {custosData.serie_mensal.length > 0 && (
+            <div className="custos-serie">
+              <h3>Evolução mensal</h3>
+              <div className="custos-bars">
+                {custosData.serie_mensal.map(s => (
+                  <div className="custos-bar" key={s.mes}>
+                    <span className="cb-val">{money(s.total)}</span>
+                    <div className="cb-track"><div className="cb-fill"
+                         style={{ height: `${Math.round((s.total / maxSerie) * 100)}%` }} /></div>
+                    <span className="cb-mes">{s.mes.slice(5)}/{s.mes.slice(2, 4)}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+          <h3>Lançamentos do mês</h3>
+          {custosData.itens.length ? (
+            <div className="custos-lista">
+              {custosData.itens.map(it => (
+                <article className="custos-item" key={it.id}>
+                  <div className="ci-main">
+                    <b>#{String(it.pedido_id || it.ml_claim_id || '').replace(/\D/g, '') || '-'}</b>
+                    <strong>{it.produto_nome || '(sem título)'}</strong>
+                    <small>
+                      {it.ml_tipo_logistica === 'full_ml' ? 'FULL' : 'Orgânica'}
+                      {it.danificado ? ' · danificado' : ''}
+                      {it.resultado ? ` · ${it.resultado}` : ''}
+                    </small>
+                  </div>
+                  <div className="ci-vals">
+                    <span>Frete {money(it.frete_reverso)}</span>
+                    <span>Produto {money(it.custo_produto)}</span>
+                    <span>Emb. {money(it.custo_embalagem)}</span>
+                    <b>{money(it.total)}</b>
+                  </div>
+                </article>
+              ))}
+            </div>
+          ) : <p className="mediacoes-empty">Nenhum custo lançado neste mês ainda.</p>}
+        </div>
+      )
+    }
+    if (painel.tipo === 'divergencia') {
+      if (!divData) return <div className="empty compact"><p>Carregando divergência…</p></div>
+      return (
+        <div className="div-panel">
+          <div className="custos-cards">
+            <article><span>Previstas (barracão)</span><strong>{divData.previstas}</strong></article>
+            <article><span>A caminho</span><strong>{divData.a_caminho}</strong></article>
+            <article><span>Entregue (transportadora)</span><strong>{divData.entregue_transportadora}</strong></article>
+            <article><span>Bipadas</span><strong>{divData.bipadas}</strong></article>
+            <article className={divData.divergencia > 0 ? 'tot alerta' : 'tot'}>
+              <span>Divergência</span><strong>{divData.divergencia}</strong>
+            </article>
+          </div>
+          <p className="div-explica">
+            {divData.divergencia > 0
+              ? `⚠️ ${divData.divergencia} devolução(ões) que a transportadora marcou como entregue ainda NÃO foram bipadas. Confira faltantes/fraude.`
+              : '✓ Tudo que foi entregue já foi bipado. Sem divergência.'}
+          </p>
+          {divData.suspeitos.length > 0 && (
+            <div className="floating-grid">
+              {divData.suspeitos.map(s => (
+                <article className="floating-card" key={s.claim_id}>
+                  <img src={s.produto_imagem || IMG_VAZIA} alt="" loading="lazy" />
+                  <b>#{String(s.pedido_id || s.claim_id).replace(/\D/g, '') || '-'}</b>
+                  <strong>{s.produto_nome || '(sem título)'}</strong>
+                  <small>
+                    Entregue, não bipada
+                    {s.motivo_label ? ` · ${s.motivo_label}` : ''}
+                    {s.shipment_id ? ` · etiqueta ${s.shipment_id}` : ''}
+                  </small>
+                  <span className="floating-card-actions">
+                    <button type="button" className="summary-link"
+                            onClick={() => abrirAvaliar(s.claim_id, s.produto_nome, s.pedido_id)}>
+                      Avaliar ›
+                    </button>
+                  </span>
+                </article>
+              ))}
+            </div>
+          )}
+        </div>
+      )
+    }
+    if (painel.tipo === 'avaliar') {
+      const dev = avaliarDev
+      return (
+        <div className="avaliar-panel">
+          <div className="avaliar-head">
+            <strong>{painel.produtoNome || dev?.produto_nome || '(produto)'}</strong>
+            <small>#{String(painel.pedidoId || painel.claimId).replace(/\D/g, '') || '-'}
+              {dev?.ml_tipo_logistica === 'full_ml' ? ' · FULL' : ''}
+              {dev?.ml_tarifa_devolucao ? ` · frete reverso ${money(dev.ml_tarifa_devolucao)}` : ''}
+            </small>
+          </div>
+          {!dev ? (
+            <p className="mediacoes-empty">
+              Buscando a devolução deste claim… Se não aparecer, rode “Sincronização completa”
+              (a devolução ainda não foi materializada no banco).
+            </p>
+          ) : (
+            <>
+              <label className="avaliar-check">
+                <input type="checkbox" checked={danificado}
+                       onChange={e => setDanificado(e.target.checked)} />
+                Produto voltou danificado (lança o custo do produto por SKU no prejuízo)
+              </label>
+              <textarea className="avaliar-obs" placeholder="Observações da avaliação…"
+                        value={obsAval} onChange={e => setObsAval(e.target.value)} />
+              <div className="avaliar-foto">
+                <label>Anexar foto/evidência</label>
+                <input type="file" accept="image/*,application/pdf"
+                       onChange={e => { const f = e.target.files?.[0]; if (f) enviarFotoAvaliacao(f) }} />
+              </div>
+              <div className="avaliar-acoes">
+                <button type="button" className="btn-primary" disabled={avaliarBusy}
+                        onClick={() => finalizarAvaliacao('concluido')}>
+                  Concluir sem problema
+                </button>
+                <button type="button" className="ghost-outline" disabled={avaliarBusy}
+                        onClick={() => finalizarAvaliacao('ocorrencia')}>
+                  Abrir ocorrência
+                </button>
+              </div>
+              {dev.ml_return_id && (
+                <div className="avaliar-ml">
+                  <span>Revisão no Mercado Livre:</span>
+                  <button type="button" className="summary-link" disabled={avaliarBusy}
+                          onClick={() => enviarReviewML(true)}>Chegou como esperado</button>
+                  <button type="button" className="summary-link" disabled={avaliarBusy}
+                          onClick={() => enviarReviewML(false)}>Com problema</button>
+                </div>
+              )}
+              {avaliarMsg && <div className="import-feedback">{avaliarMsg}</div>}
+              <a className="avaliar-link" target="_blank" rel="noreferrer"
+                 href={`https://www.mercadolivre.com.br/vendas/${String(dev.pedido_id || '').replace(/\D/g, '')}/detalhe`}>
+                Ver detalhe no Mercado Livre ›
+              </a>
+            </>
+          )}
         </div>
       )
     }
@@ -949,6 +1263,14 @@ export function Devolucoes() {
                       Recebidos
                     </button>
                     <button type="button" className="summary-link"
+                            onClick={() => setPainel({ tipo: 'custos', titulo: 'Custos e prejuízos do mês' })}>
+                      Custos
+                    </button>
+                    <button type="button" className="summary-link"
+                            onClick={() => setPainel({ tipo: 'divergencia', titulo: 'Divergência — previstas × recebidas' })}>
+                      Divergência
+                    </button>
+                    <button type="button" className="summary-link"
                             onClick={() => setPainel({ tipo: 'diff', titulo: 'Conferir vs Seller Center' })}>
                       Conferir ML
                     </button>
@@ -972,11 +1294,12 @@ export function Devolucoes() {
                   <small className="item-tag">Prazo &gt; 3 dias</small>
                 </button>
                 {itemResumo('outros_problemas', 'card-purple', 'alert', 'Outros problemas', 'Demais pendências')}
-                <button type="button" className="summary-item card-teal">
+                <button type="button" className="summary-item card-teal"
+                        onClick={() => setPainel({ tipo: 'custos', titulo: 'Custos e prejuízos do mês' })}>
                   <span className="summary-icon summary-icon-chart" aria-hidden="true" />
                   <strong className="item-count">{money(totalTarifas)}</strong>
                   <span className="item-label">Tarifa de devolução</span>
-                  <small className="item-tag">Valor descontado</small>
+                  <small className="item-tag">Ver custos do mês ›</small>
                 </button>
               </div>
             </div>

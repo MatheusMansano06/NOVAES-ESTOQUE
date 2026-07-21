@@ -659,6 +659,9 @@ class Devolucao(Base):
     ml_seller_reason = Column(String(255), default="")
     ml_product_condition = Column(String(50), default="")
     ml_return_reviews = Column(Text, default="[]")
+    # SKU do produto devolvido — chave para buscar o custo em custos_produto
+    # (CustoProduto.produto_chave) e lançar o prejuízo de dano no ledger de custos.
+    ml_sku = Column(String(120), default="", index=True)
 
     historico = relationship("DevolucaoHistoricoStatus", back_populates="devolucao",
                              cascade="all, delete-orphan")
@@ -872,3 +875,67 @@ class RecebimentoAvulso(Base):
     vinculado_claim_id = Column(String(50), default="")  # preenchido na reconciliação
     vinculado_em = Column(String(40), default="")
     info = Column(Text, default="{}")               # dump do shipment ao vivo (auditoria)
+
+
+class ConfiguracaoApp(Base):
+    """
+    Config chave/valor genérica do app. Usada para parâmetros editáveis que não
+    justificam tabela própria — ex.: `devolucao_custo_embalagem` (default 0.50),
+    o valor de embalagem somado ao prejuízo de cada devolução.
+    """
+    __tablename__ = "configuracoes_app"
+
+    chave = Column(String(80), primary_key=True)
+    valor = Column(Text, default="")
+    atualizado_em = Column(String(40), default="")
+
+
+class CustoDevolucao(Base):
+    """
+    Ledger de custo/prejuízo de UMA devolução, lançado quando o operador finaliza
+    a avaliação. Alimenta o dashboard de custos por mês. Uma linha por devolução
+    (idempotente por devolucao_id): re-finalizar atualiza a mesma linha.
+
+    Composição do prejuízo (editável no que precisa):
+      frete_reverso  — cobrança do ML pelo retorno (/charges/return-cost)
+      custo_produto  — custo do SKU quando o produto voltou danificado (custos_produto)
+      custo_embalagem— valor fixo de reembalagem (config devolucao_custo_embalagem)
+    """
+    __tablename__ = "custos_devolucao"
+
+    id = Column(Integer, primary_key=True)
+    devolucao_id = Column(Integer, ForeignKey("devolucoes.id"), nullable=False, unique=True, index=True)
+    ml_claim_id = Column(String(50), default="", index=True)
+    mes = Column(String(7), default="", index=True)   # "YYYY-MM" (fuso de Brasília)
+    sku = Column(String(120), default="")
+    danificado = Column(Integer, default=0)
+    frete_reverso = Column(Float, default=0)
+    custo_produto = Column(Float, default=0)
+    custo_embalagem = Column(Float, default=0)
+    total = Column(Float, default=0)
+    resultado = Column(String(30), default="")        # concluido | ocorrencia
+    observacao = Column(Text, default="")
+    created_at = Column(String(40), default="")
+    updated_at = Column(String(40), default="")
+
+
+class MLNotificacao(Base):
+    """
+    Auditoria das notificações (webhooks) do Mercado Livre. Guardar aqui permite
+    dedup (mesma notificação reenviada), diagnóstico e reprocessamento. O corpo
+    cru fica em `payload`. `processado_em` marca quando a integração agiu sobre ela.
+    """
+    __tablename__ = "ml_notificacoes"
+
+    id = Column(Integer, primary_key=True)
+    topic = Column(String(60), default="", index=True)
+    resource = Column(String(255), default="")
+    resource_id = Column(String(80), default="", index=True)
+    user_id = Column(String(40), default="")
+    application_id = Column(String(60), default="")
+    attempts = Column(Integer, default=0)
+    recebido_em = Column(String(40), default="", index=True)
+    processado_em = Column(String(40), default="")
+    status = Column(String(30), default="recebido")   # recebido | processado | ignorado | erro
+    detalhe = Column(Text, default="")
+    payload = Column(Text, default="{}")

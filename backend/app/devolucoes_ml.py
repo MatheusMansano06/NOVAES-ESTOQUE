@@ -130,6 +130,42 @@ def ml_post(path: str, body: Optional[dict] = None, params: Optional[dict] = Non
         return {}
 
 
+# --------------------------------------------------- Ações sobre o ML (mutação)
+# Endpoints da BIBLIA_POS_VENDA_ML.md. Todos exigem que a ação exista em
+# available_actions do claim — o handler valida antes de chamar. São operações
+# de EFEITO: reembolso mexe em dinheiro, review/allow-return encerram etapa.
+# Por isso ficam separadas e o handler só as dispara com confirmação do operador.
+#
+# ⚠️ Os corpos exatos (schema do body) não puderam ser verificados na doc oficial
+# (portal responde 403 a acesso automatizado). Os campos abaixo seguem o padrão
+# observado; se o ML recusar (4xx), o texto do erro volta cru para diagnóstico.
+
+def enviar_return_review(return_id: str, aprovado: bool) -> dict:
+    """
+    Revisão unificada da devolução: 'chegou como esperado' (ok) ou 'com problema'
+    (fail). POST /post-purchase/v1/returns/{return_id}/return-review.
+    """
+    status = "success" if aprovado else "failed"
+    return ml_post(f"/post-purchase/v1/returns/{return_id}/return-review",
+                   body={"status": status})
+
+
+def oferecer_reembolso_total(claim_id: str) -> dict:
+    """Reembolso TOTAL ao comprador (endpoint próprio, != partial)."""
+    return ml_post(f"/post-purchase/v1/claims/{claim_id}/expected-resolutions/refund")
+
+
+def oferecer_reembolso_parcial(claim_id: str, valor: float) -> dict:
+    """Reembolso PARCIAL — nunca equivale a 100% (esse usa /refund)."""
+    return ml_post(f"/post-purchase/v1/claims/{claim_id}/expected-resolutions/partial-refund",
+                   body={"amount": round(float(valor or 0), 2)})
+
+
+def permitir_devolucao(claim_id: str) -> dict:
+    """Aceita a devolução (allow-return) — libera o retorno do produto."""
+    return ml_post(f"/post-purchase/v1/claims/{claim_id}/expected-resolutions/allow-return")
+
+
 # --------------------------------------------------- Auxiliares (VERBATIM)
 
 def normalized_ml_text(value: Optional[str]) -> str:

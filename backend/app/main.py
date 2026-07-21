@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 from database import engine, Base, SessionLocal
 import os
 import json
+import asyncio
 import threading
 import re
 import time
@@ -26,7 +27,8 @@ from app.models import (
     EmbaleFU, ItemEmbaleFU, ApelidoFornecedor, PrecoVendaProduto,
     MercadoLivreItemCache, MercadoLivreSyncState, HistoricoFullEmbale,
     CustoProduto, Operador, LogOperacao, OlistEstoqueSnapshot,
-    Embalagem, EmbalagemCompra, EmbalagemMovimento, EmbalagemVinculo
+    Embalagem, EmbalagemCompra, EmbalagemMovimento, EmbalagemVinculo,
+    MLNotificacao
 )
 from app.utils.nfe_parser import NFeParsing
 from app.utils.nfe_pdf_generator import NFePDFGenerator
@@ -71,6 +73,14 @@ from app.handlers_devolucoes import (
     sync_status as dev_sync_status,
     sync_trace as dev_sync_trace,
     sync_trace_ultimo as dev_sync_trace_ultimo,
+    config_custos as dev_config_custos,
+    custos_dashboard as dev_custos_dashboard,
+    divergencia as dev_divergencia,
+    finalizar_avaliacao as dev_finalizar_avaliacao,
+    upload_evidencia as dev_upload_evidencia,
+    servir_evidencia as dev_servir_evidencia,
+    ml_review as dev_ml_review,
+    ml_resolucao as dev_ml_resolucao,
 )
 
 # Carregar variáveis de ambiente do arquivo .env
@@ -141,6 +151,14 @@ def _garantir_colunas_sqlite():
                     conn.exec_driver_sql(
                         f"ALTER TABLE ml_claim_classifications ADD COLUMN {nome_col} VARCHAR(60) DEFAULT ''")
                     print(f"[DB] Coluna ml_claim_classifications.{nome_col} criada")
+
+            # SKU do produto na devolução (custo de dano). Coluna nova em tabela
+            # já existente → precisa de ALTER, senão o sync/finalizar dá 500 em prod.
+            colunas_dev = {row[1] for row in conn.exec_driver_sql(
+                "PRAGMA table_info(devolucoes)").fetchall()}
+            if colunas_dev and "ml_sku" not in colunas_dev:
+                conn.exec_driver_sql("ALTER TABLE devolucoes ADD COLUMN ml_sku VARCHAR(120) DEFAULT ''")
+                print("[DB] Coluna devolucoes.ml_sku criada")
 
             # As 10 tabelas nascem do create_all(). O que não dá para expressar no
             # model é o índice ÚNICO PARCIAL de ml_claim_id: ele é o que torna o
@@ -5318,6 +5336,106 @@ async def ml_callback(request: Request):
     return HTMLResponse("<h2 style='color:#d32f2f'>Falha ao obter token do ML</h2>", status_code=500)
 
 
+def _extrair_claim_id(resource: str) -> str:
+    """Pega o id do claim do 'resource' da notificação (aceita prefixo post-purchase)."""
+    m = re.search(r"/claims/(\d+)", str(resource or ""))
+    return m.group(1) if m else ""
+
+
+def _processar_notificacao_ml(notif_id: int, topic: str, resource: str) -> None:
+    """Roda fora do event loop: busca o claim no ML e atualiza a devolução."""
+    from app.devolucoes_sync import processar_notificacao_claim
+    quando = datetime.utcnow().isoformat() + "Z"
+    status, detalhe = "processado", ""
+    try:
+        claim_id = _extrair_claim_id(resource)
+        if not claim_id:
+            status, detalhe = "ignorado", "sem claim_id no resource"
+        else:
+            r = processar_notificacao_claim(claim_id)
+            status = "processado" if r.get("ok") else "erro"
+            detalhe = json.dumps(r, ensure_ascii=False)[:1000]
+    except Exception as exc:
+        status, detalhe = "erro", str(exc)[:1000]
+    db = SessionLocal()
+    try:
+        n = db.query(MLNotificacao).filter(MLNotificacao.id == notif_id).first()
+        if n:
+            n.status = status
+            n.detalhe = detalhe
+            n.processado_em = quando
+            db.commit()
+    finally:
+        db.close()
+
+
+# Tópicos que disparam atualização de devolução. 'orders'/'shipments' entram como
+# rede extra (o mesmo pack pode ter um claim); os demais são registrados e ignorados.
+_TOPICOS_DEVOLUCAO = {"claims", "post_purchase", "post_purchase_claims", "marketplace_claims"}
+
+
+async def ml_notificacoes(request: Request):
+    """
+    POST /api/ml/notificacoes — webhook do Mercado Livre (tópico Marketplace
+    claims). Responde 200 SEMPRE e rápido (o ML desativa o tópico se demorar/errar).
+
+    Segurança: não confia no corpo. Registra a notificação, confere que o
+    user_id é o desta conta e, para tópicos de claim, busca o recurso na API do
+    ML em background para atualizar a devolução — nunca age a partir do payload.
+    """
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    topic = str(body.get("topic") or "").strip().lower()
+    resource = str(body.get("resource") or "")
+    user_id = str(body.get("user_id") or "")
+    recebido = datetime.utcnow().isoformat() + "Z"
+
+    # Registra sempre (auditoria/dedup/diagnóstico).
+    db = SessionLocal()
+    try:
+        notif = MLNotificacao(
+            topic=topic, resource=resource, resource_id=_extrair_claim_id(resource),
+            user_id=user_id, application_id=str(body.get("application_id") or ""),
+            attempts=int(body.get("attempts") or 0), recebido_em=recebido,
+            status="recebido", payload=json.dumps(body, ensure_ascii=False)[:8000])
+        db.add(notif)
+        db.commit()
+        notif_id = notif.id
+    except Exception:
+        notif_id = 0
+    finally:
+        db.close()
+
+    # Confere a conta: notificação de outra conta (ou config incompleta) é ignorada.
+    conta_ok = bool(ml.user_id) and (not user_id or str(user_id) == str(ml.user_id))
+    if notif_id and conta_ok and topic in _TOPICOS_DEVOLUCAO and _extrair_claim_id(resource):
+        try:
+            asyncio.get_running_loop().run_in_executor(
+                None, _processar_notificacao_ml, notif_id, topic, resource)
+        except Exception:
+            pass
+
+    # 200 sempre, para o ML não desativar o tópico.
+    return JSONResponse({"ok": True}, status_code=200)
+
+
+async def ml_notificacoes_recentes(request: Request):
+    """GET /api/ml/notificacoes — últimas notificações recebidas (diagnóstico)."""
+    db = SessionLocal()
+    try:
+        rows = db.query(MLNotificacao).order_by(MLNotificacao.id.desc()).limit(50).all()
+        return JSONResponse([{
+            "id": r.id, "topic": r.topic, "resource": r.resource,
+            "resource_id": r.resource_id, "status": r.status,
+            "recebido_em": r.recebido_em, "processado_em": r.processado_em,
+            "detalhe": r.detalhe,
+        } for r in rows])
+    finally:
+        db.close()
+
+
 async def atualizar_nome_embale(request: Request):
     db = SessionLocal()
     try:
@@ -5580,6 +5698,8 @@ routes = [
     Route("/api/ml/imagens", ml_imagens, methods=["GET"]),
     Route("/api/ml/conectar", ml_conectar, methods=["GET"]),
     Route("/api/ml/callback", ml_callback, methods=["GET"]),
+    Route("/api/ml/notificacoes", ml_notificacoes, methods=["POST"]),
+    Route("/api/ml/notificacoes", ml_notificacoes_recentes, methods=["GET"]),
     Route("/api/upload-nfe", upload_nfe, methods=["POST"]),
     Route("/api/notas-fiscais", get_nfs, methods=["GET"]),
     Route("/api/notas-fiscais/{nf_id}", get_nf, methods=["GET"]),
@@ -5664,6 +5784,11 @@ routes = [
     Route("/api/devolucoes/sync-trace/ultimo", dev_sync_trace_ultimo, methods=["GET"]),
     Route("/api/devolucoes/sync-trace/{trace_id}", dev_sync_trace, methods=["GET"]),
     Route("/api/devolucoes/historico/incompletos", dev_historico_incompletos, methods=["GET"]),
+    # Fase 3/4 — custos e divergência
+    Route("/api/devolucoes/config-custos", dev_config_custos, methods=["GET", "PUT", "POST"]),
+    Route("/api/devolucoes/custos", dev_custos_dashboard, methods=["GET"]),
+    Route("/api/devolucoes/divergencia", dev_divergencia, methods=["GET"]),
+    Route("/api/devolucoes/evidencias/arquivo/{nome}", dev_servir_evidencia, methods=["GET"]),
     Route("/api/resumo-ml", dev_resumo_ml, methods=["GET"]),
     Route("/api/devolucoes/{item_id:int}", dev_buscar_devolucao, methods=["GET"]),
     Route("/api/devolucoes/{item_id:int}/historico", dev_historico_devolucao, methods=["GET"]),
@@ -5672,8 +5797,13 @@ routes = [
     Route("/api/devolucoes/{item_id:int}/checklist", dev_salvar_checklist, methods=["POST"]),
     Route("/api/devolucoes/{item_id:int}/checklist/progresso", dev_salvar_progresso_checklist, methods=["POST"]),
     Route("/api/devolucoes/{item_id:int}/evidencias", dev_listar_evidencias, methods=["GET"]),
+    Route("/api/devolucoes/{item_id:int}/evidencias", dev_upload_evidencia, methods=["POST"]),
     Route("/api/devolucoes/{item_id:int}/contestacoes", dev_listar_contestacoes, methods=["GET"]),
     Route("/api/devolucoes/{item_id:int}/contestacoes", dev_criar_contestacao, methods=["POST"]),
+    # Fase 5/6 — finalizar avaliação e ações no ML
+    Route("/api/devolucoes/{item_id:int}/finalizar", dev_finalizar_avaliacao, methods=["POST"]),
+    Route("/api/devolucoes/{item_id:int}/ml-review", dev_ml_review, methods=["POST"]),
+    Route("/api/devolucoes/{item_id:int}/ml-resolucao", dev_ml_resolucao, methods=["POST"]),
 ]
 
 async def _on_startup():

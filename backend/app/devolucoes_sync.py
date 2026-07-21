@@ -750,7 +750,7 @@ UPSERT_FIELDS = [
     "ml_ativo", "ml_valor_pago", "ml_valor_reembolsado", "ml_taxa_venda",
     "ml_custo_envio", "ml_status_pagamento", "ml_return_id", "ml_return_subtype",
     "ml_status_money", "ml_refund_at", "ml_seller_status", "ml_seller_reason",
-    "ml_product_condition", "ml_return_reviews", "ml_tarifa_devolucao",
+    "ml_product_condition", "ml_return_reviews", "ml_tarifa_devolucao", "ml_sku",
 ]
 
 
@@ -876,6 +876,50 @@ def novo_trace_id() -> str:
     return uuid.uuid4().hex[:16]
 
 
+def processar_notificacao_claim(claim_id: str) -> dict:
+    """
+    Processa UM claim disparado por notificação (webhook) do ML — o caminho
+    near-real-time. Não confia no corpo da notificação: busca o claim na API,
+    materializa a devolução (build+upsert) e reclassifica só ele (sem cache),
+    mantendo o cache de classificação em dia sem varrer o universo todo.
+
+    Idempotente e barato (poucos requests). Devolve um resumo para auditoria.
+    """
+    claim_id = str(claim_id or "").strip()
+    if not claim_id:
+        return {"ok": False, "erro": "claim_id vazio"}
+    try:
+        claim = ml_get(f"/post-purchase/v1/claims/{claim_id}")
+    except Exception as exc:
+        return {"ok": False, "claim_id": claim_id, "erro": f"claim_get: {exc}"}
+    if not claim or not claim.get("id"):
+        return {"ok": False, "claim_id": claim_id, "erro": "claim inexistente/sem acesso"}
+
+    resultado = {"ok": True, "claim_id": claim_id}
+    try:
+        item = build_ml_devolucao(claim)
+        item["ml_ativo"] = 1
+        resultado["devolucao"] = upsert_ml_devolucao(item)
+    except Exception as exc:
+        resultado["ok"] = False
+        resultado["erro_devolucao"] = str(exc)
+    try:
+        classificado, _hit = inspect_claim_for_queue(claim, use_cache=False)
+        if classificado.get("claim_id"):
+            _exec("UPDATE ml_claim_classifications SET active = 1 WHERE claim_id = :c",
+                  {"c": str(classificado["claim_id"])})
+        resultado["bucket"] = classificado.get("bucket")
+    except Exception as exc:
+        resultado["ok"] = False
+        resultado["erro_classificacao"] = str(exc)
+    # Um bipe avulso pode ter chegado antes do claim aparecer: tenta casar agora.
+    try:
+        reconciliar_avulsos()
+    except Exception:
+        pass
+    return resultado
+
+
 # ------------------------------------------- claim do ML -> linha de devolução
 
 def add_days_iso(value: Optional[str], days: int) -> str:
@@ -966,7 +1010,12 @@ def build_ml_devolucao(claim: dict, sync_run_id: Optional[int] = None) -> dict:
         except Exception:
             order = None
 
-    item = ((order or {}).get("order_items") or [{}])[0].get("item", {})
+    order_item0 = ((order or {}).get("order_items") or [{}])[0]
+    item = order_item0.get("item", {})
+    # SKU: o ML expõe em order_items[].item.seller_sku (ou seller_custom_field como
+    # fallback). É a chave usada para achar o custo do produto no lançamento de dano.
+    seller_sku = str(item.get("seller_sku") or item.get("seller_custom_field")
+                     or order_item0.get("seller_sku") or "").strip()
     buyer = (order or {}).get("buyer", {})
     buyer_name = " ".join([buyer.get("first_name") or "", buyer.get("last_name") or ""]).strip()
     shipment = ml_return_shipments(retorno)[0]
@@ -1086,6 +1135,7 @@ def build_ml_devolucao(claim: dict, sync_run_id: Optional[int] = None) -> dict:
         "ml_seller_status": (retorno or {}).get("seller_status") or "",
         "ml_seller_reason": (retorno or {}).get("seller_reason") or "",
         "ml_product_condition": (retorno or {}).get("product_condition") or "",
+        "ml_sku": seller_sku,
         "ml_return_reviews": json_dumps((reviews_payload or {}).get("reviews") or []),
         "ml_destino_devolucao": destination,
         "ml_tipo_logistica": "full_ml" if full_ml else "seller_address",

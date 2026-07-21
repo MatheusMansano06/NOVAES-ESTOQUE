@@ -16,14 +16,25 @@ Adaptações: jsonify -> JSONResponse, request.args -> request.query_params,
 
 import asyncio
 import json
+import os
 import re
+import uuid
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from starlette.concurrency import run_in_threadpool
 from starlette.requests import Request
-from starlette.responses import JSONResponse
+from starlette.responses import JSONResponse, FileResponse
 
-from app.devolucoes_ml import MLDevolucoesError, ml_get
+from app.devolucoes_ml import (
+    MLDevolucoesError,
+    ml_get,
+    claim_available_actions,
+    enviar_return_review,
+    oferecer_reembolso_total,
+    oferecer_reembolso_parcial,
+    permitir_devolucao,
+)
 from app.devolucoes_sync import (
     STATUS_PERMITIDOS,
     _linha,
@@ -887,3 +898,378 @@ async def criar_devolucao(request: Request):
            "val": float(body["valor_produto"]), "st": status, "d": now_iso(),
            "rast": str(body.get("codigo_rastreio") or "")})
     return JSONResponse({"mensagem": "Devolucao criada"}, status_code=201)
+
+
+# ============================================================================
+# Fase 3 — Custos e prejuízos
+# ============================================================================
+
+EMBALAGEM_KEY = "devolucao_custo_embalagem"
+EMBALAGEM_DEFAULT = 0.50
+
+
+def _mes_brt(quando: Optional[str] = None) -> str:
+    """Mês YYYY-MM no fuso de Brasília (o ML manda tudo em UTC)."""
+    base = (datetime.fromisoformat(quando.replace("Z", "+00:00"))
+            if quando else datetime.now(timezone.utc))
+    if base.tzinfo is None:
+        base = base.replace(tzinfo=timezone.utc)
+    return (base.astimezone(timezone.utc) - timedelta(hours=3)).strftime("%Y-%m")
+
+
+def _config_get_float(chave: str, default: float) -> float:
+    row = _linha("SELECT valor FROM configuracoes_app WHERE chave = :c", {"c": chave})
+    if not row:
+        return default
+    try:
+        return float(row["valor"])
+    except (TypeError, ValueError):
+        return default
+
+
+def _config_set(chave: str, valor: str) -> None:
+    _exec("""INSERT INTO configuracoes_app (chave, valor, atualizado_em)
+             VALUES (:c, :v, :d)
+             ON CONFLICT(chave) DO UPDATE SET valor = excluded.valor,
+                                              atualizado_em = excluded.atualizado_em""",
+          {"c": chave, "v": str(valor), "d": now_iso()})
+
+
+def _custo_produto_sku(sku: str) -> float:
+    sku = str(sku or "").strip()
+    if not sku:
+        return 0.0
+    row = _linha("SELECT custo FROM custos_produto WHERE produto_chave = :s", {"s": sku})
+    try:
+        return round(float(row["custo"]), 2) if row else 0.0
+    except (TypeError, ValueError):
+        return 0.0
+
+
+async def config_custos(request: Request):
+    """GET/PUT do custo de embalagem (editável). Default R$ 0,50."""
+    if request.method in ("PUT", "POST"):
+        body = await request.json()
+        try:
+            valor = round(float(body.get("custo_embalagem")), 2)
+        except (TypeError, ValueError):
+            return _erro("custo_embalagem inválido")
+        if valor < 0:
+            return _erro("custo_embalagem não pode ser negativo")
+        _config_set(EMBALAGEM_KEY, valor)
+        return JSONResponse({"mensagem": "Configuração salva", "custo_embalagem": valor})
+    return JSONResponse({"custo_embalagem": _config_get_float(EMBALAGEM_KEY, EMBALAGEM_DEFAULT)})
+
+
+async def custos_dashboard(request: Request):
+    """
+    Dashboard de custos/prejuízos. Consolida o ledger custos_devolucao (frete
+    reverso + dano + embalagem) por mês, e traz o prejuízo de mediação (perdas
+    reais em contestações) das devoluções para contexto.
+    """
+    mes = (request.query_params.get("mes") or _mes_brt()).strip()
+
+    total = _linha("""
+        SELECT COUNT(*) AS lancamentos,
+               COALESCE(SUM(frete_reverso), 0) AS frete_reverso,
+               COALESCE(SUM(custo_produto), 0) AS custo_produto,
+               COALESCE(SUM(custo_embalagem), 0) AS custo_embalagem,
+               COALESCE(SUM(total), 0) AS total,
+               COALESCE(SUM(danificado), 0) AS danificados
+        FROM custos_devolucao WHERE mes = :m
+    """, {"m": mes}) or {}
+
+    # Prejuízo de mediação do mês (perdas de contestações), fonte independente.
+    med = _linha("""
+        SELECT COALESCE(SUM(valor_perdido), 0) AS perdido,
+               COALESCE(SUM(valor_recuperado), 0) AS recuperado
+        FROM devolucoes
+        WHERE status IN ('reprovado','parcial')
+          AND strftime('%Y-%m', datetime(COALESCE(ultima_sincronizacao_ml, data_solicitacao), '-3 hours')) = :m
+    """, {"m": mes}) or {}
+
+    serie = _linhas("""
+        SELECT mes, COALESCE(SUM(total), 0) AS total
+        FROM custos_devolucao
+        WHERE mes >= :desde
+        GROUP BY mes ORDER BY mes ASC
+    """, {"desde": _mes_brt((datetime.now(timezone.utc) - timedelta(days=210)).isoformat())})
+
+    itens = _linhas("""
+        SELECT cd.*, d.produto_nome, d.pedido_id, d.ml_claim_id, d.ml_tipo_logistica
+        FROM custos_devolucao cd
+        LEFT JOIN devolucoes d ON d.id = cd.devolucao_id
+        WHERE cd.mes = :m
+        ORDER BY cd.total DESC, cd.id DESC
+    """, {"m": mes})
+
+    return JSONResponse({
+        "mes": mes,
+        "resumo": {
+            "lancamentos": int(total.get("lancamentos") or 0),
+            "frete_reverso": round(float(total.get("frete_reverso") or 0), 2),
+            "custo_produto": round(float(total.get("custo_produto") or 0), 2),
+            "custo_embalagem": round(float(total.get("custo_embalagem") or 0), 2),
+            "total": round(float(total.get("total") or 0), 2),
+            "danificados": int(total.get("danificados") or 0),
+            "prejuizo_mediacao": round(float(med.get("perdido") or 0), 2),
+            "recuperado_mediacao": round(float(med.get("recuperado") or 0), 2),
+        },
+        "serie_mensal": serie,
+        "itens": itens,
+    })
+
+
+# ============================================================================
+# Fase 4 — Divergência / fraude (previstas × entregue × bipadas)
+# ============================================================================
+
+async def divergencia(request: Request):
+    """
+    Cruza, para o pool que vem ao barracão (seller_address):
+      previstas  — a caminho (shipped/delivered), ainda na fila
+      entregue   — transportadora marcou delivered
+      bipadas    — o operador bipou (recebido_em preenchido)
+    Divergência = entregue − bipadas (produto que 'chegou' mas ninguém recebeu):
+    faltante, erro logístico ou fraude. Lista os suspeitos.
+    """
+    row = _linha("""
+        SELECT
+          SUM(CASE WHEN shipment_destination='seller_address'
+                    AND shipment_status IN ('shipped','delivered')
+                    AND bucket IN ('para_retirar','para_revisao') THEN 1 ELSE 0 END) AS previstas,
+          SUM(CASE WHEN shipment_destination='seller_address'
+                    AND shipment_status='delivered'
+                    AND bucket IN ('para_retirar','para_revisao') THEN 1 ELSE 0 END) AS entregue,
+          SUM(CASE WHEN shipment_destination='seller_address'
+                    AND shipment_status='delivered'
+                    AND bucket IN ('para_retirar','para_revisao')
+                    AND COALESCE(recebido_em,'') <> '' THEN 1 ELSE 0 END) AS bipadas
+        FROM ml_claim_classifications WHERE active = 1
+    """) or {}
+
+    suspeitos = _linhas("""
+        SELECT claim_id, pedido_id, pack_id, produto_nome, produto_imagem,
+               shipment_id, tracking_number, due_date, motivo_label
+        FROM ml_claim_classifications
+        WHERE active = 1
+          AND shipment_destination='seller_address'
+          AND shipment_status='delivered'
+          AND bucket IN ('para_retirar','para_revisao')
+          AND COALESCE(recebido_em,'') = ''
+        ORDER BY due_date ASC
+    """)
+
+    previstas = int(row.get("previstas") or 0)
+    entregue = int(row.get("entregue") or 0)
+    bipadas = int(row.get("bipadas") or 0)
+    return JSONResponse({
+        "previstas": previstas,
+        "entregue_transportadora": entregue,
+        "bipadas": bipadas,
+        "divergencia": max(entregue - bipadas, 0),
+        "a_caminho": max(previstas - entregue, 0),
+        "suspeitos": suspeitos,
+    })
+
+
+# ============================================================================
+# Fase 5 — Avaliação → ação (finalizar) + evidências
+# ============================================================================
+
+async def finalizar_avaliacao(request: Request):
+    """
+    Fecha a avaliação da devolução e LANÇA o custo no dashboard.
+
+    resultado='concluido'  → sem problema; devolução finalizada.
+    resultado='ocorrencia' → com problema; segue para mediação/contestação.
+
+    Custo = frete_reverso (do ML) + embalagem (config) + custo_produto (se
+    danificado, buscado por SKU). Cada parte é sobreponível pelo body.
+    """
+    item_id = int(request.path_params["item_id"])
+    body = await request.json()
+    resultado = str(body.get("resultado") or "").strip()
+    if resultado not in {"concluido", "ocorrencia"}:
+        return _erro("resultado deve ser 'concluido' ou 'ocorrencia'")
+
+    row = _linha("SELECT * FROM devolucoes WHERE id = :i", {"i": item_id})
+    if not row:
+        return _erro("Devolucao nao encontrada", 404)
+
+    danificado = bool(body.get("danificado"))
+    frete_reverso = round(abs(float(row.get("ml_tarifa_devolucao") or 0)), 2)
+    embalagem = (round(float(body["custo_embalagem"]), 2)
+                 if body.get("custo_embalagem") is not None
+                 else _config_get_float(EMBALAGEM_KEY, EMBALAGEM_DEFAULT))
+    if body.get("custo_produto") is not None:
+        custo_produto = round(float(body["custo_produto"]), 2)
+    else:
+        custo_produto = _custo_produto_sku(row.get("ml_sku")) if danificado else 0.0
+    total = round(frete_reverso + embalagem + custo_produto, 2)
+    observacao = str(body.get("observacao") or "").strip()
+    agora = now_iso()
+    mes = _mes_brt(agora)
+
+    _exec("""
+        INSERT INTO custos_devolucao (devolucao_id, ml_claim_id, mes, sku, danificado,
+              frete_reverso, custo_produto, custo_embalagem, total, resultado,
+              observacao, created_at, updated_at)
+        VALUES (:did, :cid, :mes, :sku, :dan, :fr, :cp, :ce, :tot, :res, :obs, :d, :d)
+        ON CONFLICT(devolucao_id) DO UPDATE SET
+          mes = excluded.mes, sku = excluded.sku, danificado = excluded.danificado,
+          frete_reverso = excluded.frete_reverso, custo_produto = excluded.custo_produto,
+          custo_embalagem = excluded.custo_embalagem, total = excluded.total,
+          resultado = excluded.resultado, observacao = excluded.observacao,
+          updated_at = excluded.updated_at
+    """, {"did": item_id, "cid": str(row.get("ml_claim_id") or ""), "mes": mes,
+          "sku": str(row.get("ml_sku") or ""), "dan": 1 if danificado else 0,
+          "fr": frete_reverso, "cp": custo_produto, "ce": embalagem, "tot": total,
+          "res": resultado, "obs": observacao, "d": agora})
+
+    if resultado == "concluido":
+        novo_status = "sem_divergencia"
+        _exec("""UPDATE devolucoes
+                 SET status = :st, chegada_status = 'esperado', requer_acao = 0,
+                     ml_ativo = 0, observacao_final = :obs
+                 WHERE id = :i""",
+              {"st": novo_status, "obs": observacao or row.get("observacao_final") or "",
+               "i": item_id})
+    else:
+        novo_status = "divergencia_encontrada"
+        _exec("""UPDATE devolucoes
+                 SET status = :st, requer_acao = 1, ml_ativo = 1,
+                     observacao_final = :obs
+                 WHERE id = :i""",
+              {"st": novo_status, "obs": observacao or row.get("observacao_final") or "",
+               "i": item_id})
+
+    _exec("""INSERT INTO historico_status (devolucao_id, status_anterior, status_novo, data_alteracao)
+             VALUES (:i, :ant, :novo, :d)""",
+          {"i": item_id, "ant": row.get("status") or "", "novo": novo_status, "d": agora})
+
+    return JSONResponse({
+        "mensagem": "Avaliação finalizada",
+        "resultado": resultado, "status": novo_status,
+        "custo": {"frete_reverso": frete_reverso, "custo_produto": custo_produto,
+                  "custo_embalagem": embalagem, "total": total, "mes": mes},
+    })
+
+
+EVID_EXT_OK = {".jpg", ".jpeg", ".png", ".webp", ".gif", ".pdf"}
+
+
+async def upload_evidencia(request: Request):
+    """Anexa foto/arquivo à devolução (multipart 'file'). Guarda no UPLOAD_DIR."""
+    from app.main import UPLOAD_DIR
+    item_id = int(request.path_params["item_id"])
+    if not _linha("SELECT id FROM devolucoes WHERE id = :i", {"i": item_id}):
+        return _erro("Devolucao nao encontrada", 404)
+    form = await request.form()
+    file = form.get("file")
+    if not file or not getattr(file, "filename", ""):
+        return _erro("Envie o arquivo no campo 'file'.")
+    ext = os.path.splitext(file.filename)[1].lower()
+    if ext not in EVID_EXT_OK:
+        return _erro(f"Extensão não permitida. Use: {sorted(EVID_EXT_OK)}")
+    conteudo = await file.read()
+    if len(conteudo) > 15 * 1024 * 1024:
+        return _erro("Arquivo maior que 15 MB.", 413)
+    nome_seguro = f"evid_{item_id}_{uuid.uuid4().hex}{ext}"
+    with open(os.path.join(UPLOAD_DIR, nome_seguro), "wb") as f:
+        f.write(conteudo)
+    _exec("""INSERT INTO evidencias (devolucao_id, tipo, arquivo, descricao, data_upload)
+             VALUES (:i, :tipo, :arq, :desc, :d)""",
+          {"i": item_id, "tipo": str(form.get("tipo") or "foto"), "arq": nome_seguro,
+           "desc": str(form.get("descricao") or ""), "d": now_iso()})
+    return JSONResponse({"mensagem": "Evidência anexada", "arquivo": nome_seguro}, status_code=201)
+
+
+async def servir_evidencia(request: Request):
+    """Serve o arquivo de evidência, com proteção contra path traversal."""
+    from app.main import UPLOAD_DIR
+    nome = os.path.basename(str(request.path_params["nome"]))
+    caminho = os.path.realpath(os.path.join(UPLOAD_DIR, nome))
+    if not caminho.startswith(os.path.realpath(UPLOAD_DIR)) or not os.path.isfile(caminho):
+        return _erro("Arquivo nao encontrado", 404)
+    return FileResponse(caminho)
+
+
+# ============================================================================
+# Fase 6 — Ações sobre o ML (mutação; exigem confirmação)
+# ============================================================================
+
+def _acoes_do_claim(claim_id: str) -> set:
+    try:
+        detalhe = ml_get(f"/post-purchase/v1/claims/{claim_id}")
+    except Exception:
+        return set()
+    return {str(a.get("action") or "") for a in claim_available_actions(detalhe)}
+
+
+async def ml_review(request: Request):
+    """
+    Envia a revisão da devolução ao ML: chegou como esperado (ok) ou com problema
+    (fail) — evita ter que entrar no site. Valida que a ação existe no claim.
+    """
+    item_id = int(request.path_params["item_id"])
+    body = await request.json()
+    aprovado = bool(body.get("aprovado", True))
+    row = _linha("SELECT ml_claim_id, ml_return_id FROM devolucoes WHERE id = :i", {"i": item_id})
+    if not row:
+        return _erro("Devolucao nao encontrada", 404)
+    return_id = str(row.get("ml_return_id") or "").strip()
+    if not return_id:
+        return _erro("Devolução sem return_id do ML — não há revisão a enviar.")
+    acoes = _acoes_do_claim(str(row.get("ml_claim_id") or ""))
+    review_ok = {"return_review_unified_ok", "return_review_ok"}
+    review_fail = {"return_review_unified_fail", "return_review_fail"}
+    disponiveis = review_ok if aprovado else review_fail
+    if not (acoes & disponiveis):
+        return _erro("O Mercado Livre não oferece esta revisão para este caso agora.",
+                     409, acoes_disponiveis=sorted(acoes))
+    try:
+        resp = await run_in_threadpool(enviar_return_review, return_id, aprovado)
+    except MLDevolucoesError as exc:
+        return _erro("Falha ao enviar revisão ao Mercado Livre", 502, erro=str(exc))
+    return JSONResponse({"mensagem": "Revisão enviada ao Mercado Livre",
+                         "aprovado": aprovado, "resposta_ml": resp})
+
+
+async def ml_resolucao(request: Request):
+    """
+    Dispara uma resolução esperada no ML: reembolso total/parcial ou aceitar a
+    devolução. É operação de EFEITO (mexe em dinheiro) — exige confirmar=true e
+    valida contra as available_actions do claim.
+    """
+    item_id = int(request.path_params["item_id"])
+    body = await request.json()
+    if not body.get("confirmar"):
+        return _erro("Confirme a ação (confirmar=true) — ela tem efeito no Mercado Livre.")
+    tipo = str(body.get("tipo") or "").strip()
+    row = _linha("SELECT ml_claim_id FROM devolucoes WHERE id = :i", {"i": item_id})
+    if not row:
+        return _erro("Devolucao nao encontrada", 404)
+    claim_id = str(row.get("ml_claim_id") or "").strip()
+    if not claim_id:
+        return _erro("Devolução sem claim do ML.")
+    acoes = _acoes_do_claim(claim_id)
+    try:
+        if tipo == "refund_total":
+            if "refund" not in acoes:
+                return _erro("Reembolso total indisponível neste claim.", 409,
+                             acoes_disponiveis=sorted(acoes))
+            resp = await run_in_threadpool(oferecer_reembolso_total, claim_id)
+        elif tipo == "refund_parcial":
+            valor = float(body.get("valor") or 0)
+            if valor <= 0:
+                return _erro("Informe o valor do reembolso parcial.")
+            resp = await run_in_threadpool(oferecer_reembolso_parcial, claim_id, valor)
+        elif tipo == "allow_return":
+            resp = await run_in_threadpool(permitir_devolucao, claim_id)
+        else:
+            return _erro("tipo deve ser: refund_total, refund_parcial ou allow_return")
+    except MLDevolucoesError as exc:
+        return _erro("Falha ao executar a resolução no Mercado Livre", 502, erro=str(exc))
+    return JSONResponse({"mensagem": "Resolução enviada ao Mercado Livre",
+                         "tipo": tipo, "resposta_ml": resp})
