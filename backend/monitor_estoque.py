@@ -1,10 +1,14 @@
 """
 Monitor de estoque — roda em background (cron do OpenClaw) e avisa no Telegram.
 
-Checa três coisas, todas lendo dos endpoints que o painel já usa (sem regra nova):
+Checa quatro coisas, todas lendo dos endpoints que o painel já usa:
   1. Produto INATIVO na Olist mas com anúncio ATIVO no ML  -> vende sem ter produto
-  2. Produto ATIVO na Olist mas anúncio PAUSADO no ML       -> pausa provavelmente indevida
-  3. Margem de contribuição abaixo do mínimo                -> mesma fórmula da tela de Anúncios ML
+  2. Anúncio PAUSADO no ML com saldo > 0 na Olist          -> pausa provavelmente indevida
+  3. Estoque do DEPÓSITO do ML diferente do saldo da Olist -> divergência de quantidade
+  4. Margem de contribuição abaixo do mínimo               -> mesma fórmula da tela de Anúncios ML
+
+Anúncio FULL não entra na conferência de quantidade: o saldo dele fica no galpão
+do Mercado Livre, então divergir do barracão é o esperado.
 
 Uso:  python monitor_estoque.py            (a partir de backend/)
 Env:  BACKEND_URL (default http://localhost:8000), MARGEM_MINIMA_PCT (default 10),
@@ -30,8 +34,6 @@ MAX_ALERTAS = int(os.getenv("MONITOR_MAX_ALERTAS") or 10)
 # Piso de sanidade da listagem da Olist (a base real tem ~1200 SKUs). Serve pra
 # barrar coleta truncada, não pra exigir a base exata. Ver monitorar().
 OLIST_MINIMO = int(os.getenv("OLIST_MINIMO") or 500)
-# Teto de consultas de estoque por rodada (é uma requisição por produto pausado)
-MAX_CONSULTAS_ESTOQUE = int(os.getenv("MONITOR_MAX_CONSULTAS_ESTOQUE") or 60)
 
 # A Olist devolve a situação como letra (A/I/E) ou por extenso, dependendo da
 # versão da API. Só tratamos o que reconhecemos: situação desconhecida NÃO vira
@@ -104,15 +106,19 @@ def _situacao(produto: Dict) -> str:
     return str(produto.get("situacao") or "").strip().upper()
 
 
-def estoque_olist(produto_id: str) -> Optional[float]:
-    """Saldo disponível de um produto na Olist (uma chamada por produto)."""
-    if not produto_id:
-        return None
-    resp = _req(f"/api/olist/estoque-produto?id={urllib.parse.quote(str(produto_id))}")
-    if not resp:
-        return None
-    valor = resp.get("estoque_atual")
-    return float(valor) if isinstance(valor, (int, float)) else None
+def saldos_olist() -> Dict[str, float]:
+    """Saldo da Olist por SKU. Vem do snapshot que a Lista de Compra já mantém
+    atualizado em segundo plano — uma requisição em vez de uma por produto."""
+    resp = _req("/api/lista-compra")
+    itens = (resp or {}).get("itens") or []
+    saldos: Dict[str, float] = {}
+    for item in itens:
+        if not item.get("tem_estoque_olist"):
+            continue  # sem snapshot não dá pra afirmar saldo nenhum
+        sku = str(item.get("sku") or "").strip().upper()
+        if sku:
+            saldos[sku] = float(item.get("estoque_organico") or 0)
+    return saldos
 
 
 def desconto_tarifa(item_id: str) -> Optional[float]:
@@ -151,6 +157,7 @@ def monitorar() -> Dict[str, Any]:
     olist = produtos_olist()
     custos = (_req("/api/custos") or {}).get("custos") or {}
     margens = (_req("/api/ml/margens", "POST", {}) or {}).get("margens") or {}
+    saldos = saldos_olist()
 
     if not ml_ativos and not ml_pausados and not olist:
         print("[MONITOR] Nada retornado (backend fora do ar?) — abortando sem alertar")
@@ -189,9 +196,8 @@ def monitorar() -> Dict[str, Any]:
         # explica a pausa, e sobra o erro de quem deu baixa. Sem essa conferência,
         # todo anúncio pausado por preço ou sazonalidade viraria alerta — o
         # cadastro na Olist continua ativo mesmo com saldo zero.
-        print(f"[MONITOR] conferindo estoque de {len(candidatos_pausa)} pausado(s)…")
-        for sku, produto, nome in candidatos_pausa[:MAX_CONSULTAS_ESTOQUE]:
-            saldo = estoque_olist(produto.get("id"))
+        for sku, produto, nome in candidatos_pausa:
+            saldo = saldos.get(sku)
             if saldo is None or saldo <= 0:
                 continue
             alertas.append(
@@ -200,6 +206,24 @@ def monitorar() -> Dict[str, Any]:
                 f"Tem saldo — conferir se a pausa foi engano\n"
                 f"{ml_pausados[sku].get('permalink') or ''}".strip()
             )
+
+    # 3 — quantidade: depósito do ML x Olist. Anúncio FULL fica de fora: o saldo
+    # dele está no galpão do Mercado Livre, não no barracão, então divergir é o
+    # esperado. Só compara o que é atendido pelo próprio estoque.
+    for sku, anuncio in ml_ativos.items():
+        if anuncio.get("full") or (anuncio.get("logistica") or "") == "fulfillment":
+            continue
+        saldo = saldos.get(sku)
+        qtd_ml = anuncio.get("disponivel")
+        if saldo is None or qtd_ml is None:
+            continue
+        if float(qtd_ml) == float(saldo):
+            continue
+        alertas.append(
+            f"⚖️ ESTOQUE DIFERENTE\nSKU {sku} — {(anuncio.get('titulo') or '')[:40]}\n"
+            f"ML (depósito): {float(qtd_ml):g} | Olist: {saldo:g}\n"
+            f"{anuncio.get('permalink') or ''}".strip()
+        )
 
     # 3 — margem abaixo do mínimo (só anúncio ativo e com custo cadastrado)
     candidatos = []
@@ -230,11 +254,17 @@ def monitorar() -> Dict[str, Any]:
     # Envio: uma mensagem por alerta, para a deduplicação valer por problema
     # (um alerta novo não reenvia os antigos). Teto por rodada evita inundar.
     enviados = 0
-    for alerta in alertas[:MAX_ALERTAS]:
-        if enviar_alerta(alerta):
+    nao_enviados = 0
+    for alerta in alertas:
+        if enviados >= MAX_ALERTAS:
+            nao_enviados += 1
+            continue
+        # O teto conta só o que REALMENTE saiu: alerta suprimido por dedup não
+        # gasta vaga, senão os do fim da fila nunca chegariam.
+        if enviar_alerta(alerta) == "enviado":
             enviados += 1
-    if len(alertas) > MAX_ALERTAS:
-        enviar_alerta(f"… e mais {len(alertas) - MAX_ALERTAS} alerta(s) nesta rodada. "
+    if nao_enviados:
+        enviar_alerta(f"… e mais {nao_enviados} alerta(s) nesta rodada. "
                       f"Abra o painel para ver todos.")
 
     resumo = {

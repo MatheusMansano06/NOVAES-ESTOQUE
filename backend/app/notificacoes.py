@@ -281,48 +281,50 @@ _PROVIDERS = {
 
 # -------------------------------------------------------------------- público
 
-def enviar_alerta(mensagem: str, destino: Optional[str] = None) -> bool:
+def enviar_alerta(mensagem: str, destino: Optional[str] = None) -> str:
     """
-    Envia um alerta pelo canal configurado. Retorna True se saiu (ou se foi
-    suprimido por dedup, que também é sucesso do ponto de vista do job).
-    Nunca levanta exceção.
+    Envia um alerta pelo canal configurado. Nunca levanta exceção.
+
+    Devolve "enviado", "dedup" (suprimido por ser repetição recente) ou "erro".
+    Quem chama precisa distinguir os dois primeiros: se um teto de mensagens
+    contasse o dedup como envio, as vagas seriam gastas com alertas que ninguém
+    recebeu e o resto da fila nunca sairia.
     """
     try:
         texto = _truncar((mensagem or "").strip())
         if not texto:
             print("[ALERTA] mensagem vazia, ignorando")
-            return False
+            return "erro"
 
         provider = _detectar_provider()
         envio = _PROVIDERS.get(provider)
         if envio is None:
             print(f"[ALERTA] provider desconhecido: {provider}")
-            return False
+            return "erro"
 
         alvo = (destino or "").strip() or _destino_padrao(provider)
         if not alvo and provider != "log":
             faltando = "TELEGRAM_CHAT_ID" if provider == "telegram" else "WHATSAPP_NUMBER"
             print(f"[ALERTA] sem destino (defina {faltando}) - provider {provider}")
-            return False
+            return "erro"
 
         # anti-spam: mesmo texto + mesmo destino + mesmo provider dentro da janela
         chave = hashlib.sha256(f"{provider}|{alvo}|{texto}".encode("utf-8")).hexdigest()
         if _ja_enviado_recentemente(chave):
             print("[ALERTA] duplicado dentro da janela de dedup, não reenviado")
-            return True
+            return "dedup"
 
-        ok = bool(envio(alvo, texto))
-        if ok:
+        if envio(alvo, texto):
             print(f"[ALERTA] enviado via {provider}")
-        else:
-            # falhou: solta o dedup pra próxima rodada poder tentar de novo
-            _liberar_dedup(chave)
-            print(f"[ALERTA] falha no envio via {provider}")
-        return ok
+            return "enviado"
+        # falhou: solta o dedup pra próxima rodada poder tentar de novo
+        _liberar_dedup(chave)
+        print(f"[ALERTA] falha no envio via {provider}")
+        return "erro"
     except Exception as e:
         # alerta nunca derruba o job que o chamou
         print(f"[ALERTA] erro inesperado: {e}")
-        return False
+        return "erro"
 
 
 def descobrir_chat_id_telegram() -> None:
