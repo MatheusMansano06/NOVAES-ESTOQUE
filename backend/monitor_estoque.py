@@ -27,8 +27,11 @@ load_dotenv()
 BACKEND_URL = (os.getenv("BACKEND_URL") or "http://localhost:8000").rstrip("/")
 MARGEM_MINIMA_PCT = float(os.getenv("MARGEM_MINIMA_PCT") or 10)
 MAX_ALERTAS = int(os.getenv("MONITOR_MAX_ALERTAS") or 10)
-# Piso de sanidade da listagem da Olist (a base tem ~2000 produtos). Ver monitorar().
-OLIST_MINIMO = int(os.getenv("OLIST_MINIMO") or 1000)
+# Piso de sanidade da listagem da Olist (a base real tem ~1200 SKUs). Serve pra
+# barrar coleta truncada, não pra exigir a base exata. Ver monitorar().
+OLIST_MINIMO = int(os.getenv("OLIST_MINIMO") or 500)
+# Teto de consultas de estoque por rodada (é uma requisição por produto pausado)
+MAX_CONSULTAS_ESTOQUE = int(os.getenv("MONITOR_MAX_CONSULTAS_ESTOQUE") or 60)
 
 # A Olist devolve a situação como letra (A/I/E) ou por extenso, dependendo da
 # versão da API. Só tratamos o que reconhecemos: situação desconhecida NÃO vira
@@ -101,6 +104,17 @@ def _situacao(produto: Dict) -> str:
     return str(produto.get("situacao") or "").strip().upper()
 
 
+def estoque_olist(produto_id: str) -> Optional[float]:
+    """Saldo disponível de um produto na Olist (uma chamada por produto)."""
+    if not produto_id:
+        return None
+    resp = _req(f"/api/olist/estoque-produto?id={urllib.parse.quote(str(produto_id))}")
+    if not resp:
+        return None
+    valor = resp.get("estoque_atual")
+    return float(valor) if isinstance(valor, (int, float)) else None
+
+
 def desconto_tarifa(item_id: str) -> Optional[float]:
     """Bônus de tarifa de promoção ativa (o ML banca parte do desconto).
     Buscado só para os candidatos a alerta — é uma chamada por item."""
@@ -159,6 +173,7 @@ def monitorar() -> Dict[str, Any]:
 
     # 1 e 2 — divergência de status entre Olist e ML
     if olist_confiavel:
+        candidatos_pausa = []
         for sku, produto in olist.items():
             sit = _situacao(produto)
             nome = (produto.get("nome") or "")[:40]
@@ -168,11 +183,23 @@ def monitorar() -> Dict[str, Any]:
                     f"Olist: inativo ({sit}) | ML: ATIVO\n{ml_ativos[sku].get('permalink') or ''}".strip()
                 )
             elif sit in OLIST_ATIVO and sku in ml_pausados:
-                alertas.append(
-                    f"🟡 PAUSA SUSPEITA\nSKU {sku} — {nome}\n"
-                    f"Olist: ativo | ML: PAUSADO — conferir se acabou mesmo\n"
-                    f"{ml_pausados[sku].get('permalink') or ''}".strip()
-                )
+                candidatos_pausa.append((sku, produto, nome))
+
+        # Anúncio pausado só é suspeito se AINDA HÁ ESTOQUE: aí "acabou" não
+        # explica a pausa, e sobra o erro de quem deu baixa. Sem essa conferência,
+        # todo anúncio pausado por preço ou sazonalidade viraria alerta — o
+        # cadastro na Olist continua ativo mesmo com saldo zero.
+        print(f"[MONITOR] conferindo estoque de {len(candidatos_pausa)} pausado(s)…")
+        for sku, produto, nome in candidatos_pausa[:MAX_CONSULTAS_ESTOQUE]:
+            saldo = estoque_olist(produto.get("id"))
+            if saldo is None or saldo <= 0:
+                continue
+            alertas.append(
+                f"🟡 PAUSA SUSPEITA\nSKU {sku} — {nome}\n"
+                f"Olist: ativo, {saldo:g} em estoque | ML: PAUSADO\n"
+                f"Tem saldo — conferir se a pausa foi engano\n"
+                f"{ml_pausados[sku].get('permalink') or ''}".strip()
+            )
 
     # 3 — margem abaixo do mínimo (só anúncio ativo e com custo cadastrado)
     candidatos = []
