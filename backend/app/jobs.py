@@ -297,6 +297,32 @@ def sincronizar_devolucoes_ml():
         logger.error(f"[JOB][DEVOL] erro inesperado: {e}")
 
 
+def monitorar_estoque():
+    """
+    Alertas de divergência Olist x ML e margem baixa (lógica em monitor_estoque.py).
+
+    Roda DENTRO da produção de propósito: antes o disparo vinha do cron da máquina
+    do escritório, então PC desligado = nenhuma checagem naquela hora (e sem
+    recuperação depois). O script chama os endpoints do próprio backend, que aqui
+    é localhost — a mesma URL vale no container.
+    """
+    try:
+        from monitor_estoque import monitorar
+        monitorar()
+    except Exception as e:
+        logger.error(f"[JOB][MONITOR] erro inesperado: {e}")
+
+
+def _monitor_habilitado() -> bool:
+    """Liga sozinho só na produção (Railway). Se ligasse em qualquer backend,
+    todo `uvicorn` local com o .env do projeto passaria a mandar alerta em
+    paralelo — o dedup é por máquina, então o Matheus receberia tudo em dobro."""
+    escolha = (os.getenv("MONITOR_ESTOQUE_ENABLED") or "").strip().lower()
+    if escolha:
+        return escolha not in ("0", "false", "nao", "não", "off")
+    return bool(os.getenv("RAILWAY_ENVIRONMENT"))
+
+
 def iniciar_scheduler():
     """
     Inicia o scheduler com a tarefa diária às 8am
@@ -376,6 +402,24 @@ def iniciar_scheduler():
             coalesce=True,
             misfire_grace_time=3600,
         )
+
+        # Monitor de estoque: mesma checagem horária que rodava no cron local.
+        if _monitor_habilitado():
+            try:
+                monitor_intervalo = max(15, int(os.getenv("MONITOR_INTERVAL_MINUTES", "60")))
+            except (TypeError, ValueError):
+                monitor_intervalo = 60
+            scheduler.add_job(
+                monitorar_estoque,
+                'interval',
+                minutes=monitor_intervalo,
+                id='monitor_estoque',
+                name='Monitor de estoque (alertas de divergência e margem)',
+                max_instances=1,
+                coalesce=True,
+                misfire_grace_time=1800,
+            )
+            logger.info(f"[SCHEDULER] Job 'monitor_estoque' agendado a cada {monitor_intervalo} min")
 
         scheduler.start()
         logger.info("[SCHEDULER] Agendador iniciado com sucesso")

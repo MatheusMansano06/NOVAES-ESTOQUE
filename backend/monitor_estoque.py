@@ -1,5 +1,9 @@
 """
-Monitor de estoque — roda em background (cron do OpenClaw) e avisa no Telegram.
+Monitor de estoque — roda de hora em hora dentro do backend e avisa no Telegram.
+
+Quem agenda é o scheduler de app/jobs.py (job 'monitor_estoque'), então a
+checagem acontece na produção 24h, sem depender de máquina ligada. Continua
+executável na mão (`python monitor_estoque.py`) para conferir uma rodada.
 
 Checa quatro coisas, todas lendo dos endpoints que o painel já usa:
   1. Produto INATIVO na Olist mas com anúncio ATIVO no ML  -> vende sem ter produto
