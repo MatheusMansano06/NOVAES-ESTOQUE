@@ -27,6 +27,8 @@ load_dotenv()
 BACKEND_URL = (os.getenv("BACKEND_URL") or "http://localhost:8000").rstrip("/")
 MARGEM_MINIMA_PCT = float(os.getenv("MARGEM_MINIMA_PCT") or 10)
 MAX_ALERTAS = int(os.getenv("MONITOR_MAX_ALERTAS") or 10)
+# Piso de sanidade da listagem da Olist (a base tem ~2000 produtos). Ver monitorar().
+OLIST_MINIMO = int(os.getenv("OLIST_MINIMO") or 1000)
 
 # A Olist devolve a situação como letra (A/I/E) ou por extenso, dependendo da
 # versão da API. Só tratamos o que reconhecemos: situação desconhecida NÃO vira
@@ -76,9 +78,23 @@ def anuncios_ml(status: str) -> Dict[str, Dict]:
 
 
 def produtos_olist() -> Dict[str, Dict]:
+    """Produtos da Olist indexados por SKU.
+
+    O mesmo código costuma ter DOIS registros na Olist — o ativo e uma cópia
+    excluída (é o caso dos kits). Se o excluído vencesse, um produto normal
+    viraria alerta de "vendendo sem produto": por isso o ativo tem prioridade.
+    """
     resp = _req("/api/olist/produtos-todos")
     produtos = (resp or {}).get("produtos") or []
-    return {str(p.get("sku") or "").strip().upper(): p for p in produtos if p.get("sku")}
+    por_sku: Dict[str, Dict] = {}
+    for p in produtos:
+        sku = str(p.get("sku") or "").strip().upper()
+        if not sku:
+            continue
+        atual = por_sku.get(sku)
+        if atual is None or (_situacao(p) in OLIST_ATIVO and _situacao(atual) not in OLIST_ATIVO):
+            por_sku[sku] = p
+    return por_sku
 
 
 def _situacao(produto: Dict) -> str:
@@ -130,28 +146,33 @@ def monitorar() -> Dict[str, Any]:
     print(f"[MONITOR] ML ativos={len(ml_ativos)} pausados={len(ml_pausados)} | "
           f"Olist={len(olist)} situações={sorted(s for s in situacoes if s)}")
 
-    # Sem a Olist não dá pra comparar status: avisa em vez de deixar a rodada
-    # passar como "nenhuma divergência" (falso negativo silencioso).
-    if not olist and (ml_ativos or ml_pausados):
-        print("[MONITOR] Olist não respondeu — checagem de divergência PULADA nesta rodada")
-
     alertas: List[str] = []
 
+    # A listagem da Olist às vezes volta truncada (uma página só, quando uma
+    # requisição da paginação falha). Comparar status com base parcial INVERTE
+    # o alerta: um SKU cujo registro ativo ficou de fora aparece como "vendendo
+    # sem produto". Por isso só comparamos com a base inteira na mão.
+    olist_confiavel = len(olist) >= OLIST_MINIMO
+    if not olist_confiavel:
+        print(f"[MONITOR] Olist veio com {len(olist)} produtos (piso {OLIST_MINIMO}) — "
+              f"checagem de divergência PULADA nesta rodada")
+
     # 1 e 2 — divergência de status entre Olist e ML
-    for sku, produto in olist.items():
-        sit = _situacao(produto)
-        nome = (produto.get("nome") or "")[:40]
-        if sit in OLIST_INATIVO and sku in ml_ativos:
-            alertas.append(
-                f"🔴 VENDENDO SEM PRODUTO\nSKU {sku} — {nome}\n"
-                f"Olist: inativo ({sit}) | ML: ATIVO\n{ml_ativos[sku].get('permalink') or ''}".strip()
-            )
-        elif sit in OLIST_ATIVO and sku in ml_pausados:
-            alertas.append(
-                f"🟡 PAUSA SUSPEITA\nSKU {sku} — {nome}\n"
-                f"Olist: ativo | ML: PAUSADO — conferir se acabou mesmo\n"
-                f"{ml_pausados[sku].get('permalink') or ''}".strip()
-            )
+    if olist_confiavel:
+        for sku, produto in olist.items():
+            sit = _situacao(produto)
+            nome = (produto.get("nome") or "")[:40]
+            if sit in OLIST_INATIVO and sku in ml_ativos:
+                alertas.append(
+                    f"🔴 VENDENDO SEM PRODUTO\nSKU {sku} — {nome}\n"
+                    f"Olist: inativo ({sit}) | ML: ATIVO\n{ml_ativos[sku].get('permalink') or ''}".strip()
+                )
+            elif sit in OLIST_ATIVO and sku in ml_pausados:
+                alertas.append(
+                    f"🟡 PAUSA SUSPEITA\nSKU {sku} — {nome}\n"
+                    f"Olist: ativo | ML: PAUSADO — conferir se acabou mesmo\n"
+                    f"{ml_pausados[sku].get('permalink') or ''}".strip()
+                )
 
     # 3 — margem abaixo do mínimo (só anúncio ativo e com custo cadastrado)
     candidatos = []
