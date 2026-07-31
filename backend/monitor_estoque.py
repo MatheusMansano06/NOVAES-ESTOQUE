@@ -1,9 +1,10 @@
 """
-Monitor de estoque — roda de hora em hora dentro do backend e avisa no Telegram.
+Monitor de estoque — roda em horário de expediente e avisa no Telegram.
 
-Quem agenda é o scheduler de app/jobs.py (job 'monitor_estoque'), então a
-checagem acontece na produção 24h, sem depender de máquina ligada. Continua
-executável na mão (`python monitor_estoque.py`) para conferir uma rodada.
+Quem agenda é o scheduler de app/jobs.py (jobs 'monitor_estoque' e
+'monitor_estoque_sabado'): seg-sex de hora em hora das 8h às 18h, sábado às
+8h/12h/18h, domingo não roda. Fica na produção, sem depender de máquina ligada.
+Continua executável na mão (`python monitor_estoque.py`) para conferir uma rodada.
 
 Checa quatro coisas, todas lendo dos endpoints que o painel já usa:
   1. Produto INATIVO na Olist mas com anúncio ATIVO no ML  -> vende sem ter produto

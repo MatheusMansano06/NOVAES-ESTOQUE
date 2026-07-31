@@ -313,6 +313,23 @@ def monitorar_estoque():
         logger.error(f"[JOB][MONITOR] erro inesperado: {e}")
 
 
+def _fuso_monitor():
+    """Fuso dos horários do monitor (o servidor do Railway roda em UTC).
+
+    O fallback é UTC-3 fixo, NÃO o fuso do servidor: se a imagem estiver sem
+    tzdata, cair no relógio do container jogaria a janela de 8h-18h para
+    5h-15h locais — alerta de madrugada e silêncio à tarde. O Brasil não tem
+    horário de verão desde 2019, então o offset fixo é exato.
+    """
+    try:
+        from zoneinfo import ZoneInfo
+        return ZoneInfo(os.getenv("MONITOR_TZ") or "America/Sao_Paulo")
+    except Exception as e:
+        from datetime import timedelta, timezone as _tz
+        logger.error(f"[SCHEDULER] fuso do monitor indisponível ({e}); usando UTC-3 fixo")
+        return _tz(timedelta(hours=-3))
+
+
 def _monitor_habilitado() -> bool:
     """Liga sozinho só na produção (Railway). Se ligasse em qualquer backend,
     todo `uvicorn` local com o .env do projeto passaria a mandar alerta em
@@ -403,23 +420,40 @@ def iniciar_scheduler():
             misfire_grace_time=3600,
         )
 
-        # Monitor de estoque: mesma checagem horária que rodava no cron local.
+        # Monitor de estoque em horário de expediente. Alerta fora dele não é
+        # acionável — vira ruído e ensina a ignorar o canal. Por isso é agendado
+        # por hora do dia, e não a cada N minutos: seg-sex de hora em hora das
+        # 8h às 18h, sábado só 8h/12h/18h, domingo nenhum.
         if _monitor_habilitado():
-            try:
-                monitor_intervalo = max(15, int(os.getenv("MONITOR_INTERVAL_MINUTES", "60")))
-            except (TypeError, ValueError):
-                monitor_intervalo = 60
+            tz_monitor = _fuso_monitor()
             scheduler.add_job(
                 monitorar_estoque,
-                'interval',
-                minutes=monitor_intervalo,
+                'cron',
+                day_of_week='mon-fri',
+                hour='8-18',
+                minute=0,
+                timezone=tz_monitor,
                 id='monitor_estoque',
-                name='Monitor de estoque (alertas de divergência e margem)',
+                name='Monitor de estoque (seg-sex, 8h-18h)',
                 max_instances=1,
                 coalesce=True,
                 misfire_grace_time=1800,
             )
-            logger.info(f"[SCHEDULER] Job 'monitor_estoque' agendado a cada {monitor_intervalo} min")
+            scheduler.add_job(
+                monitorar_estoque,
+                'cron',
+                day_of_week='sat',
+                hour='8,12,18',
+                minute=0,
+                timezone=tz_monitor,
+                id='monitor_estoque_sabado',
+                name='Monitor de estoque (sábado, 8h/12h/18h)',
+                max_instances=1,
+                coalesce=True,
+                misfire_grace_time=1800,
+            )
+            logger.info(f"[SCHEDULER] Job 'monitor_estoque' agendado (fuso {tz_monitor}): "
+                        f"seg-sex 8h-18h, sáb 8h/12h/18h, dom não roda")
 
         scheduler.start()
         logger.info("[SCHEDULER] Agendador iniciado com sucesso")
