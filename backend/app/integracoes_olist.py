@@ -398,7 +398,10 @@ class OlistIntegration:
             print(f"[OLIST] Usando OAuth2 com paginação (página {page_size} itens)...")
             try:
                 while pagina <= MAX_PAGES and total_recuperado < limite:
-                    url = f"{self.API_BASE}/produtos?pageSize={page_size}&page={pagina}"
+                    # A v3 pagina por limit/offset. Com pageSize/page ela IGNORA a
+                    # paginacao e devolve sempre os mesmos primeiros itens - eram
+                    # 100 produtos repetidos 20x fingindo ser 2000.
+                    url = f"{self.API_BASE}/produtos?limit={page_size}&offset={total_recuperado}"
 
                     print(f"[OLIST] Carregando página {pagina}... (total: {total_recuperado})")
 
@@ -411,6 +414,11 @@ class OlistIntegration:
                             resposta = json.loads(response.read().decode("utf-8"))
 
                             produtos = resposta.get("itens") or resposta.get("data") or resposta.get("results") or (resposta if isinstance(resposta, list) else [])
+
+                            if pagina == 1 and isinstance(resposta, dict):
+                                total_api = (resposta.get("paginacao") or {}).get("total")
+                                if total_api is not None:
+                                    print(f"[OLIST] A API informa {total_api} produtos no total")
 
                             if not produtos or len(produtos) == 0:
                                 print(f"[OLIST] Fim! Página {pagina} vazia. Total: {total_recuperado}")
