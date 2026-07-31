@@ -416,6 +416,7 @@ class OlistIntegration:
                                     "nome": prod.get("descricao") or prod.get("nome", ""),
                                     "preco": float(prod.get("precos", {}).get("preco", 0) if isinstance(prod.get("precos"), dict) else prod.get("preco", 0) or 0),
                                     "codigo_produto": prod.get("sku", ""),
+                                    "situacao": prod.get("situacao") or "",
                                 })
                                 total_recuperado += 1
 
@@ -459,6 +460,7 @@ class OlistIntegration:
                                 "nome": prod.get("nome", ""),
                                 "preco": float(prod.get("preco", 0) or 0),
                                 "codigo_produto": prod.get("codigo", ""),
+                                "situacao": prod.get("situacao") or "",
                             })
 
                         if resultado:
