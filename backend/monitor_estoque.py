@@ -6,11 +6,13 @@ Quem agenda é o scheduler de app/jobs.py (jobs 'monitor_estoque' e
 8h/12h/18h, domingo não roda. Fica na produção, sem depender de máquina ligada.
 Continua executável na mão (`python monitor_estoque.py`) para conferir uma rodada.
 
-Checa quatro coisas, todas lendo dos endpoints que o painel já usa:
+Checa cinco coisas — as quatro primeiras lendo dos endpoints que o painel já usa:
   1. Produto INATIVO na Olist mas com anúncio ATIVO no ML  -> vende sem ter produto
   2. Anúncio PAUSADO no ML com saldo > 0 na Olist          -> pausa provavelmente indevida
   3. Estoque do DEPÓSITO do ML diferente do saldo da Olist -> divergência de quantidade
   4. Margem de contribuição abaixo do mínimo               -> mesma fórmula da tela de Anúncios ML
+  5. VENDA recente fechada abaixo da margem mínima de venda -> tarifa e frete reais
+     do pedido, lendo o espelho ml_venda_cache direto do banco
 
 Anúncio FULL não entra na conferência de quantidade: o saldo dele fica no galpão
 do Mercado Livre, então divergir do barracão é o esperado.
@@ -24,7 +26,7 @@ import os
 import json
 import urllib.request
 import urllib.parse
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
 
 from dotenv import load_dotenv
@@ -35,6 +37,20 @@ load_dotenv()
 
 BACKEND_URL = (os.getenv("BACKEND_URL") or "http://localhost:8000").rstrip("/")
 MARGEM_MINIMA_PCT = float(os.getenv("MARGEM_MINIMA_PCT") or 10)
+# Venda já feita tem régua própria: o anúncio é aviso preventivo (10%), a venda
+# é dinheiro que já saiu. Abaixo disso o pedido praticamente não pagou nada.
+MARGEM_VENDA_MINIMA_PCT = float(os.getenv("MARGEM_VENDA_MINIMA_PCT") or 5)
+# Janela de vendas olhada a cada rodada. Maior que um dia de propósito: sem
+# rodada no domingo, uma venda ruim de sábado à noite só seria vista na segunda.
+VENDAS_JANELA_HORAS = float(os.getenv("VENDAS_JANELA_HORAS") or 48)
+# Venda é fato consumado: anuncia uma vez e cala. Tem que cobrir a janela acima,
+# senão a mesma venda reaparece enquanto continuar dentro dela.
+DEDUP_VENDA_MIN = float(os.getenv("DEDUP_VENDA_MIN") or 96 * 60)
+# Piso do frete grátis no ML: abaixo dele quem paga o frete é o COMPRADOR, e o
+# vendedor não tem esse custo. Usado só quando o frete real do pedido ainda não
+# foi enriquecido — sem isso, um anúncio de R$ 19 levava o frete estimado de
+# R$ 26 e virava "prejuízo" que nunca existiu.
+FRETE_GRATIS_MINIMO = float(os.getenv("FRETE_GRATIS_MINIMO") or 79)
 MAX_ALERTAS = int(os.getenv("MONITOR_MAX_ALERTAS") or 10)
 # Piso de sanidade da listagem da Olist (a base real tem ~1200 SKUs). Serve pra
 # barrar coleta truncada, não pra exigir a base exata. Ver monitorar().
@@ -154,6 +170,123 @@ def margem_pct(dados: Dict, custo_info: Dict) -> Optional[float]:
     return ((preco - frete - tarifa_efetiva - float(custo) - imposto) / preco) * 100
 
 
+def vendas_margem_baixa(custos: Dict[str, Dict], anuncios: Dict[str, Dict],
+                        margens: Optional[Dict[str, Dict]] = None) -> List[str]:
+    """Vendas recentes cuja margem ficou abaixo do mínimo.
+
+    Lê o espelho de pedidos (ml_venda_cache) direto do banco: não existe endpoint
+    de vendas por período, e criar um publicaria o financeiro numa API que hoje
+    não exige credencial. A conta usa tarifa e frete REAIS do pedido — não a
+    estimativa do anúncio — e desconta imposto, igual à margem da tela.
+
+    O frete real só existe depois do enriquecimento do shipment, que cobre uma
+    fração dos pedidos — exigi-lo calaria o alerta na maioria das vendas. Quando
+    falta, cai no frete estimado do anúncio, que é exatamente o que a tela de
+    margem usa. O erro possível aí é subestimar o frete, ou seja, alertar de
+    menos: melhor calar sobre uma venda ruim do que acusar uma venda boa.
+    """
+    try:
+        from database import SessionLocal
+        from app.models import MercadoLivreVendaCache
+    except Exception as e:
+        print(f"[MONITOR] vendas: banco indisponível ({e})")
+        return []
+
+    # date_created guarda a hora do ML sem fuso (o parser descarta o offset), e o
+    # servidor roda em UTC — a diferença de ~3h é irrelevante numa janela de dias.
+    corte = datetime.utcnow() - timedelta(hours=VENDAS_JANELA_HORAS)
+    alertas: List[str] = []
+    por_sku: Dict[str, Dict[str, Any]] = {}
+    sem_frete = 0
+    sem_custo = 0
+
+    db = SessionLocal()
+    try:
+        vendas = (db.query(MercadoLivreVendaCache)
+                    .filter(MercadoLivreVendaCache.date_created >= corte)
+                    .order_by(MercadoLivreVendaCache.date_created.desc())
+                    .all())
+        for v in vendas:
+            if (v.status or "").lower() in {"cancelled", "invalid"}:
+                continue
+            qtd = int(v.quantity or 0)
+            receita = float(v.unit_price or 0) * qtd
+            if receita <= 0:
+                continue
+            sku = str(v.sku or "").strip().upper()
+            custo_info = custos.get(sku)
+            if not custo_info or custo_info.get("custo") is None:
+                sem_custo += 1
+                continue
+            tarifa = float(v.sale_fee or 0) * (qtd or 1)
+
+            # O `shipping_cost` do espelho NÃO entra aqui: ele guarda
+            # shipping_option.cost, que é o que o COMPRADOR pagou de frete — zero
+            # justamente nas vendas de frete grátis, onde quem paga é o vendedor.
+            # Usá-lo inverteria a conta nos dois sentidos (custo fantasma no item
+            # barato, custo invisível no caro). Enquanto o espelho não guardar o
+            # custo do remetente (/shipments/{id}/costs), vale a regra do ML:
+            # abaixo do piso de frete grátis o comprador paga o frete; acima dele,
+            # e no FULL, o vendedor paga — e aí usamos o frete estimado do
+            # anúncio, o mesmo número que a tela de margem mostra.
+            preco_unit = float(v.unit_price or 0)
+            logistica = (v.logistic_type or "") or (anuncios.get(sku) or {}).get("logistica") or ""
+            if preco_unit < FRETE_GRATIS_MINIMO and logistica != "fulfillment":
+                frete = 0.0
+            else:
+                estimado = (margens or {}).get(sku, {}).get("frete")
+                if estimado is None:
+                    sem_frete += 1
+                    continue  # sem frete estimado não dá pra afirmar margem
+                frete = float(estimado) * (qtd or 1)
+            custo = float(custo_info["custo"]) * qtd
+            imposto_pct = custo_info.get("imposto_pct")
+            imposto = receita * float(9 if imposto_pct is None else imposto_pct) / 100
+            lucro = receita - tarifa - frete - custo - imposto
+            pct = lucro / receita * 100
+            if pct >= MARGEM_VENDA_MINIMA_PCT:
+                continue
+
+            # Agrupado por SKU: o mesmo anúncio mal precificado vende várias vezes
+            # no dia, e a ação é uma só (corrigir o preço). Uma mensagem por
+            # pedido só gastaria o teto da rodada repetindo o mesmo recado.
+            g = por_sku.setdefault(sku, {
+                "titulo": (v.item_title or "")[:40], "pedidos": 0, "unidades": 0,
+                "receita": 0.0, "lucro": 0.0, "pior_pct": pct, "ultima": v.date_created,
+            })
+            g["pedidos"] += 1
+            g["unidades"] += qtd
+            g["receita"] += receita
+            g["lucro"] += lucro
+            g["pior_pct"] = min(g["pior_pct"], pct)
+            if v.date_created and (not g["ultima"] or v.date_created > g["ultima"]):
+                g["ultima"] = v.date_created
+        # Pior margem primeiro: se o teto da rodada cortar, corta o menos grave.
+        for sku, g in sorted(por_sku.items(), key=lambda kv: kv[1]["pior_pct"]):
+            media_pct = g["lucro"] / g["receita"] * 100 if g["receita"] else 0
+            quando = g["ultima"].strftime("%d/%m %H:%M") if g["ultima"] else "?"
+            plural = "vendas" if g["pedidos"] > 1 else "venda"
+            alertas.append(
+                f"💸 VENDEU COM MARGEM BAIXA\nSKU {sku} — {g['titulo']}\n"
+                f"MC {media_pct:.1f}% (mínimo {MARGEM_VENDA_MINIMA_PCT:.0f}%) | "
+                f"pior {g['pior_pct']:.1f}%\n"
+                f"{g['pedidos']} {plural}, {g['unidades']} un | "
+                f"receita R$ {g['receita']:.2f} | lucro R$ {g['lucro']:.2f}\n"
+                f"última {quando} · últimas {VENDAS_JANELA_HORAS:g}h\n"
+                f"{(anuncios.get(sku) or {}).get('permalink') or ''}".strip()
+            )
+    except Exception as e:
+        print(f"[MONITOR] vendas: falha ao conferir ({e})")
+        return alertas
+    finally:
+        db.close()
+
+    print(f"[MONITOR] vendas em {VENDAS_JANELA_HORAS:g}h: {len(alertas)} abaixo de "
+          f"{MARGEM_VENDA_MINIMA_PCT:g}% | sem custo cadastrado: {sem_custo} | "
+          f"sem frete estimado: {sem_frete}")
+    return alertas
+
+
 def monitorar() -> Dict[str, Any]:
     print(f"[MONITOR] {datetime.now():%d/%m/%Y %H:%M} — checando {BACKEND_URL}")
 
@@ -256,17 +389,26 @@ def monitorar() -> Dict[str, Any]:
             f"{dados.get('permalink') or ''}".strip()
         )
 
+    # 4 — vendas recentes com margem abaixo do mínimo (fato consumado)
+    alertas_venda = vendas_margem_baixa(custos, ml_ativos, margens)
+
     # Envio: uma mensagem por alerta, para a deduplicação valer por problema
     # (um alerta novo não reenvia os antigos). Teto por rodada evita inundar.
+    #
+    # Venda vai PRIMEIRO na fila: são poucas e só aparecem uma vez, enquanto os
+    # alertas de estado são dezenas e reaparecem toda hora. Na ordem inversa, um
+    # acúmulo de divergências consumiria o teto e a venda ruim nunca chegaria.
+    fila = ([(t, DEDUP_VENDA_MIN) for t in alertas_venda] +
+            [(t, None) for t in alertas])
     enviados = 0
     nao_enviados = 0
-    for alerta in alertas:
+    for alerta, janela in fila:
         if enviados >= MAX_ALERTAS:
             nao_enviados += 1
             continue
         # O teto conta só o que REALMENTE saiu: alerta suprimido por dedup não
         # gasta vaga, senão os do fim da fila nunca chegariam.
-        if enviar_alerta(alerta) == "enviado":
+        if enviar_alerta(alerta, janela_min=janela) == "enviado":
             enviados += 1
     if nao_enviados:
         enviar_alerta(f"… e mais {nao_enviados} alerta(s) nesta rodada. "
@@ -277,7 +419,8 @@ def monitorar() -> Dict[str, Any]:
         "ml_ativos": len(ml_ativos),
         "ml_pausados": len(ml_pausados),
         "olist": len(olist),
-        "alertas": len(alertas),
+        "alertas": len(alertas) + len(alertas_venda),
+        "vendas_margem_baixa": len(alertas_venda),
         "enviados": enviados,
     }
     print(f"[MONITOR] {json.dumps(resumo, ensure_ascii=False)}")

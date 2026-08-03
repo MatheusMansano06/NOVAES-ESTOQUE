@@ -138,17 +138,24 @@ def _janela_dedup_seg() -> float:
     return max(0.0, minutos) * 60.0
 
 
-def _ja_enviado_recentemente(chave: str) -> bool:
+# A poda do arquivo é INDEPENDENTE da janela de quem chama: cada alerta tem a
+# sua (a divergência de estoque repete de hora em hora, a venda com margem baixa
+# só uma vez por dias). Se a poda usasse a janela da chamada, um alerta de 60min
+# apagaria o registro de 72h e a mesma venda voltaria a ser anunciada.
+RETENCAO_DEDUP_SEG = 7 * 24 * 3600
+
+
+def _ja_enviado_recentemente(chave: str, janela: float) -> bool:
     """True se a mesma mensagem/destino já saiu dentro da janela. Registra quando libera."""
-    janela = _janela_dedup_seg()
     if janela <= 0:
         return False
     agora = time.time()
     with _dedup_lock:
         registros = _carregar_dedup()
-        # limpa o que já venceu (evita o arquivo crescer pra sempre)
-        registros = {k: t for k, t in registros.items() if agora - t < janela}
-        if chave in registros:
+        # limpa o que já não serve pra nenhuma janela (evita crescer pra sempre)
+        registros = {k: t for k, t in registros.items() if agora - t < RETENCAO_DEDUP_SEG}
+        anterior = registros.get(chave)
+        if anterior is not None and agora - anterior < janela:
             return True
         registros[chave] = agora
         try:
@@ -281,9 +288,15 @@ _PROVIDERS = {
 
 # -------------------------------------------------------------------- público
 
-def enviar_alerta(mensagem: str, destino: Optional[str] = None) -> str:
+def enviar_alerta(mensagem: str, destino: Optional[str] = None,
+                  janela_min: Optional[float] = None) -> str:
     """
     Envia um alerta pelo canal configurado. Nunca levanta exceção.
+
+    `janela_min` sobrescreve a janela de deduplicação desta mensagem. Serve pro
+    alerta que descreve um FATO consumado (uma venda que já aconteceu): repetir
+    de hora em hora não ajuda ninguém, ao contrário do alerta de estado (estoque
+    divergente), que precisa insistir enquanto o problema não for resolvido.
 
     Devolve "enviado", "dedup" (suprimido por ser repetição recente) ou "erro".
     Quem chama precisa distinguir os dois primeiros: se um teto de mensagens
@@ -310,7 +323,8 @@ def enviar_alerta(mensagem: str, destino: Optional[str] = None) -> str:
 
         # anti-spam: mesmo texto + mesmo destino + mesmo provider dentro da janela
         chave = hashlib.sha256(f"{provider}|{alvo}|{texto}".encode("utf-8")).hexdigest()
-        if _ja_enviado_recentemente(chave):
+        janela = _janela_dedup_seg() if janela_min is None else max(0.0, float(janela_min)) * 60.0
+        if _ja_enviado_recentemente(chave, janela):
             print("[ALERTA] duplicado dentro da janela de dedup, não reenviado")
             return "dedup"
 
