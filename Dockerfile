@@ -21,6 +21,11 @@ RUN npm run build
 FROM python:3.11-slim
 WORKDIR /app
 
+# stdout sem buffer: os jobs em background (monitor de estoque, syncs) reportam
+# por print, e com buffer de bloco essas linhas só apareceriam no log do Railway
+# muito depois — ou nunca, se o container reiniciasse antes do flush.
+ENV PYTHONUNBUFFERED=1
+
 COPY backend/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 

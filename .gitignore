@@ -22,6 +22,7 @@ olist_token.json
 ml_token.json
 produtos_cache.json
 credentials.json
+alertas_dedup.json
 estoque-virtual-secrets.zip
 
 # Backend

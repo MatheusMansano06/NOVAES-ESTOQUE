@@ -79,6 +79,9 @@ class OlistIntegration:
         self._estoque_cache: Dict[str, tuple] = {}
         self._estoque_cache_ttl = 300  # 5 minutos
 
+        # Marca se a ultima listagem completa parou no meio (ver _buscar_produtos_api)
+        self._listagem_parcial = False
+
         # Rate limiter: Olist permite 120 req/min. Usamos margem de seguranca.
         # Garante intervalo minimo entre requisicoes (thread-safe).
         self._rate_lock = threading.Lock()
@@ -370,7 +373,11 @@ class OlistIntegration:
         # 3) Cache miss -> carregar da API
         print(f"[OLIST] Cache MISS -> carregando da API...")
         produtos = self._buscar_produtos_api(limite=limite)
-        if produtos:
+        # So vai pro cache a coleta COMPLETA. Gravar uma listagem interrompida
+        # serviria a base mutilada (ex.: 100 de 2000) por todo o TTL, a todas as
+        # telas. Neste caso devolvemos o parcial so a quem pediu e tentamos de
+        # novo na proxima chamada.
+        if produtos and not self._listagem_parcial:
             self._salvar_cache(produtos)
         return produtos
 
@@ -379,6 +386,7 @@ class OlistIntegration:
         resultado = []
         pagina = 1
         total_recuperado = 0
+        self._listagem_parcial = False
         MAX_PAGES = 20  # Aumentado para 20 páginas = até 2000 produtos
         page_size = 100  # Aumentar para 100 por página para ser mais rápido
 
@@ -390,10 +398,14 @@ class OlistIntegration:
             print(f"[OLIST] Usando OAuth2 com paginação (página {page_size} itens)...")
             try:
                 while pagina <= MAX_PAGES and total_recuperado < limite:
-                    url = f"{self.API_BASE}/produtos?pageSize={page_size}&page={pagina}"
+                    # A v3 pagina por limit/offset. Com pageSize/page ela IGNORA a
+                    # paginacao e devolve sempre os mesmos primeiros itens - eram
+                    # 100 produtos repetidos 20x fingindo ser 2000.
+                    url = f"{self.API_BASE}/produtos?limit={page_size}&offset={total_recuperado}"
 
                     print(f"[OLIST] Carregando página {pagina}... (total: {total_recuperado})")
 
+                    self._throttle()  # respeita o rate limit (120/min) entre as paginas
                     headers = {"Accept": "application/json", "Authorization": f"Bearer {token}"}
                     req = urllib.request.Request(url, headers=headers, method="GET")
 
@@ -402,6 +414,11 @@ class OlistIntegration:
                             resposta = json.loads(response.read().decode("utf-8"))
 
                             produtos = resposta.get("itens") or resposta.get("data") or resposta.get("results") or (resposta if isinstance(resposta, list) else [])
+
+                            if pagina == 1 and isinstance(resposta, dict):
+                                total_api = (resposta.get("paginacao") or {}).get("total")
+                                if total_api is not None:
+                                    print(f"[OLIST] A API informa {total_api} produtos no total")
 
                             if not produtos or len(produtos) == 0:
                                 print(f"[OLIST] Fim! Página {pagina} vazia. Total: {total_recuperado}")
@@ -416,6 +433,7 @@ class OlistIntegration:
                                     "nome": prod.get("descricao") or prod.get("nome", ""),
                                     "preco": float(prod.get("precos", {}).get("preco", 0) if isinstance(prod.get("precos"), dict) else prod.get("preco", 0) or 0),
                                     "codigo_produto": prod.get("sku", ""),
+                                    "situacao": prod.get("situacao") or "",
                                 })
                                 total_recuperado += 1
 
@@ -428,7 +446,9 @@ class OlistIntegration:
                             if total_recuperado >= limite:
                                 break
                     except Exception as page_error:
+                        # Coleta incompleta: sinaliza pra nao virar cache (ver acima)
                         print(f"[OLIST] Erro na página {pagina}: {page_error}")
+                        self._listagem_parcial = True
                         break
 
                 if resultado:
@@ -459,6 +479,7 @@ class OlistIntegration:
                                 "nome": prod.get("nome", ""),
                                 "preco": float(prod.get("preco", 0) or 0),
                                 "codigo_produto": prod.get("codigo", ""),
+                                "situacao": prod.get("situacao") or "",
                             })
 
                         if resultado:
