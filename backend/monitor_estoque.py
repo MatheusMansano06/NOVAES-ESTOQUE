@@ -264,7 +264,7 @@ def vendas_margem_baixa(custos: Dict[str, Dict], anuncios: Dict[str, Dict],
         # Pior margem primeiro: se o teto da rodada cortar, corta o menos grave.
         for sku, g in sorted(por_sku.items(), key=lambda kv: kv[1]["pior_pct"]):
             media_pct = g["lucro"] / g["receita"] * 100 if g["receita"] else 0
-            quando = g["ultima"].strftime("%d/%m %H:%M") if g["ultima"] else "?"
+            quando = g["ultima"].strftime("%a, %d/%m/%Y às %H:%M") if g["ultima"] else "?"
             plural = "vendas" if g["pedidos"] > 1 else "venda"
             alertas.append(
                 f"💸 VENDEU COM MARGEM BAIXA\nSKU {sku} — {g['titulo']}\n"
@@ -272,7 +272,7 @@ def vendas_margem_baixa(custos: Dict[str, Dict], anuncios: Dict[str, Dict],
                 f"pior {g['pior_pct']:.1f}%\n"
                 f"{g['pedidos']} {plural}, {g['unidades']} un | "
                 f"receita R$ {g['receita']:.2f} | lucro R$ {g['lucro']:.2f}\n"
-                f"última {quando} · últimas {VENDAS_JANELA_HORAS:g}h\n"
+                f"{quando}\n"
                 f"{(anuncios.get(sku) or {}).get('permalink') or ''}".strip()
             )
     except Exception as e:
