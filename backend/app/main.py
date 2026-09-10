@@ -5421,6 +5421,26 @@ async def ml_notificacoes(request: Request):
     return JSONResponse({"ok": True}, status_code=200)
 
 
+async def shopee_webhook(request: Request):
+    """
+    POST /api/shopee/webhook — callback de push notification da Shopee Open
+    Platform. Precisa responder 2xx rápido (é isso que a tela de configuração
+    de "notificações ao vivo" verifica); GET também aceito por segurança caso
+    a Shopee faça handshake por GET.
+
+    ponytail: só loga o payload por enquanto — a integração Shopee ainda não
+    existe (sem token/loja conectada). Quando ela for construída, trocar o
+    print por persistência + processamento por código de evento, no molde de
+    ml_notificacoes/MLNotificacao.
+    """
+    try:
+        body = await request.json() if request.method == "POST" else {}
+    except Exception:
+        body = {}
+    print(f"[SHOPEE][WEBHOOK] {request.method} {json.dumps(body, ensure_ascii=False)[:2000]}")
+    return JSONResponse({"ok": True}, status_code=200)
+
+
 async def ml_notificacoes_recentes(request: Request):
     """GET /api/ml/notificacoes — últimas notificações recebidas (diagnóstico)."""
     db = SessionLocal()
@@ -5804,6 +5824,9 @@ routes = [
     Route("/api/devolucoes/{item_id:int}/finalizar", dev_finalizar_avaliacao, methods=["POST"]),
     Route("/api/devolucoes/{item_id:int}/ml-review", dev_ml_review, methods=["POST"]),
     Route("/api/devolucoes/{item_id:int}/ml-resolucao", dev_ml_resolucao, methods=["POST"]),
+
+    # Webhook Shopee (push notification)
+    Route("/api/shopee/webhook", shopee_webhook, methods=["GET", "POST"]),
 ]
 
 async def _on_startup():
