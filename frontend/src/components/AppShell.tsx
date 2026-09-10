@@ -22,7 +22,6 @@ export interface ShellNavItem {
   active?: boolean
   badge?: string | number | null
   onClick: () => void
-  marketplace?: 'olist' | 'shopee'
 }
 
 export interface ShellNavGroup {

@@ -13,7 +13,7 @@ import { ListaCompra } from './components/ListaCompra'
 import { RadarFull } from './components/RadarFull'
 import { EstoqueEmbalagens } from './components/EstoqueEmbalagens'
 import { Devolucoes } from './components/Devolucoes'
-import { MarketplaceSwitch, type Marketplace } from './components/MarketplaceSwitch'
+import { PlatformTabs, type Platform } from './components/MarketplaceSwitch'
 import { AppShell, type ShellNavGroup, type ShellStatusItem } from './components/AppShell'
 import {
   baixarMultiplosOuPdfs,
@@ -217,9 +217,9 @@ function App() {
   // Estados de navegação
   const [operadorSessao, setOperadorSessaoState] = useState<OperadorSessao | null>(() => getOperadorSessao())
   const [pagina, setPagina] = useState<Pagina>(() => (getOperadorSessao() ? 'inicial' : 'bemvindo'))
-  const [marketplace, setMarketplace] = useState<Marketplace>(() => {
-    const saved = localStorage.getItem('marketplace-filter')
-    return (saved === 'olist' || saved === 'shopee') ? saved : null
+  const [platform, setPlatform] = useState<Platform>(() => {
+    const saved = localStorage.getItem('platform-tab')
+    return (saved === 'ml' || saved === 'shopee' || saved === 'operacao') ? (saved as Platform) : 'ml'
   })
   const [notaSelecionada, setNotaSelecionada] = useState<NotaFiscal | null>(null)
   const [produtosNota, setProdutosNota] = useState<ItemNota[]>([])
@@ -1650,7 +1650,7 @@ function App() {
       items: [
         { key: 'dashboard', label: 'Dashboard', icon: 'dashboard', active: pagina === 'inicial', onClick: () => setPagina('inicial') },
         { key: 'notas', label: 'Notas fiscais', icon: 'receipt', badge: notas.length, active: pagina === 'notas-fiscais', onClick: () => setPagina('notas-fiscais') },
-        { key: 'full-sep', label: 'FULL', icon: 'box', badge: inboundsAtivos.length + divergencias.length, active: pagina === 'full-operacoes', onClick: () => setPagina('full-operacoes'), marketplace: 'olist' },
+        { key: 'full-sep', label: 'FULL', icon: 'box', badge: inboundsAtivos.length + divergencias.length, active: pagina === 'full-operacoes', onClick: () => setPagina('full-operacoes') },
         { key: 'fornecedores', label: 'Fornecedores', icon: 'users', active: pagina === 'fornecedores', onClick: () => setPagina('fornecedores') },
       ],
     },
@@ -1658,8 +1658,8 @@ function App() {
     {
       label: 'Marketplace',
       items: [
-        { key: 'anuncios', label: 'Anuncios ML', icon: 'megaphone', active: pagina === 'anuncios', onClick: () => setPagina('anuncios'), marketplace: 'olist' },
-        { key: 'devolucoes', label: 'Devolucoes', icon: 'box', active: pagina === 'devolucoes', onClick: () => setPagina('devolucoes'), marketplace: 'olist' },
+        { key: 'anuncios', label: 'Anuncios ML', icon: 'megaphone', active: pagina === 'anuncios', onClick: () => setPagina('anuncios') },
+        { key: 'devolucoes', label: 'Devolucoes', icon: 'box', active: pagina === 'devolucoes', onClick: () => setPagina('devolucoes') },
       ],
     },
     // === FERRAMENTAS ===
@@ -1691,15 +1691,52 @@ function App() {
     })
   }
 
-  // Filtrar navGroups baseado em marketplace selecionado
-  const navGroups = navGroupsRaw.map(group => ({
-    ...group,
-    items: group.items.filter(item => !item.marketplace || item.marketplace === marketplace),
-  })).filter(group => group.items.length > 0)
+  // Filtrar navGroups: ML mostra anuncios/devolucoes, Shopee mostra só dashboard, Operacao mostra ferramentas/arquivados
+  const navGroups = navGroupsRaw.map(group => {
+    if (group.label === 'Dashboard') {
+      // Dashboard aparece em todas, mas item diferente por platform
+      return {
+        ...group,
+        items: [
+          {
+            key: 'dashboard',
+            label: platform === 'ml' ? 'Dashboard ML' : platform === 'shopee' ? 'Dashboard Shopee' : 'Dashboard',
+            icon: 'dashboard',
+            active: pagina === 'inicial',
+            onClick: () => setPagina('inicial')
+          },
+          { key: 'notas', label: 'Notas fiscais', icon: 'receipt', badge: notas.length, active: pagina === 'notas-fiscais', onClick: () => setPagina('notas-fiscais') },
+          { key: 'fornecedores', label: 'Fornecedores', icon: 'users', active: pagina === 'fornecedores', onClick: () => setPagina('fornecedores') },
+          ...(platform === 'ml' ? [
+            { key: 'full-sep', label: 'FULL', icon: 'box', badge: inboundsAtivos.length + divergencias.length, active: pagina === 'full-operacoes', onClick: () => setPagina('full-operacoes') }
+          ] : [])
+        ]
+      }
+    }
+    if (group.label === 'Marketplace') {
+      return {
+        ...group,
+        items: platform === 'ml' ? group.items : []
+      }
+    }
+    if (group.label === 'Arquivados') {
+      return {
+        ...group,
+        items: platform === 'operacao' ? group.items : []
+      }
+    }
+    if (group.label === 'Ferramentas') {
+      return {
+        ...group,
+        items: platform === 'operacao' ? group.items : []
+      }
+    }
+    return group
+  }).filter(group => group.items.length > 0)
 
-  const handleMarketplaceChange = (mp: Marketplace) => {
-    setMarketplace(mp)
-    localStorage.setItem('marketplace-filter', mp || '')
+  const handlePlatformChange = (p: Platform) => {
+    setPlatform(p)
+    localStorage.setItem('platform-tab', p)
   }
 
   const renderComShell = (title: string, subtitle: string, conteudo: ReactNode) => (
@@ -2124,9 +2161,7 @@ function App() {
       'Dashboard Operacional',
       'Visao geral da sua operacao em tempo real.',
       <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
-          <div style={{ borderBottom: '1px solid #e0e0e0', paddingBottom: '1rem' }}>
-            <MarketplaceSwitch active={marketplace} onChange={handleMarketplaceChange} />
-          </div>
+          <PlatformTabs active={platform} onChange={handlePlatformChange} />
           <section className="nvs-kpi-grid" style={{ marginBottom: '1.5rem' }}>
             {[
               { tag: 'FN', cor: 'blue', titulo: 'Fornecedores', valor: estoque.length > 0 ? new Set(estoque.flatMap(e => e.notas_fiscais.map(n => n.fornecedor))).size : 0, helper: 'Fornecedores cadastrados', ir: 'fornecedores' as Pagina },
