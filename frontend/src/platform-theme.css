@@ -1,246 +1,391 @@
 /* ============================================================
    ESCOLHA DE POSTO — porta de entrada do painel.
-   As logos flutuam e a sombra encolhe junto: dá peso físico
-   em vez de um translateY solto.
+
+   Direção: painel de controle de galpão, não cartão de site.
+   Cantos vivos, estrutura de 1px, tipografia condensada técnica,
+   LED de status e faixa de demarcação de piso no posto assumido.
    ============================================================ */
 
-.nvs-posto {
+.posto {
+  --aco-900: #090c11;
+  --aco-800: #0e131a;
+  --aco-700: #141b24;
+  --aco-linha: #1d2733;
+  --aco-texto: #e9eef6;
+  --aco-fraco: #78859a;
+  --demarca: #f5c400;
+
   min-height: 100vh;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 48px;
-  padding: 56px 24px;
-  background:
-    radial-gradient(circle at 12% 18%, rgba(255, 196, 0, 0.1), transparent 42%),
-    radial-gradient(circle at 88% 26%, rgba(238, 77, 45, 0.1), transparent 40%),
-    linear-gradient(165deg, #061a35 0%, #0a2b55 62%, #0e3f74 100%);
-}
-
-.nvs-posto__topo {
-  text-align: center;
-  max-width: 620px;
-}
-
-.nvs-posto__eyebrow {
-  font-size: 0.74rem;
-  font-weight: 800;
-  letter-spacing: 0.28em;
-  text-transform: uppercase;
-  color: var(--nvs-yellow);
-  margin-bottom: 14px;
-}
-
-.nvs-posto__titulo {
-  font-size: clamp(1.9rem, 4vw, 2.9rem);
-  font-weight: 800;
-  color: #fff;
-  line-height: 1.12;
-  letter-spacing: -0.02em;
-}
-
-.nvs-posto__sub {
-  margin-top: 12px;
-  font-size: 1.02rem;
-  color: rgba(255, 255, 255, 0.66);
-}
-
-.nvs-posto__cards {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(258px, 1fr));
-  gap: 26px;
-  width: 100%;
-  max-width: 1000px;
+  grid-template-rows: auto auto 1fr auto;
+  background-color: var(--aco-900);
+  background-image:
+    linear-gradient(rgba(255, 255, 255, 0.016) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.016) 1px, transparent 1px);
+  background-size: 46px 46px;
+  color: var(--aco-texto);
+  font-family: 'Barlow Condensed', 'Arial Narrow', system-ui, sans-serif;
 }
 
-.nvs-posto__card {
-  position: relative;
-  border: 0;
-  border-radius: 26px;
-  padding: 30px 24px 24px;
-  cursor: pointer;
+/* --- barra de identificação, tipo plaqueta de equipamento --- */
+.posto__barra {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 0 22px;
+  height: 46px;
+  border-bottom: 1px solid var(--aco-linha);
+  background: var(--aco-800);
+  font-family: 'IBM Plex Mono', ui-monospace, monospace;
+  font-size: 0.68rem;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--aco-fraco);
+}
+
+.posto__barra-marca {
+  color: var(--demarca);
+  font-weight: 600;
+}
+
+.posto__barra-sep {
+  width: 1px;
+  height: 14px;
+  background: var(--aco-linha);
+}
+
+.posto__barra-dir {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.posto__barra-op {
+  color: var(--aco-texto);
+}
+
+/* --- chamada --- */
+.posto__intro {
+  padding: 46px 22px 30px;
   text-align: center;
+}
+
+.posto__h1 {
+  font-size: clamp(2.6rem, 6.5vw, 4.4rem);
+  font-weight: 700;
+  line-height: 0.94;
+  letter-spacing: 0.005em;
+  text-transform: uppercase;
+  color: var(--aco-texto);
+}
+
+.posto__sub {
+  margin-top: 12px;
+  font-family: 'IBM Plex Mono', ui-monospace, monospace;
+  font-size: 0.78rem;
+  letter-spacing: 0.1em;
+  color: var(--aco-fraco);
+  text-transform: none;
+}
+
+/* --- as três baias, separadas por estrutura de 1px --- */
+.posto__baias {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 1px;
+  background: var(--aco-linha);
+  border-top: 1px solid var(--aco-linha);
+  border-bottom: 1px solid var(--aco-linha);
+}
+
+.posto__baia {
+  --marca: #2b7fff;
+  position: relative;
+  isolation: isolate;
+  border: 0;
+  border-radius: 0;
+  background: var(--aco-800);
+  color: inherit;
+  font-family: inherit;
+  cursor: pointer;
+  padding: 34px 26px 30px;
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 18px;
-  box-shadow: 0 22px 44px rgba(0, 0, 0, 0.32);
-  transition: transform 0.28s ease, box-shadow 0.28s ease;
-  font-family: inherit;
+  gap: 16px;
   overflow: hidden;
+  transition: background 0.32s ease;
+  animation: posto-subir 0.5s cubic-bezier(0.16, 0.84, 0.44, 1) backwards;
+  animation-delay: calc(var(--baia-i) * 90ms);
 }
 
-.nvs-posto__card::after {
-  content: '';
-  position: absolute;
-  inset: 0;
-  border-radius: 26px;
-  border: 3px solid transparent;
-  transition: border-color 0.28s ease;
-  pointer-events: none;
+.posto__baia--ml { --marca: #ffe600; }
+.posto__baia--shopee { --marca: #ee4d2d; }
+.posto__baia--operacao { --marca: #3f9bff; }
+
+@keyframes posto-subir {
+  from { opacity: 0; transform: translateY(26px); }
+  to   { opacity: 1; transform: translateY(0); }
 }
 
-.nvs-posto__card:hover,
-.nvs-posto__card:focus-visible {
-  transform: translateY(-10px);
-  box-shadow: 0 34px 60px rgba(0, 0, 0, 0.4);
+.posto__baia:hover,
+.posto__baia:focus-visible {
+  background: var(--aco-700);
   outline: none;
 }
 
-.nvs-posto__card:hover::after,
-.nvs-posto__card:focus-visible::after,
-.nvs-posto__card.is-atual::after {
-  border-color: var(--card-cor);
+/* A cor da marca entra como luz vinda do piso, nunca como fundo de
+   texto — assim o contraste do conteúdo não depende da marca. */
+.posto__luz {
+  position: absolute;
+  inset: auto 0 0 0;
+  height: 3px;
+  z-index: -1;
+  background: var(--marca);
+  box-shadow: 0 0 0 rgba(0, 0, 0, 0);
+  transition: height 0.42s cubic-bezier(0.16, 0.84, 0.44, 1), opacity 0.42s ease;
+  opacity: 0.42;
 }
 
-.nvs-posto__palco {
-  height: 156px;
+.posto__baia:hover .posto__luz,
+.posto__baia:focus-visible .posto__luz,
+.posto__baia.is-atual .posto__luz {
+  height: 62%;
+  opacity: 1;
+  background: linear-gradient(
+    to top,
+    color-mix(in srgb, var(--marca) 46%, transparent) 0%,
+    color-mix(in srgb, var(--marca) 12%, transparent) 42%,
+    transparent 100%
+  );
+}
+
+.posto__baia.is-atual {
+  background: var(--aco-700);
+}
+
+/* Número do posto: estêncil pintado na coluna */
+.posto__num {
+  position: absolute;
+  top: 16px;
+  left: 20px;
+  font-family: 'IBM Plex Mono', ui-monospace, monospace;
+  font-size: 0.82rem;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  color: var(--aco-fraco);
+  opacity: 0.6;
+}
+
+.posto__num::before {
+  content: 'POSTO ';
+}
+
+/* --- logo com sombra dura, luz de galpão vindo de cima --- */
+.posto__palco {
+  height: 128px;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: flex-end;
-  gap: 10px;
+  gap: 14px;
+  margin-top: 12px;
 }
 
-.nvs-posto__logo {
-  animation: nvs-flutuar 4.4s ease-in-out infinite;
-  animation-delay: var(--card-delay);
+.posto__logo {
   display: flex;
   align-items: center;
   justify-content: center;
-  height: 122px;
+  animation: posto-flutuar 5s ease-in-out infinite;
+  animation-delay: calc(var(--baia-i) * 0.8s);
 }
 
-/* Recorte da moeda: o PNG da marca tem 268x68 e a moeda ocupa os
-   primeiros ~100px. Escalando 1.55x, a moeda fica em 155x105. */
-.nvs-posto__moeda-ml {
+.posto__sombra {
+  width: 92px;
+  height: 7px;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.62);
+  filter: blur(3px);
+  animation: posto-sombra 5s ease-in-out infinite;
+  animation-delay: calc(var(--baia-i) * 0.8s);
+}
+
+@keyframes posto-flutuar {
+  0%, 100% { transform: translateY(0); }
+  50%      { transform: translateY(-11px); }
+}
+
+@keyframes posto-sombra {
+  0%, 100% { transform: scaleX(1);    opacity: 0.72; }
+  50%      { transform: scaleX(0.76); opacity: 0.34; }
+}
+
+.posto__moeda-ml {
   display: block;
   position: relative;
-  width: 152px;
-  height: 105px;
+  width: 138px;
+  height: 96px;
   overflow: hidden;
 }
 
-.nvs-posto__moeda-ml img {
+.posto__moeda-ml img {
   position: absolute;
   top: 0;
   left: 0;
-  height: 105px;
-  width: 415px;
+  height: 96px;
+  width: 379px;
   max-width: none;
 }
 
-.nvs-posto__marca-shopee {
-  width: 106px;
-  height: 106px;
+.posto__marca-shopee {
+  width: 92px;
+  height: 92px;
   display: block;
 }
 
-.nvs-posto__sombra {
-  width: 116px;
-  height: 16px;
-  border-radius: 50%;
-  background: radial-gradient(ellipse at center, rgba(18, 10, 0, 0.55) 0%, rgba(18, 10, 0, 0.3) 48%, transparent 72%);
-  filter: blur(3px);
-  animation: nvs-sombra 4.4s ease-in-out infinite;
-  animation-delay: var(--card-delay);
+/* --- identificação --- */
+.posto__nome {
+  font-size: 1.9rem;
+  font-weight: 600;
+  line-height: 1;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
 }
 
-@keyframes nvs-flutuar {
-  0%,
-  100% {
-    transform: translateY(0);
-  }
-  50% {
-    transform: translateY(-16px);
-  }
-}
-
-@keyframes nvs-sombra {
-  0%,
-  100% {
-    transform: scaleX(1);
-    opacity: 0.85;
-  }
-  50% {
-    transform: scaleX(0.78);
-    opacity: 0.42;
-  }
-}
-
-.nvs-posto__info {
-  display: flex;
-  flex-direction: column;
-  gap: 5px;
-}
-
-.nvs-posto__nome {
-  font-size: 1.22rem;
-  font-weight: 800;
-  color: var(--nvs-navy);
-  letter-spacing: -0.01em;
-}
-
-.nvs-posto__papel {
-  font-size: 0.9rem;
-  color: var(--nvs-slate);
-}
-
-.nvs-posto__resumo {
-  margin-top: 6px;
-  font-size: 0.8rem;
-  font-weight: 700;
-  color: var(--nvs-slate);
-  opacity: 0.78;
-}
-
-.nvs-posto__entrar {
+.posto__status {
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  font-size: 0.9rem;
-  font-weight: 800;
-  color: var(--nvs-navy);
-  padding: 10px 18px;
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.78);
-  transition: gap 0.24s ease;
+  font-family: 'IBM Plex Mono', ui-monospace, monospace;
+  font-size: 0.7rem;
+  letter-spacing: 0.06em;
+  color: var(--aco-fraco);
 }
 
-.nvs-posto__card:hover .nvs-posto__entrar {
-  gap: 14px;
+.posto__led {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--marca);
+  box-shadow: 0 0 8px var(--marca);
+  animation: posto-led 2.6s ease-in-out infinite;
+  animation-delay: calc(var(--baia-i) * 0.5s);
 }
 
-.nvs-posto__cancelar {
-  border: 0;
+@keyframes posto-led {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0.28; }
+}
+
+.posto__lista {
+  list-style: none;
+  margin: 4px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  font-family: 'IBM Plex Mono', ui-monospace, monospace;
+  font-size: 0.72rem;
+  letter-spacing: 0.04em;
+  color: var(--aco-fraco);
+}
+
+.posto__lista li::before {
+  content: '· ';
+  color: var(--marca);
+}
+
+/* --- ação --- */
+.posto__acao {
+  margin-top: auto;
+  padding-top: 22px;
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  font-family: 'IBM Plex Mono', ui-monospace, monospace;
+  font-size: 0.74rem;
+  font-weight: 600;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--aco-texto);
+  transition: gap 0.26s ease, color 0.26s ease;
+}
+
+.posto__baia:hover .posto__acao,
+.posto__baia:focus-visible .posto__acao {
+  gap: 15px;
+}
+
+/* Faixa de demarcação de piso: marca o posto que já está assumido */
+.posto__faixa {
+  position: absolute;
+  inset: auto 0 0 0;
+  height: 7px;
+  background: repeating-linear-gradient(
+    -45deg,
+    var(--demarca) 0 9px,
+    #0b0e13 9px 18px
+  );
+}
+
+/* --- rodapé --- */
+.posto__rodape {
+  height: 62px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.posto__rodape-nota,
+.posto__cancelar {
+  font-family: 'IBM Plex Mono', ui-monospace, monospace;
+  font-size: 0.72rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--aco-fraco);
+}
+
+.posto__cancelar {
+  border: 1px solid var(--aco-linha);
+  border-radius: 0;
   background: transparent;
-  color: rgba(255, 255, 255, 0.62);
-  font-size: 0.92rem;
-  font-weight: 700;
+  padding: 9px 20px;
   cursor: pointer;
-  padding: 10px 18px;
-  border-radius: 999px;
-  font-family: inherit;
 }
 
-.nvs-posto__cancelar:hover {
-  color: #fff;
-  background: rgba(255, 255, 255, 0.1);
+.posto__cancelar:hover {
+  color: var(--aco-texto);
+  border-color: var(--aco-fraco);
+}
+
+@media (max-width: 860px) {
+  .posto__baias {
+    grid-template-columns: 1fr;
+  }
+  .posto__baia {
+    padding: 26px 22px 24px;
+  }
+  .posto__palco {
+    height: 104px;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .nvs-posto__logo,
-  .nvs-posto__sombra {
+  .posto__baia,
+  .posto__logo,
+  .posto__sombra,
+  .posto__led {
     animation: none;
   }
-  .nvs-posto__card {
+  .posto__luz,
+  .posto__acao {
     transition: none;
   }
 }
 
 /* ============================================================
-   TEMA POR PLATAFORMA — a lateral se veste do posto escolhido
+   TEMA POR PLATAFORMA — a lateral se veste do posto assumido
    ============================================================ */
 
 /* --- Mercado Livre: amarelo com texto navy (contraste AA) --- */
