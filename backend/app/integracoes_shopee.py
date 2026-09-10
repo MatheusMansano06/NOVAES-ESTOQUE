@@ -220,6 +220,10 @@ class ShopeeAPI:
         except Exception as e:
             return {"error": "falha_requisicao", "message": str(e)}
 
+    def info_loja(self) -> Dict[str, Any]:
+        """Dados da loja autorizada. Primeira chamada assinada com token."""
+        return self.chamar("/api/v2/shop/get_shop_info")
+
     def status(self) -> Dict[str, Any]:
         """Campos em português, no mesmo formato de /api/ml|olist/status."""
         if not self.configurado:

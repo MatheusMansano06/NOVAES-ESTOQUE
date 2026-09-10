@@ -5427,6 +5427,22 @@ async def shopee_status(request: Request):
     return JSONResponse(shopee.status())
 
 
+async def shopee_loja(request: Request):
+    """GET /api/shopee/loja — dados da loja autorizada."""
+    dados = shopee.info_loja()
+    if dados.get("error"):
+        return JSONResponse(
+            {"erro": dados.get("error"), "mensagem": dados.get("message")}, status_code=502
+        )
+    return JSONResponse({
+        "shop_id": dados.get("shop_id"),
+        "nome": dados.get("shop_name"),
+        "regiao": dados.get("region"),
+        "status": dados.get("status"),
+        "fulfillment_shopee": dados.get("shop_fulfillment_flag"),
+    })
+
+
 async def shopee_conectar(request: Request):
     """GET /api/shopee/conectar — manda o lojista autorizar a loja."""
     if not shopee.configurado:
@@ -5865,6 +5881,7 @@ routes = [
 
     # Shopee (OAuth + push notification)
     Route("/api/shopee/status", shopee_status, methods=["GET"]),
+    Route("/api/shopee/loja", shopee_loja, methods=["GET"]),
     Route("/api/shopee/conectar", shopee_conectar, methods=["GET"]),
     Route("/api/shopee/callback", shopee_callback, methods=["GET"]),
     Route("/api/shopee/webhook", shopee_webhook, methods=["GET", "POST"]),
