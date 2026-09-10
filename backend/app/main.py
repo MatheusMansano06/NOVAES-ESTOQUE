@@ -40,6 +40,7 @@ from app.utils.embalagens import (
 )
 from app.integracoes_olist import olist
 from app.integracoes_ml import ml
+from app.integracoes_shopee import shopee
 from app.jobs import iniciar_scheduler
 from app.handlers_devolucoes import (
     buscar_devolucao as dev_buscar_devolucao,
@@ -5421,6 +5422,102 @@ async def ml_notificacoes(request: Request):
     return JSONResponse({"ok": True}, status_code=200)
 
 
+async def shopee_status(request: Request):
+    """GET /api/shopee/status — mesmo formato de /api/ml|olist/status."""
+    return JSONResponse(shopee.status())
+
+
+async def shopee_loja(request: Request):
+    """GET /api/shopee/loja — dados da loja autorizada."""
+    dados = shopee.info_loja()
+    if dados.get("error"):
+        return JSONResponse(
+            {"erro": dados.get("error"), "mensagem": dados.get("message")}, status_code=502
+        )
+    return JSONResponse({
+        "shop_id": dados.get("shop_id"),
+        "nome": dados.get("shop_name"),
+        "regiao": dados.get("region"),
+        "status": dados.get("status"),
+        "fulfillment_shopee": dados.get("shop_fulfillment_flag"),
+    })
+
+
+async def shopee_dashboard(request: Request):
+    """GET /api/shopee/dashboard — saude da conta Shopee."""
+    dados = shopee.dashboard()
+    if dados.get("erro"):
+        return JSONResponse(dados, status_code=502)
+    return JSONResponse(dados)
+
+
+async def shopee_token_forma(request: Request):
+    """GET /api/shopee/token-forma — formato do token salvo, sem os valores."""
+    return JSONResponse(shopee.forma_do_token())
+
+
+async def shopee_renovar(request: Request):
+    """POST /api/shopee/renovar — força a renovação para testar a cadeia."""
+    return JSONResponse(shopee.renovar_agora())
+
+
+async def shopee_diagnostico(request: Request):
+    """GET /api/shopee/diagnostico — o que cada endpoint da Shopee devolve."""
+    return JSONResponse(shopee.diagnostico())
+
+
+async def shopee_conectar(request: Request):
+    """GET /api/shopee/conectar — manda o lojista autorizar a loja."""
+    if not shopee.configurado:
+        return HTMLResponse(
+            "<h2>Configure SHOPEE_PARTNER_ID/SHOPEE_PARTNER_KEY no .env</h2>",
+            status_code=400,
+        )
+    return RedirectResponse(shopee.url_autorizacao())
+
+
+async def shopee_callback(request: Request):
+    """GET /api/shopee/callback — recebe code + shop_id e troca por token."""
+    code = request.query_params.get("code")
+    shop_id = request.query_params.get("shop_id")
+    if not code or not shop_id:
+        return HTMLResponse(
+            "<h2>Retorno sem code/shop_id — refaça a autorização</h2>", status_code=400
+        )
+
+    resposta = shopee.trocar_code(code, shop_id)
+    if resposta.get("error"):
+        return HTMLResponse(
+            f"<h2 style='color:#d32f2f'>Falha ao conectar: {resposta.get('message') or resposta.get('error')}</h2>",
+            status_code=502,
+        )
+
+    return HTMLResponse("""<html><body style="font-family:sans-serif;text-align:center;padding:50px">
+        <h1 style="color:#2e7d32">✓ Shopee conectada!</h1>
+        <a href="/" style="display:inline-block;margin-top:20px;padding:12px 30px;background:#1976d2;color:#fff;text-decoration:none;border-radius:6px">Voltar</a>
+        </body></html>""")
+
+
+async def shopee_webhook(request: Request):
+    """
+    POST /api/shopee/webhook — callback de push notification da Shopee Open
+    Platform. Precisa responder 2xx rápido (é isso que a tela de configuração
+    de "notificações ao vivo" verifica); GET também aceito por segurança caso
+    a Shopee faça handshake por GET.
+
+    ponytail: só loga o payload por enquanto — a integração Shopee ainda não
+    existe (sem token/loja conectada). Quando ela for construída, trocar o
+    print por persistência + processamento por código de evento, no molde de
+    ml_notificacoes/MLNotificacao.
+    """
+    try:
+        body = await request.json() if request.method == "POST" else {}
+    except Exception:
+        body = {}
+    print(f"[SHOPEE][WEBHOOK] {request.method} {json.dumps(body, ensure_ascii=False)[:2000]}")
+    return JSONResponse({"ok": True}, status_code=200)
+
+
 async def ml_notificacoes_recentes(request: Request):
     """GET /api/ml/notificacoes — últimas notificações recebidas (diagnóstico)."""
     db = SessionLocal()
@@ -5804,6 +5901,17 @@ routes = [
     Route("/api/devolucoes/{item_id:int}/finalizar", dev_finalizar_avaliacao, methods=["POST"]),
     Route("/api/devolucoes/{item_id:int}/ml-review", dev_ml_review, methods=["POST"]),
     Route("/api/devolucoes/{item_id:int}/ml-resolucao", dev_ml_resolucao, methods=["POST"]),
+
+    # Shopee (OAuth + push notification)
+    Route("/api/shopee/status", shopee_status, methods=["GET"]),
+    Route("/api/shopee/loja", shopee_loja, methods=["GET"]),
+    Route("/api/shopee/dashboard", shopee_dashboard, methods=["GET"]),
+    Route("/api/shopee/token-forma", shopee_token_forma, methods=["GET"]),
+    Route("/api/shopee/renovar", shopee_renovar, methods=["POST"]),
+    Route("/api/shopee/diagnostico", shopee_diagnostico, methods=["GET"]),
+    Route("/api/shopee/conectar", shopee_conectar, methods=["GET"]),
+    Route("/api/shopee/callback", shopee_callback, methods=["GET"]),
+    Route("/api/shopee/webhook", shopee_webhook, methods=["GET", "POST"]),
 ]
 
 async def _on_startup():

@@ -20,6 +20,7 @@ logs/
 # Tokens & Credentials
 olist_token.json
 ml_token.json
+shopee_token.json
 produtos_cache.json
 credentials.json
 alertas_dedup.json

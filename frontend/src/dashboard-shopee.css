@@ -1,0 +1,363 @@
+/* ============================================================
+   Painel da Shopee — saúde da conta.
+   O do ML gira em torno de estoque; aqui o eixo é conformidade,
+   porque na Shopee métrica fora da meta vira penalidade.
+   ============================================================ */
+
+.dsh {
+  --papel: #fff;
+  --borda: #e4eaf3;
+  --navy: #061a35;
+  --fraco: #7a8ba1;
+  --verde: #12a150;
+  --ambar: #d97706;
+  --vermelho: #c53434;
+
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.dsh__vazio {
+  background: var(--papel, #fff);
+  border: 1px solid #e4eaf3;
+  border-radius: 14px;
+  padding: 28px;
+  text-align: center;
+  color: #7a8ba1;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.dsh__vazio-det {
+  font-size: 0.82rem;
+  opacity: 0.8;
+}
+
+/* --- faixa do que exige ação --------------------------------- */
+.dsh__alerta {
+  background: linear-gradient(135deg, #fff5f5 0%, #fff 62%);
+  border: 1px solid #f6c6c6;
+  border-left: 5px solid var(--vermelho);
+  border-radius: 14px;
+  padding: 20px 22px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 18px 32px;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.dsh__alerta--ok {
+  background: linear-gradient(135deg, #f1faf4 0%, #fff 62%);
+  border-color: #bfe3cd;
+  border-left-color: var(--verde);
+}
+
+.dsh__alerta-tag {
+  display: inline-block;
+  font-size: 0.66rem;
+  font-weight: 800;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--vermelho);
+  margin-bottom: 7px;
+}
+
+.dsh__alerta--ok .dsh__alerta-tag {
+  color: var(--verde);
+}
+
+.dsh__alerta-topo h2 {
+  font-size: 1.24rem;
+  font-weight: 800;
+  color: var(--navy);
+  letter-spacing: -0.015em;
+  line-height: 1.2;
+}
+
+.dsh__alerta-topo p {
+  margin-top: 5px;
+  font-size: 0.88rem;
+  color: var(--fraco);
+}
+
+.dsh__alerta-lista {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.dsh__alerta-lista li {
+  background: var(--papel);
+  border: 1px solid #f0cfcf;
+  border-radius: 10px;
+  padding: 10px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 190px;
+}
+
+.dsh__alerta-nome {
+  font-size: 0.84rem;
+  font-weight: 700;
+  color: var(--navy);
+}
+
+.dsh__alerta-valor {
+  font-size: 1.2rem;
+  font-weight: 800;
+  color: var(--vermelho);
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.dsh__alerta-valor em {
+  font-style: normal;
+  font-size: 0.74rem;
+  font-weight: 600;
+  color: var(--fraco);
+}
+
+/* --- resumo em três números ---------------------------------- */
+.dsh__resumo {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: 14px;
+}
+
+.dsh__resumo-item {
+  background: var(--papel);
+  border: 1px solid var(--borda);
+  border-radius: 12px;
+  padding: 15px 17px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.dsh__resumo-label {
+  font-size: 0.76rem;
+  color: var(--fraco);
+}
+
+.dsh__resumo-item strong {
+  font-size: 1.5rem;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  color: var(--navy);
+  line-height: 1.1;
+}
+
+.dsh__resumo-nota {
+  font-size: 0.74rem;
+  color: var(--fraco);
+}
+
+/* --- blocos por dimensão -------------------------------------- */
+.dsh__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(290px, 1fr));
+  gap: 16px;
+}
+
+.dsh__bloco {
+  background: var(--papel);
+  border: 1px solid var(--borda);
+  border-radius: 14px;
+  padding: 18px;
+}
+
+.dsh__bloco-topo {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding-bottom: 13px;
+  border-bottom: 1px solid var(--borda);
+}
+
+.dsh__bloco-topo h3 {
+  font-size: 1rem;
+  font-weight: 800;
+  color: var(--navy);
+}
+
+.dsh__bloco-topo p {
+  margin-top: 2px;
+  font-size: 0.78rem;
+  color: var(--fraco);
+}
+
+.dsh__pill {
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: #e8f7ee;
+  color: var(--verde);
+  font-size: 0.72rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.dsh__pill--erro {
+  background: #fdeaea;
+  color: var(--vermelho);
+}
+
+.dsh__metricas {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.dsh__metricas li {
+  padding: 13px 0;
+  border-bottom: 1px solid #f1f5f9;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.dsh__metricas li:last-child {
+  border-bottom: 0;
+  padding-bottom: 0;
+}
+
+.dsh__metricas li.is-fora .dsh__metrica-valor {
+  color: var(--vermelho);
+}
+
+.dsh__metrica-topo {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.dsh__metrica-nome {
+  font-size: 0.86rem;
+  color: var(--navy);
+  font-weight: 600;
+}
+
+.dsh__metrica-valor {
+  font-size: 1.02rem;
+  font-weight: 800;
+  color: var(--navy);
+  white-space: nowrap;
+}
+
+/* --- barra de folga até a meta -------------------------------- */
+.dsh__barra {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.dsh__barra-trilho {
+  position: relative;
+  flex: 1;
+  height: 6px;
+  border-radius: 3px;
+  background: #eef2f7;
+  overflow: hidden;
+}
+
+.dsh__barra-fill {
+  height: 100%;
+  border-radius: 3px;
+  transition: width 0.5s cubic-bezier(0.16, 0.84, 0.44, 1);
+}
+
+/* marca onde fica o limite, para a barra ser lida contra a meta */
+.dsh__barra-teto {
+  position: absolute;
+  top: -2px;
+  bottom: -2px;
+  right: 0;
+  width: 2px;
+  background: #9aa9bd;
+}
+
+.dsh__barra-alvo {
+  font-size: 0.7rem;
+  color: var(--fraco);
+  white-space: nowrap;
+}
+
+.dsh__tend {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--fraco);
+}
+
+.dsh__tend--bom { color: var(--verde); }
+.dsh__tend--ruim { color: var(--ambar); }
+.dsh__tend--igual { opacity: 0.75; }
+
+/* --- repasses -------------------------------------------------- */
+.dsh__repasses {
+  background: var(--papel);
+  border: 1px solid var(--borda);
+  border-radius: 14px;
+  padding: 18px;
+}
+
+.dsh__repasses header h3 {
+  font-size: 1rem;
+  font-weight: 800;
+  color: var(--navy);
+}
+
+.dsh__repasses header p {
+  margin-top: 2px;
+  font-size: 0.8rem;
+  color: var(--fraco);
+}
+
+.dsh__repasses ul {
+  list-style: none;
+  margin: 13px 0 0;
+  padding: 0;
+}
+
+.dsh__repasses li {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 10px 0;
+  border-top: 1px solid #f1f5f9;
+  font-size: 0.86rem;
+}
+
+.dsh__repasse-pedido {
+  font-family: ui-monospace, 'Cascadia Mono', Consolas, monospace;
+  color: var(--navy);
+  font-weight: 600;
+}
+
+.dsh__repasse-data {
+  color: var(--fraco);
+  font-size: 0.78rem;
+}
+
+.dsh__repasse-valor {
+  margin-left: auto;
+  font-weight: 800;
+  color: var(--verde);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dsh__barra-fill {
+    transition: none;
+  }
+}
