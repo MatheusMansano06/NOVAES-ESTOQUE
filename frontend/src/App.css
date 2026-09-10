@@ -307,7 +307,13 @@ body::after {
   box-shadow: 0 18px 30px rgba(0, 0, 0, 0.22);
 }
 
-.nvs-sidebar__brand-card img {
+.nvs-sidebar__brand-card {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.nvs-sidebar__brand-default {
   width: 100%;
   display: block;
   border-radius: 16px;

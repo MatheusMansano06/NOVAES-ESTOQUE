@@ -13,7 +13,8 @@ import { ListaCompra } from './components/ListaCompra'
 import { RadarFull } from './components/RadarFull'
 import { EstoqueEmbalagens } from './components/EstoqueEmbalagens'
 import { Devolucoes } from './components/Devolucoes'
-import { PlataformaSelecao, type Platform } from './components/PlataformaSelecao'
+import { PlataformaSelecao, type Platform, LogoMercadoLivre, LogoShopee, LogoOperacao } from './components/PlataformaSelecao'
+import { LoginNVS } from './components/LoginNVS'
 import { DashboardShopee } from './components/DashboardShopee'
 import './platform-theme.css'
 import './dashboard-shopee.css'
@@ -1748,6 +1749,12 @@ function App() {
     setPagina('inicial')
   }
 
+  const brandLogoPorPlataforma: Record<Platform, ReactNode> = {
+    ml: <LogoMercadoLivre />,
+    shopee: <LogoShopee />,
+    operacao: <LogoOperacao />,
+  }
+
   const renderComShell = (title: string, subtitle: string, conteudo: ReactNode) => (
     <AppShell
       title={title}
@@ -1759,410 +1766,26 @@ function App() {
       onProfileClick={operadorSessao ? trocarOperador : undefined}
       syncTimeLabel={fmtHora(ultimaSincronizacao)}
       onTrocarPlataforma={() => setEscolhendoPlataforma(true)}
+      brandLogo={brandLogoPorPlataforma[platform]}
     >
       {conteudo}
     </AppShell>
   )
 
-  if (false && pagina === 'bemvindo') {
-    const features = [
-      { titulo: 'Turno rastreado', texto: 'Cada ação fica salva com o nome de quem operou.' },
-      { titulo: 'Master liberado', texto: 'PIN numérico para gestão, histórico e cadastro de pessoas.' },
-      { titulo: 'Fluxo contínuo', texto: 'Notas, inbound, baixa e balanço seguem no mesmo painel.' },
-    ]
-
-    return (
-      <div style={{
-        position: 'relative',
-        zIndex: 1,
-        minHeight: '100vh',
-        display: 'grid',
-        gridTemplateColumns: 'minmax(320px, 1.05fr) minmax(360px, 0.95fr)',
-        background: '#eef4fb',
-      }}>
-        <div style={{
-          position: 'relative',
-          overflow: 'hidden',
-          background: 'linear-gradient(155deg, #081b44 0%, #0d2d69 58%, #0e5f8d 100%)',
-          color: '#fff',
-          padding: '3.5rem 3.2rem',
-          display: 'flex',
-          flexDirection: 'column',
-          justifyContent: 'space-between',
-        }}>
-          <div style={{
-            position: 'absolute',
-            inset: 0,
-            background: 'radial-gradient(circle at 18% 20%, rgba(255,255,255,0.16), transparent 28%), radial-gradient(circle at 78% 32%, rgba(255,196,0,0.16), transparent 22%)',
-            pointerEvents: 'none',
-          }} />
-
-          <div style={{ position: 'relative', zIndex: 1 }}>
-            <div style={{
-              width: 104,
-              height: 104,
-              borderRadius: '50%',
-              background: "#ffffff url('/assets/nvs-tech-logo.jpeg') center / 82% auto no-repeat",
-              border: '3px solid rgba(255, 196, 0, 0.9)',
-              boxShadow: '0 14px 32px rgba(0, 0, 0, 0.25)',
-            }} />
-          </div>
-
-          <div style={{ position: 'relative', zIndex: 1, display: 'grid', gap: '1.8rem' }}>
-            <div>
-              <div style={{ display: 'inline-flex', width: 'fit-content', padding: '0.38rem 0.9rem', borderRadius: '999px', background: 'rgba(255,255,255,0.12)', fontWeight: 700, letterSpacing: '0.04em', textTransform: 'uppercase', fontSize: '0.8rem' }}>
-                Operação NVS
-              </div>
-              <h1 style={{ fontSize: '2.35rem', lineHeight: 1.05, fontWeight: 900, margin: '1rem 0 0.8rem 0' }}>
-                Entrada com operador e histórico real da operação
-              </h1>
-              <p style={{ fontSize: '1rem', lineHeight: 1.6, opacity: 0.88, margin: 0, maxWidth: '32rem' }}>
-                Escolha quem está no turno para registrar upload de nota, inbound, separação, baixa, balanço e ajustes com responsabilidade por pessoa.
-              </p>
-            </div>
-
-            <div style={{ display: 'grid', gap: '0.95rem', maxWidth: '34rem' }}>
-              {features.map((feature) => (
-                <div key={feature.titulo} style={{ padding: '1rem 1.1rem', borderRadius: '18px', background: 'rgba(255,255,255,0.1)', backdropFilter: 'blur(10px)', border: '1px solid rgba(255,255,255,0.14)' }}>
-                  <div style={{ fontWeight: 800, marginBottom: '0.25rem' }}>{feature.titulo}</div>
-                  <div style={{ opacity: 0.82, lineHeight: 1.5 }}>{feature.texto}</div>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          <div style={{ position: 'relative', zIndex: 1, fontSize: '0.8rem', opacity: 0.7 }}>
-            © 2026 NVS TECH. Controle operacional local.
-          </div>
-        </div>
-
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '2rem' }}>
-          <div style={{
-            width: '100%',
-            maxWidth: '520px',
-            background: '#fff',
-            borderRadius: '30px',
-            border: '1px solid #dce6f4',
-            boxShadow: '0 30px 70px rgba(12, 41, 95, 0.12)',
-            padding: '2.2rem',
-            display: 'grid',
-            gap: '1.5rem',
-          }}>
-            <div style={{ display: 'grid', gap: '0.45rem' }}>
-              <div style={{ display: 'inline-flex', width: 'fit-content', padding: '0.4rem 0.9rem', borderRadius: '999px', background: '#edf4ff', color: '#1b5fd1', fontWeight: 800, fontSize: '0.78rem', letterSpacing: '0.04em', textTransform: 'uppercase' }}>
-                Acesso de operador
-              </div>
-              <h2 style={{ fontSize: '2.05rem', fontWeight: 900, color: '#0b2050', margin: 0 }}>
-                Entrar no turno
-              </h2>
-              <p style={{ fontSize: '0.98rem', color: '#667085', lineHeight: 1.6, margin: 0 }}>
-                Selecione seu nome para iniciar o fluxo de picking ou use o PIN master para gestão.
-              </p>
-            </div>
-
-            <div style={{ display: 'grid', gap: '0.9rem' }}>
-              <select
-                value={operadorSelecionadoId}
-                onChange={(e) => setOperadorSelecionadoId(e.target.value)}
-                disabled={operadoresLoading || loginLoading}
-                style={{
-                  width: '100%',
-                  padding: '1.1rem 1rem',
-                  borderRadius: '18px',
-                  border: '2px solid #8cb7ff',
-                  fontSize: '1rem',
-                  color: '#102a5c',
-                  outline: 'none',
-                  boxShadow: '0 0 0 4px rgba(31,111,255,0.08)',
-                }}
-              >
-                <option value="">Selecionar operador</option>
-                {operadoresDisponiveis.map((operador) => (
-                  <option key={operador.id} value={String(operador.id)}>{operador.nome}</option>
-                ))}
-              </select>
-
-              <button
-                type="button"
-                onClick={entrarComoOperador}
-                disabled={operadoresLoading || loginLoading || !operadorSelecionadoId}
-                style={{
-                  width: '100%',
-                  padding: '1rem',
-                  background: 'linear-gradient(135deg, #9bb4f3 0%, #98d9e5 100%)',
-                  color: '#fff',
-                  border: 'none',
-                  borderRadius: '18px',
-                  fontSize: '1.1rem',
-                  fontWeight: 900,
-                  cursor: operadoresLoading || loginLoading || !operadorSelecionadoId ? 'not-allowed' : 'pointer',
-                  opacity: operadoresLoading || loginLoading || !operadorSelecionadoId ? 0.65 : 1,
-                }}
-              >
-                {operadoresLoading ? 'Carregando operadores...' : 'Continuar'}
-              </button>
-            </div>
-
-            <div style={{ display: 'grid', gap: '0.85rem', paddingTop: '0.5rem', borderTop: '1px solid #edf1f6' }}>
-              <div style={{ fontWeight: 800, color: '#0b2050' }}>Acesso master</div>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr auto', gap: '0.75rem' }}>
-                <input
-                  type="password"
-                  inputMode="numeric"
-                  pattern="[0-9]*"
-                  maxLength={10}
-                  placeholder="PIN numérico"
-                  value={masterPin}
-                  onChange={(e) => setMasterPin(e.target.value.replace(/\D/g, ''))}
-                  style={{ padding: '0.95rem 1rem', borderRadius: '14px', border: '1px solid #cfd8e3', fontSize: '1rem' }}
-                />
-                <button
-                  type="button"
-                  onClick={entrarComoMaster}
-                  disabled={loginLoading}
-                  style={{ padding: '0.95rem 1.2rem', borderRadius: '14px', border: 'none', background: '#0f2e67', color: '#fff', fontWeight: 800, cursor: loginLoading ? 'wait' : 'pointer' }}
-                >
-                  {loginLoading ? 'Entrando...' : 'Master'}
-                </button>
-              </div>
-            </div>
-
-            {loginErro && (
-              <div style={{ padding: '0.9rem 1rem', borderRadius: '14px', background: '#fff1f1', color: '#b42318', fontWeight: 700 }}>
-                {loginErro}
-              </div>
-            )}
-          </div>
-        </div>
-      </div>
-    )
-  }
-
   if (pagina === 'bemvindo') {
-    const features = [
-      { icon: '📄', texto: 'Notas fiscais organizadas' },
-      { icon: '🔄', texto: 'Anúncios e estoque sincronizados' },
-      { icon: '📦', texto: 'Inbound FULL com menos erro operacional' },
-    ]
     return (
-      <div style={{
-        position: 'relative',
-        zIndex: 1,
-        minHeight: '100vh',
-        display: 'grid',
-        gridTemplateColumns: '1fr 1fr',
-        background: '#fff',
-        fontFamily: 'inherit'
-      }}>
-        {/* Lateral esquerda — inteira azul */}
-        <div style={{
-          position: 'relative',
-          overflow: 'hidden',
-          background: 'linear-gradient(150deg, #0a1c44 0%, #0c2a5e 55%, #0e336f 100%)',
-          color: '#fff',
-          padding: '3.5rem 3.25rem',
-          display: 'flex',
-          flexDirection: 'column',
-          justifyContent: 'space-between'
-        }}>
-          {/* Motoqueiro ao fundo */}
-          <div style={{
-            position: 'absolute',
-            right: '-2%',
-            top: '50%',
-            transform: 'translateY(-50%)',
-            width: '60%',
-            height: '72%',
-            backgroundImage: "url('/assets/nvs-rider.jpeg')",
-            backgroundRepeat: 'no-repeat',
-            backgroundPosition: 'center',
-            backgroundSize: 'contain',
-            opacity: 0.12,
-            mixBlendMode: 'screen',
-            WebkitMaskImage: 'radial-gradient(ellipse at center, #000 30%, transparent 68%)',
-            maskImage: 'radial-gradient(ellipse at center, #000 30%, transparent 68%)',
-            pointerEvents: 'none'
-          }} />
-
-          {/* Logo (bolinha NVS TECH) — topo */}
-          <div style={{ position: 'relative', zIndex: 1 }}>
-            <div style={{
-              width: 104,
-              height: 104,
-              borderRadius: '50%',
-              background: "#ffffff url('/assets/nvs-tech-logo.jpeg') center / 82% auto no-repeat",
-              border: '3px solid rgba(255, 196, 0, 0.9)',
-              boxShadow: '0 14px 32px rgba(0, 0, 0, 0.25)'
-            }} />
-          </div>
-
-          {/* Conteúdo central — centralizado na vertical */}
-          <div style={{
-            position: 'relative',
-            zIndex: 1,
-            flex: 1,
-            display: 'flex',
-            flexDirection: 'column',
-            justifyContent: 'center'
-          }}>
-            <h1 style={{ fontSize: '2.1rem', fontWeight: 800, margin: '0 0 0.85rem 0' }}>
-              Bem-vindo de volta!
-            </h1>
-            <p style={{ fontSize: '1rem', lineHeight: 1.5, opacity: 0.85, margin: '0 0 2.5rem 0', maxWidth: '340px' }}>
-              Entre na sua conta e gerencie sua operação de marketplace.
-            </p>
-
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
-              {features.map((f) => (
-                <div key={f.texto} style={{ display: 'flex', alignItems: 'center', gap: '0.9rem' }}>
-                  <div style={{
-                    width: 40, height: 40, borderRadius: '10px',
-                    background: 'rgba(255,255,255,0.1)',
-                    display: 'flex', alignItems: 'center', justifyContent: 'center',
-                    fontSize: '1.15rem', flexShrink: 0
-                  }}>
-                    {f.icon}
-                  </div>
-                  <span style={{ fontSize: '0.98rem', opacity: 0.95 }}>{f.texto}</span>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          <div style={{ position: 'relative', zIndex: 1, fontSize: '0.78rem', opacity: 0.6 }}>
-            © 2026 NVS TECH. Todos os direitos reservados.
-          </div>
-        </div>
-
-        {/* Lateral direita — inteira branca, com o botão */}
-        <div style={{
-          background: '#fff',
-          padding: '3rem',
-          display: 'flex',
-          flexDirection: 'column',
-          justifyContent: 'center',
-          alignItems: 'center'
-        }}>
-          <div style={{ width: '100%', maxWidth: '380px', display: 'flex', flexDirection: 'column', gap: '1.6rem' }}>
-            <div>
-              <h2 style={{ fontSize: '1.7rem', fontWeight: 800, color: '#0b2050', margin: '0 0 0.6rem 0' }}>
-                Acessar plataforma
-              </h2>
-              <p style={{ fontSize: '0.95rem', color: '#667085', lineHeight: 1.5, margin: 0 }}>
-                Tudo pronto para você gerenciar suas notas, estoque e inbound. É só entrar.
-              </p>
-            </div>
-
-            <select
-              value={operadorSelecionadoId}
-              onChange={(e) => setOperadorSelecionadoId(e.target.value)}
-              disabled={operadoresLoading || loginLoading}
-              style={{
-                width: '100%',
-                padding: '1rem',
-                borderRadius: '10px',
-                border: '2px solid #cfe0ff',
-                fontSize: '1rem',
-                color: '#0b2050',
-                background: '#fff',
-                outline: 'none',
-              }}
-            >
-              <option value="">Selecionar operador</option>
-              {operadoresDisponiveis.map((operador) => (
-                <option key={operador.id} value={String(operador.id)}>{operador.nome}</option>
-              ))}
-            </select>
-
-            <button
-              type="button"
-              onClick={entrarComoOperador}
-              disabled={operadoresLoading || loginLoading || !operadorSelecionadoId}
-              style={{
-                width: '100%',
-                padding: '1rem',
-                background: 'linear-gradient(135deg, #1f6fff 0%, #1657d6 100%)',
-                color: '#fff',
-                border: 'none',
-                borderRadius: '10px',
-                fontSize: '1.05rem',
-                fontWeight: 800,
-                cursor: operadoresLoading || loginLoading || !operadorSelecionadoId ? 'not-allowed' : 'pointer',
-                opacity: operadoresLoading || loginLoading || !operadorSelecionadoId ? 0.65 : 1,
-                boxShadow: '0 12px 26px rgba(31, 111, 255, 0.35)',
-                transition: 'transform 0.12s ease, box-shadow 0.12s ease'
-              }}
-              onMouseEnter={(e) => {
-                if (!operadoresLoading && !loginLoading && operadorSelecionadoId) {
-                  const el = e.currentTarget
-                  el.style.transform = 'translateY(-1px)'
-                  el.style.boxShadow = '0 16px 32px rgba(31, 111, 255, 0.42)'
-                }
-              }}
-              onMouseLeave={(e) => {
-                const el = e.currentTarget
-                el.style.transform = 'none'
-                el.style.boxShadow = '0 12px 26px rgba(31, 111, 255, 0.35)'
-              }}
-            >
-              {operadoresLoading ? 'Carregando operadores...' : 'Continuar'}
-            </button>
-
-            <div style={{ display: 'grid', gap: '0.75rem', paddingTop: '0.25rem', borderTop: '1px solid #e8edf5' }}>
-              <div style={{ fontSize: '0.9rem', fontWeight: 700, color: '#0b2050' }}>
-                Acesso master
-              </div>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr auto', gap: '0.65rem' }}>
-                <input
-                  type="password"
-                  inputMode="numeric"
-                  pattern="[0-9]*"
-                  maxLength={10}
-                  placeholder="PIN numérico"
-                  value={masterPin}
-                  onChange={(e) => setMasterPin(e.target.value.replace(/\D/g, ''))}
-                  style={{
-                    width: '100%',
-                    padding: '0.95rem 1rem',
-                    borderRadius: '10px',
-                    border: '1px solid #cfe0ff',
-                    fontSize: '0.98rem',
-                    color: '#0b2050',
-                    outline: 'none',
-                  }}
-                />
-                <button
-                  type="button"
-                  onClick={entrarComoMaster}
-                  disabled={loginLoading}
-                  style={{
-                    padding: '0.95rem 1rem',
-                    background: '#12357a',
-                    color: '#fff',
-                    border: 'none',
-                    borderRadius: '10px',
-                    fontSize: '0.95rem',
-                    fontWeight: 800,
-                    cursor: loginLoading ? 'wait' : 'pointer',
-                  }}
-                >
-                  {loginLoading ? '...' : 'Master'}
-                </button>
-              </div>
-            </div>
-
-            {loginErro && (
-              <div style={{ textAlign: 'center', fontSize: '0.85rem', color: '#c62828', fontWeight: 700 }}>
-                {loginErro}
-              </div>
-            )}
-
-            <div style={{ textAlign: 'center', fontSize: '0.85rem', color: '#98a2b3' }}>
-              Precisa de ajuda? <span style={{ color: '#1f6fff', fontWeight: 600 }}>Fale com o suporte</span>
-            </div>
-          </div>
-        </div>
-      </div>
+      <LoginNVS
+        operadores={operadoresDisponiveis}
+        operadorSelecionadoId={operadorSelecionadoId}
+        onSelecionarOperador={setOperadorSelecionadoId}
+        onEntrarComoOperador={entrarComoOperador}
+        masterPin={masterPin}
+        onMasterPinChange={setMasterPin}
+        onEntrarComoMaster={entrarComoMaster}
+        carregandoOperadores={operadoresLoading}
+        entrando={loginLoading}
+        erro={loginErro}
+      />
     )
   }
 
@@ -2171,16 +1794,18 @@ function App() {
       <PlataformaSelecao
         onEscolher={handlePlatformChange}
         atual={localStorage.getItem('platform-tab') ? platform : null}
-        onVoltar={() => setEscolhendoPlataforma(false)}
+        onSair={trocarOperador}
+        onAtalho={(destino) => {
+          setPlatform('operacao')
+          localStorage.setItem('platform-tab', 'operacao')
+          setEscolhendoPlataforma(false)
+          setPagina(destino)
+        }}
+        operadorNome={operadorSessao?.operadorNome || 'NVS Tech'}
+        operadorCargo={operadorSessao?.role === 'master' ? 'Master' : 'Operador'}
         mlConectado={Boolean(mlStatus?.autorizado)}
         inboundsAtivos={inboundsAtivos.length}
-        notas={notas.length}
-        divergencias={divergencias.length}
-        recentes={notas.slice(0, 3).map((n) => ({
-          id: n.id,
-          titulo: `NF ${n.numero_nf}${n.fornecedor ? ` · ${n.fornecedor}` : ''}`,
-          quando: n.data_upload ? `${fmtData(n.data_upload)} às ${fmtHora(n.data_upload)}` : null,
-        }))}
+        fluxoOk={syncSaudavel}
       />
     )
   }

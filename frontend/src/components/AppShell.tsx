@@ -52,6 +52,8 @@ interface AppShellProps {
     onClick: () => void
   }
   onTrocarPlataforma?: () => void
+  /** Logo da plataforma ativa. Sem valor, cai na marca NVS Tech. */
+  brandLogo?: ReactNode
   children: ReactNode
 }
 
@@ -204,6 +206,7 @@ export function AppShell({
   syncTimeLabel,
   primaryAction,
   onTrocarPlataforma,
+  brandLogo,
   children,
 }: AppShellProps) {
   const [collapsed, setCollapsed] = useState(false)
@@ -213,7 +216,7 @@ export function AppShell({
       <aside className="nvs-sidebar">
         <div className="nvs-sidebar__brand">
           <div className="nvs-sidebar__brand-card">
-            <img src="/assets/nvs-tech-full.jpeg" alt="NVS Tech" />
+            {brandLogo ?? <img className="nvs-sidebar__brand-default" src="/assets/nvs-tech-full.jpeg" alt="NVS Tech" />}
           </div>
           {onTrocarPlataforma && (
             <button

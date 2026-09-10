@@ -1,0 +1,494 @@
+/* ============================================================
+   LOGIN — porta de entrada da NVS Tech.
+   Manchete pesada à esquerda, cena da operação ao centro e o
+   cartão de acesso flutuando à direita. Cabe em uma tela só.
+   ============================================================ */
+
+.lg {
+  --papel: #ffffff;
+  --tinta: #050b16;
+  --texto: #4a5769;
+  --fraco: #8593a8;
+  --linha: #e6ebf3;
+  --azul: #0b5cf6;
+
+  position: relative;
+  height: 100vh;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  background: var(--papel);
+  color: var(--texto);
+  font-family: inherit;
+}
+
+/* Cena da esteira: entra pelo centro e some em branco à esquerda,
+   para a manchete continuar legível por cima. */
+.lg__cena {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  transform: translateX(-54%);
+  aspect-ratio: 633 / 841;
+  background: url('/assets/brand/login-cena.png') center / cover no-repeat;
+  pointer-events: none;
+}
+
+.lg__cena::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background:
+    linear-gradient(90deg, #fff 0%, rgba(255, 255, 255, 0.72) 12%, rgba(255, 255, 255, 0) 34%),
+    linear-gradient(270deg, #fff 0%, rgba(255, 255, 255, 0.6) 10%, rgba(255, 255, 255, 0) 30%),
+    linear-gradient(180deg, #fff 0%, rgba(255, 255, 255, 0) 18%),
+    linear-gradient(0deg, #fff 0%, rgba(255, 255, 255, 0) 16%);
+}
+
+/* --- topbar ---------------------------------------------------- */
+.lg__topbar {
+  position: relative;
+  z-index: 2;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  padding: clamp(10px, 1.8vh, 20px) clamp(20px, 3.4vw, 52px);
+}
+
+.lg__marca {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  min-width: 0;
+}
+
+.lg__marca-logo {
+  width: 132px;
+  height: 58px;
+  object-fit: cover;
+  object-position: center 50%;
+  flex-shrink: 0;
+}
+
+.lg__marca-risco {
+  width: 1px;
+  height: 42px;
+  background: var(--linha);
+  flex-shrink: 0;
+}
+
+.lg__marca-txt {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.lg__marca-txt strong {
+  font-size: 0.86rem;
+  font-weight: 800;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--tinta);
+}
+
+.lg__marca-txt span {
+  font-size: 0.6rem;
+  font-weight: 600;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--fraco);
+}
+
+.lg__lema {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+  font-size: 0.64rem;
+  font-weight: 700;
+  letter-spacing: 0.24em;
+  text-transform: uppercase;
+  color: var(--fraco);
+  flex-shrink: 0;
+}
+
+.lg__lema i {
+  margin-top: 8px;
+  width: 34px;
+  height: 3px;
+  background: var(--azul);
+}
+
+/* --- conteúdo -------------------------------------------------- */
+.lg__conteudo {
+  position: relative;
+  z-index: 2;
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+  max-width: 1520px;
+  margin: 0 auto;
+  padding: 0 clamp(20px, 3.4vw, 52px);
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(360px, 470px);
+  align-items: center;
+  gap: clamp(24px, 4vw, 60px);
+}
+
+/* --- manchete e vantagens -------------------------------------- */
+.lg__pitch {
+  max-width: 30ch;
+}
+
+.lg__h1 {
+  font-family: 'Archivo Black', system-ui, sans-serif;
+  font-weight: 400;
+  font-size: clamp(2rem, 5.6vh, 4rem);
+  line-height: 0.94;
+  letter-spacing: -0.02em;
+  text-transform: uppercase;
+  color: var(--tinta);
+}
+
+.lg__h1 em {
+  font-style: normal;
+  color: var(--azul);
+}
+
+.lg__risco {
+  display: block;
+  width: 44px;
+  height: 4px;
+  background: var(--azul);
+  margin: clamp(10px, 2vh, 20px) 0 clamp(10px, 1.8vh, 18px);
+}
+
+.lg__sub {
+  font-size: clamp(0.9rem, 1.9vh, 1.02rem);
+  line-height: 1.5;
+  color: var(--texto);
+  max-width: 26ch;
+}
+
+.lg__vantagens {
+  margin-top: clamp(18px, 3.4vh, 40px);
+  display: flex;
+  flex-direction: column;
+  gap: clamp(12px, 2.2vh, 22px);
+  list-style: none;
+}
+
+.lg__vantagens li {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  color: var(--tinta);
+}
+
+.lg__vantagens li > svg {
+  color: var(--tinta);
+  flex-shrink: 0;
+}
+
+.lg__vantagens div {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 0.7rem;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  line-height: 1.3;
+}
+
+.lg__vantagens strong {
+  font-weight: 800;
+  color: var(--tinta);
+}
+
+.lg__vantagens span {
+  font-weight: 600;
+  color: var(--fraco);
+}
+
+/* --- cartão de acesso ------------------------------------------ */
+.lg__cartao {
+  background: rgba(255, 255, 255, 0.92);
+  backdrop-filter: blur(18px);
+  border: 1px solid rgba(255, 255, 255, 0.9);
+  border-radius: 22px;
+  box-shadow: 0 36px 80px rgba(5, 11, 22, 0.16);
+  padding: clamp(20px, 3.6vh, 40px);
+  display: flex;
+  flex-direction: column;
+}
+
+.lg__cartao-marca {
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0.28em;
+  text-transform: uppercase;
+  color: var(--fraco);
+}
+
+.lg__cartao-titulo {
+  margin-top: clamp(10px, 2vh, 20px);
+  font-size: clamp(1.4rem, 3.4vh, 2rem);
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  color: var(--tinta);
+}
+
+.lg__cartao-sub {
+  margin-top: 6px;
+  font-size: 0.96rem;
+  color: var(--fraco);
+}
+
+.lg__campo {
+  margin-top: clamp(16px, 3vh, 30px);
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+}
+
+.lg__campo > span {
+  font-size: 0.88rem;
+  font-weight: 600;
+  color: var(--texto);
+}
+
+.lg__campo select {
+  width: 100%;
+  appearance: none;
+  border: 1px solid #d6dfeb;
+  border-radius: 12px;
+  background: #fff
+    url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%238593a8' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E")
+    right 14px center / 18px no-repeat;
+  padding: clamp(11px, 1.9vh, 15px) 42px clamp(11px, 1.9vh, 15px) 16px;
+  font-family: inherit;
+  font-size: 1rem;
+  color: var(--tinta);
+  cursor: pointer;
+}
+
+.lg__campo select:focus-visible {
+  outline: 2px solid var(--azul);
+  outline-offset: 1px;
+}
+
+.lg__campo select:disabled {
+  color: var(--fraco);
+  cursor: wait;
+}
+
+.lg__btn {
+  margin-top: clamp(12px, 2.2vh, 20px);
+  width: 100%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  border: 0;
+  border-radius: 12px;
+  background: var(--azul);
+  color: #fff;
+  font-family: inherit;
+  font-size: 1rem;
+  font-weight: 700;
+  padding: clamp(12px, 2.1vh, 16px) 18px;
+  cursor: pointer;
+  transition: background 0.16s ease, box-shadow 0.16s ease;
+  box-shadow: 0 14px 30px rgba(11, 92, 246, 0.28);
+}
+
+.lg__btn:hover:not(:disabled) {
+  background: #0a4fd0;
+}
+
+.lg__btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+  box-shadow: none;
+}
+
+.lg__btn--fantasma {
+  margin-top: 0;
+  background: #fff;
+  color: var(--tinta);
+  border: 1px solid #d6dfeb;
+  box-shadow: none;
+  justify-content: flex-start;
+  gap: 14px;
+}
+
+.lg__btn--fantasma span {
+  flex: 1;
+  text-align: left;
+}
+
+.lg__btn--fantasma:hover:not(:disabled) {
+  background: #f6f9ff;
+  border-color: var(--azul);
+  color: var(--azul);
+}
+
+.lg__ou {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin: clamp(12px, 2.2vh, 20px) 0;
+  font-size: 0.82rem;
+  color: var(--fraco);
+}
+
+.lg__ou i {
+  flex: 1;
+  height: 1px;
+  background: var(--linha);
+}
+
+.lg__master {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+}
+
+.lg__master input {
+  border: 1px solid #d6dfeb;
+  border-radius: 12px;
+  padding: clamp(11px, 1.9vh, 15px) 16px;
+  font-family: inherit;
+  font-size: 1rem;
+  color: var(--tinta);
+  outline: none;
+}
+
+.lg__master input:focus-visible {
+  border-color: var(--azul);
+}
+
+.lg__master button {
+  border: 0;
+  border-radius: 12px;
+  background: var(--tinta);
+  color: #fff;
+  font-family: inherit;
+  font-size: 0.95rem;
+  font-weight: 700;
+  padding: 0 22px;
+  cursor: pointer;
+}
+
+.lg__master button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.lg__erro {
+  margin-top: 14px;
+  text-align: center;
+  font-size: 0.86rem;
+  font-weight: 700;
+  color: #c62828;
+}
+
+.lg__ajuda {
+  margin-top: clamp(12px, 2.4vh, 22px);
+  text-align: center;
+  font-size: 0.86rem;
+  color: var(--fraco);
+}
+
+.lg__ajuda span {
+  color: var(--azul);
+  font-weight: 600;
+}
+
+/* --- rodapé ---------------------------------------------------- */
+.lg__rodape {
+  position: relative;
+  z-index: 2;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  width: 100%;
+  max-width: 1520px;
+  margin: 0 auto;
+  padding: clamp(10px, 2vh, 24px) clamp(20px, 3.4vw, 52px);
+}
+
+.lg__rodape div {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.lg__rodape i {
+  width: 26px;
+  height: 1px;
+  background: #c9d3e0;
+  flex-shrink: 0;
+}
+
+.lg__rodape span {
+  font-size: 0.66rem;
+  font-weight: 600;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--fraco);
+}
+
+/* --- responsivo -------------------------------------------------
+   Abaixo de 1080px a manchete sai da frente do cartão: a tela vira
+   uma coluna só e volta a rolar. */
+@media (max-width: 1080px) {
+  .lg {
+    height: auto;
+    min-height: 100vh;
+    overflow: visible;
+  }
+  .lg__cena {
+    left: 0;
+    opacity: 0.35;
+  }
+  .lg__conteudo {
+    grid-template-columns: minmax(0, 1fr);
+    padding: clamp(20px, 4vw, 40px) clamp(20px, 3.4vw, 52px);
+    gap: 32px;
+  }
+  .lg__pitch {
+    max-width: none;
+  }
+  .lg__vantagens {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .lg__cartao {
+    max-width: 470px;
+  }
+}
+
+@media (max-width: 640px) {
+  .lg__lema,
+  .lg__vantagens {
+    display: none;
+  }
+  .lg__rodape {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 10px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .lg__btn {
+    transition: none;
+  }
+}
