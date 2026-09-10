@@ -5451,6 +5451,16 @@ async def shopee_dashboard(request: Request):
     return JSONResponse(dados)
 
 
+async def shopee_token_forma(request: Request):
+    """GET /api/shopee/token-forma — formato do token salvo, sem os valores."""
+    return JSONResponse(shopee.forma_do_token())
+
+
+async def shopee_renovar(request: Request):
+    """POST /api/shopee/renovar — força a renovação para testar a cadeia."""
+    return JSONResponse(shopee.renovar_agora())
+
+
 async def shopee_diagnostico(request: Request):
     """GET /api/shopee/diagnostico — o que cada endpoint da Shopee devolve."""
     return JSONResponse(shopee.diagnostico())
@@ -5896,6 +5906,8 @@ routes = [
     Route("/api/shopee/status", shopee_status, methods=["GET"]),
     Route("/api/shopee/loja", shopee_loja, methods=["GET"]),
     Route("/api/shopee/dashboard", shopee_dashboard, methods=["GET"]),
+    Route("/api/shopee/token-forma", shopee_token_forma, methods=["GET"]),
+    Route("/api/shopee/renovar", shopee_renovar, methods=["POST"]),
     Route("/api/shopee/diagnostico", shopee_diagnostico, methods=["GET"]),
     Route("/api/shopee/conectar", shopee_conectar, methods=["GET"]),
     Route("/api/shopee/callback", shopee_callback, methods=["GET"]),

@@ -381,6 +381,45 @@ class ShopeeAPI:
             },
         }
 
+    def forma_do_token(self) -> Dict[str, Any]:
+        """Formato do token salvo, sem devolver os valores.
+
+        Serve para separar "refresh_token gravado errado" de "refresh_token
+        recusado pela Shopee" — que dão o mesmo erro na renovação.
+        """
+        d = self._ler_token()
+        at = str(d.get("access_token") or "")
+        rt = str(d.get("refresh_token") or "")
+        return {
+            "tem_access_token": bool(at),
+            "tam_access_token": len(at),
+            "tem_refresh_token": bool(rt),
+            "tam_refresh_token": len(rt),
+            "shop_id": d.get("shop_id"),
+            "shop_id_tipo": type(d.get("shop_id")).__name__,
+            "expires_at": d.get("expires_at"),
+            "campos": sorted(d.keys()),
+        }
+
+    def renovar_agora(self) -> Dict[str, Any]:
+        """Força a renovação, para conferir a cadeia sem esperar 4h.
+
+        Consome o refresh_token atual — só use quando quiser justamente
+        testar se a próxima renovação vai funcionar.
+        """
+        with self._token_lock:
+            antes = self._ler_token()
+            novo = self._renovar(antes)
+            depois = self._ler_token()
+            return {
+                "renovou": bool(novo),
+                "erro": None if novo else (self._ultimo_erro_refresh or "falha na chamada"),
+                "refresh_token_mudou": bool(
+                    novo and antes.get("refresh_token") != depois.get("refresh_token")
+                ),
+                "expires_at": depois.get("expires_at"),
+            }
+
     def diagnostico(self) -> Dict[str, Any]:
         """Sonda os endpoints que interessam e devolve o formato cru de cada um.
 
