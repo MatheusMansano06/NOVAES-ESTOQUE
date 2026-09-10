@@ -222,7 +222,11 @@ class ShopeeAPI:
 
     def info_loja(self) -> Dict[str, Any]:
         """Dados da loja autorizada. Primeira chamada assinada com token."""
-        return self.chamar("/api/v2/shop/get_shop_info")
+        dados = self.chamar("/api/v2/shop/get_shop_info")
+        # get_shop_info não repete o shop_id no corpo: ele vai na query.
+        if not dados.get("error"):
+            dados.setdefault("shop_id", self._ler_token().get("shop_id"))
+        return dados
 
     def status(self) -> Dict[str, Any]:
         """Campos em português, no mesmo formato de /api/ml|olist/status."""
