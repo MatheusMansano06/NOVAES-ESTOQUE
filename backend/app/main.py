@@ -5443,6 +5443,14 @@ async def shopee_loja(request: Request):
     })
 
 
+async def shopee_dashboard(request: Request):
+    """GET /api/shopee/dashboard — saude da conta Shopee."""
+    dados = shopee.dashboard()
+    if dados.get("erro"):
+        return JSONResponse(dados, status_code=502)
+    return JSONResponse(dados)
+
+
 async def shopee_diagnostico(request: Request):
     """GET /api/shopee/diagnostico — o que cada endpoint da Shopee devolve."""
     return JSONResponse(shopee.diagnostico())
@@ -5887,6 +5895,7 @@ routes = [
     # Shopee (OAuth + push notification)
     Route("/api/shopee/status", shopee_status, methods=["GET"]),
     Route("/api/shopee/loja", shopee_loja, methods=["GET"]),
+    Route("/api/shopee/dashboard", shopee_dashboard, methods=["GET"]),
     Route("/api/shopee/diagnostico", shopee_diagnostico, methods=["GET"]),
     Route("/api/shopee/conectar", shopee_conectar, methods=["GET"]),
     Route("/api/shopee/callback", shopee_callback, methods=["GET"]),

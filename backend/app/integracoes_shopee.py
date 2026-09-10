@@ -51,6 +51,86 @@ def assinar(partner_key: str, base: str) -> str:
     return hmac.new(partner_key.encode(), base.encode(), hashlib.sha256).hexdigest()
 
 
+# Nomes que a Shopee usa em inglês, do jeito que o operador entende.
+NOME_METRICA = {
+    "late_shipment_rate": "Envio atrasado",
+    "non_fulfillment_rate": "Pedidos não atendidos",
+    "cancellation_rate": "Cancelamentos",
+    "return_refund_rate": "Devoluções e reembolsos",
+    "saturday_shipment_rate": "Envio aos sábados",
+    "avg_preparation_time_ps": "Tempo médio de preparo",
+    "otdr_dd_rate": "Entrega no prazo",
+    "response_rate": "Taxa de resposta ao comprador",
+    "shop_rating": "Nota da loja",
+    "pre_order_listing_rate": "Anúncios em pré-venda",
+    "the_amount_of_pre_order_listing": "Quantidade de anúncios em pré-venda",
+    "severe_listing_violations": "Violações graves de anúncio",
+    "other_listing_violations": "Outras violações de anúncio",
+    "prohibited_listings": "Anúncios proibidos",
+    "counterfeit_ip_infringement": "Falsificação ou uso indevido de marca",
+    "spam_listings": "Anúncios de spam",
+    "pqr_products": "Produtos com reclamação de qualidade",
+}
+
+DIMENSAO = {1: "envio", 2: "anuncios", 3: "atendimento"}
+UNIDADE = {1: "", 2: "%", 4: " dias"}
+
+
+def avaliar_metrica(m: Dict[str, Any]) -> Dict[str, Any]:
+    """Compara a métrica com a meta e com o período anterior.
+
+    A direção depende do comparador: em `<5` menor é melhor, em `>=60` maior é
+    melhor. Sem isso, uma queda em "taxa de resposta" seria lida como melhora.
+    """
+    nome_api = str(m.get("metric_name") or "")
+    valor = m.get("current_period")
+    anterior = m.get("last_period")
+    alvo_bruto = m.get("target") or {}
+    comparador = str(alvo_bruto.get("comparator") or "")
+    alvo = alvo_bruto.get("value")
+
+    menor_e_melhor = comparador.startswith("<")
+
+    fora_da_meta = False
+    if valor is not None and alvo is not None and comparador:
+        if comparador == "<":
+            fora_da_meta = valor >= alvo
+        elif comparador == "<=":
+            fora_da_meta = valor > alvo
+        elif comparador == ">":
+            fora_da_meta = valor <= alvo
+        elif comparador == ">=":
+            fora_da_meta = valor < alvo
+
+    tendencia = "estavel"
+    if valor is not None and anterior is not None and valor != anterior:
+        melhorou = valor < anterior if menor_e_melhor else valor > anterior
+        tendencia = "melhorou" if melhorou else "piorou"
+
+    # Fração da meta já consumida. Acima de 1 significa meta estourada em
+    # limite superior; abaixo de 1, piso não alcançado.
+    uso = None
+    if valor is not None and alvo:
+        uso = round(float(valor) / float(alvo), 3)
+    elif valor is not None and alvo == 0:
+        uso = 0.0 if valor == 0 else 2.0
+
+    return {
+        "chave": nome_api,
+        "nome": NOME_METRICA.get(nome_api, nome_api.replace("_", " ").capitalize()),
+        "dimensao": DIMENSAO.get(m.get("metric_type"), "outros"),
+        "valor": valor,
+        "anterior": anterior,
+        "unidade": UNIDADE.get(m.get("unit"), ""),
+        "alvo": alvo,
+        "comparador": comparador,
+        "menor_e_melhor": menor_e_melhor,
+        "fora_da_meta": fora_da_meta,
+        "tendencia": tendencia,
+        "uso_da_meta": uso,
+    }
+
+
 class ShopeeAPI:
     def __init__(self) -> None:
         self.partner_id = str(os.getenv("SHOPEE_PARTNER_ID", "")).strip()
@@ -228,6 +308,54 @@ class ShopeeAPI:
             dados.setdefault("shop_id", self._ler_token().get("shop_id"))
         return dados
 
+    def dashboard(self) -> Dict[str, Any]:
+        """Saúde da conta Shopee: cada métrica contra a meta e contra o período
+        anterior, mais o dinheiro que entrou na quinzena.
+
+        Na Shopee, métrica fora da meta vira penalidade e anúncio
+        despriorizado — por isso o painel gira em torno disso, e não do
+        estoque como o do Mercado Livre.
+        """
+        perf = self.chamar("/api/v2/account_health/get_shop_performance")
+        if perf.get("error"):
+            return {"erro": perf.get("error"), "mensagem": perf.get("message")}
+
+        corpo = perf.get("response") or {}
+        geral = corpo.get("overall_performance") or {}
+
+        metricas = [
+            avaliar_metrica(m) for m in (corpo.get("metric_list") or [])
+        ]
+        metricas = [m for m in metricas if m["valor"] is not None]
+
+        agora = int(time.time())
+        repasses = self.chamar(
+            "/api/v2/payment/get_escrow_list",
+            {"release_time_from": agora - 14 * 86400, "release_time_to": agora,
+             "page_size": 100},
+        )
+        lista_repasses = ((repasses.get("response") or {}).get("escrow_list") or []) \
+            if not repasses.get("error") else []
+
+        return {
+            "rating": geral.get("rating"),
+            "falhas": {
+                "envio": geral.get("fulfillment_failed") or 0,
+                "anuncios": geral.get("listing_failed") or 0,
+                "atendimento": geral.get("custom_service_failed") or 0,
+            },
+            "metricas": metricas,
+            "repasses": {
+                "quantidade": len(lista_repasses),
+                "total": round(sum(float(r.get("payout_amount") or 0) for r in lista_repasses), 2),
+                "ultimos": sorted(
+                    lista_repasses,
+                    key=lambda r: r.get("escrow_release_time") or 0,
+                    reverse=True,
+                )[:5],
+            },
+        }
+
     def diagnostico(self) -> Dict[str, Any]:
         """Sonda os endpoints que interessam e devolve o formato cru de cada um.
 
@@ -302,3 +430,39 @@ if __name__ == "__main__":
     assert com_loja != esperado, "sign de loja tem que diferir do público"
 
     print("ok: assinatura pública e de loja conferem")
+
+    # Avaliação das métricas: a direção do comparador é o que separa
+    # "melhorou" de "piorou". Casos tirados da conta real.
+    def met(nome, atual, ant, comp, alvo, tipo=1, unit=2):
+        return {"metric_name": nome, "current_period": atual, "last_period": ant,
+                "target": {"comparator": comp, "value": alvo},
+                "metric_type": tipo, "unit": unit}
+
+    # Limite superior: 0.88% de atraso com meta <5% está dentro e melhorou.
+    r = avaliar_metrica(met("late_shipment_rate", 0.88, 1.72, "<", 5))
+    assert r["fora_da_meta"] is False and r["tendencia"] == "melhorou"
+    assert r["nome"] == "Envio atrasado"
+
+    # Piso: taxa de resposta caindo é piora, mesmo continuando acima da meta.
+    r = avaliar_metrica(met("response_rate", 70.0, 85.9, ">=", 60, tipo=3))
+    assert r["fora_da_meta"] is False and r["tendencia"] == "piorou"
+
+    # Piso furado.
+    assert avaliar_metrica(met("response_rate", 55.0, 85.9, ">=", 60))["fora_da_meta"] is True
+
+    # Meta zero: uma violação já estoura, ainda que tenha caído de 2 para 1.
+    r = avaliar_metrica(met("severe_listing_violations", 1, 2, "<=", 0, tipo=2, unit=1))
+    assert r["fora_da_meta"] is True and r["tendencia"] == "melhorou"
+    assert r["dimensao"] == "anuncios"
+
+    # Zerada é o único jeito de cumprir meta zero.
+    assert avaliar_metrica(met("spam_listings", 0, 2, "<=", 0, tipo=2, unit=1))["fora_da_meta"] is False
+
+    # Fronteira do "<": igual ao alvo já está fora.
+    assert avaliar_metrica(met("x", 5, 4, "<", 5))["fora_da_meta"] is True
+    assert avaliar_metrica(met("x", 5, 4, "<=", 5))["fora_da_meta"] is False
+
+    # Métrica sem leitura no período não pode ser tratada como zero.
+    assert avaliar_metrica(met("the_amount_of_pre_order_listing", None, None, "<", 6))["valor"] is None
+
+    print("ok: metricas avaliadas contra meta e periodo anterior")

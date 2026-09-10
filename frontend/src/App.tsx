@@ -14,7 +14,9 @@ import { RadarFull } from './components/RadarFull'
 import { EstoqueEmbalagens } from './components/EstoqueEmbalagens'
 import { Devolucoes } from './components/Devolucoes'
 import { PlataformaSelecao, type Platform } from './components/PlataformaSelecao'
+import { DashboardShopee } from './components/DashboardShopee'
 import './platform-theme.css'
+import './dashboard-shopee.css'
 import { AppShell, type ShellNavGroup, type ShellStatusItem } from './components/AppShell'
 import {
   baixarMultiplosOuPdfs,
@@ -2183,6 +2185,16 @@ function App() {
     )
   }
 
+  // O painel da Shopee é outro: gira em torno da saúde da conta, não do
+  // estoque como o do Mercado Livre.
+  if (pagina === 'inicial' && platform === 'shopee') {
+    return renderComShell(
+      'Saúde da conta Shopee',
+      'O que a Shopee está medindo na sua loja agora.',
+      <DashboardShopee />,
+    )
+  }
+
   if (pagina === 'inicial') {
     return renderComShell(
       platform === 'ml' ? 'Dashboard Mercado Livre'
@@ -2308,94 +2320,7 @@ function App() {
               {/* Card da conta do Mercado Livre — só no posto do ML */}
               {platform === 'ml' && <ContaMLCard />}
 
-              {platform === 'shopee' && (
-                <div className="card" style={{ border: '2px solid #ffccc0' }}>
-                  <div className="card-body" style={{ padding: '1.25rem' }}>
-                    <div style={{ color: '#ee4d2d', fontWeight: 800, fontSize: '0.74rem', letterSpacing: '0.04em', textTransform: 'uppercase', marginBottom: '0.6rem' }}>
-                      Minha conta Shopee
-                    </div>
-                    <div style={{ fontWeight: 700, color: '#061a35', marginBottom: '0.35rem' }}>
-                      Loja ainda não conectada
-                    </div>
-                    <p style={{ fontSize: '0.88rem', color: '#5b6b7f', lineHeight: 1.5 }}>
-                      O webhook já responde à Shopee. Falta autorizar a loja para
-                      trazer pedidos, estoque e repasses para cá.
-                    </p>
-                  </div>
-                </div>
-              )}
-
-              {/* Notas sem estar 100% — compacto */}
-              <div className="card" style={{ border: '2px solid #ffd54f', boxShadow: '0 10px 24px rgba(255, 152, 0, 0.08)' }}>
-                <div className="card-body" style={{ padding: '0.85rem 1rem', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.75rem' }}>
-                  <div style={{ color: '#e65100', fontWeight: 800, fontSize: '0.74rem', letterSpacing: '0.04em', textTransform: 'uppercase' }}>
-                    Notas sem estar 100% para Olist
-                  </div>
-                  <div style={{ fontSize: '1.4rem', fontWeight: 800, color: '#e65100', lineHeight: 1 }}>
-                    {notasFiltradas.filter(n => {
-                      const p = calcularProgresso(n.itens)
-                      return p.total > 0 && p.percentual < 100
-                    }).length}
-                  </div>
-                </div>
-              </div>
-            </div>
-          </section>
-
-          {/* CARROSSEL: anúncios pausados SEM estoque no Mercado Livre */}
-          {platform === 'ml' && (
-          <section className="card" style={{ marginBottom: '1.5rem' }}>
-            <div className="card-body" style={{ padding: '1.25rem' }}>
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1rem', flexWrap: 'wrap', gap: '0.5rem' }}>
-                <div style={{ color: '#c62828', fontWeight: 800, fontSize: '0.82rem', letterSpacing: '0.04em', textTransform: 'uppercase' }}>
-                  Produtos pausados sem estoque no Mercado Livre
-                </div>
-                <span style={{ fontSize: '0.8rem', color: '#999', fontWeight: 600 }}>
-                  {anunciosPausadosSemEstoque.length} {anunciosPausadosSemEstoque.length === 1 ? 'anúncio' : 'anúncios'}
-                </span>
-              </div>
-              {anunciosPausadosSemEstoque.length === 0 ? (
-                <p style={{ color: '#999', fontSize: '0.9rem', padding: '1rem 0' }}>
-                  Nenhum anúncio pausado sem estoque no momento. 🎉
-                </p>
-              ) : (
-                <div style={{ display: 'flex', gap: '1rem', overflowX: 'auto', paddingBottom: '0.75rem', scrollbarWidth: 'thin' }}>
-                  {anunciosPausadosSemEstoque.map(a => (
-                    <a
-                      key={a.id}
-                      href={a.permalink || '#'}
-                      target="_blank"
-                      rel="noreferrer"
-                      style={{
-                        flexShrink: 0,
-                        width: '160px',
-                        textDecoration: 'none',
-                        color: 'inherit',
-                        border: '1px solid #ffcdd2',
-                        borderRadius: '12px',
-                        overflow: 'hidden',
-                        background: '#fff',
-                        transition: 'box-shadow 0.2s, transform 0.2s',
-                      }}
-                      onMouseEnter={e => { e.currentTarget.style.boxShadow = '0 8px 20px rgba(198, 40, 40, 0.18)'; e.currentTarget.style.transform = 'translateY(-2px)' }}
-                      onMouseLeave={e => { e.currentTarget.style.boxShadow = 'none'; e.currentTarget.style.transform = 'translateY(0)' }}
-                    >
-                      <div style={{ width: '160px', height: '160px', background: '#f5f5f5', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
-                        {(a.imagem_principal || a.thumbnail)
-                          ? <img src={a.imagem_principal || a.thumbnail} alt={a.titulo} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-                          : <span style={{ color: '#ccc', fontSize: '2rem' }}>📦</span>}
-                      </div>
-                      <div style={{ padding: '0.6rem 0.7rem' }}>
-                        <div style={{ fontSize: '0.78rem', fontWeight: 700, color: '#1a1a1a', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={a.sku}>
-                          {a.sku || 'sem SKU'}
-                        </div>
-                        <div style={{ fontSize: '0.7rem', color: '#999', marginTop: '0.2rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={a.titulo}>
-                          {a.titulo}
-                        </div>
-                      </div>
-                    </a>
-                  ))}
-                </div>
+                              </div>
               )}
             </div>
           </section>
