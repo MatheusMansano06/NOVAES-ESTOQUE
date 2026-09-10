@@ -1,391 +1,495 @@
 /* ============================================================
-   ESCOLHA DE POSTO — porta de entrada do painel.
+   ESCOLHA DE MÓDULO — porta de entrada do painel.
 
-   Direção: painel de controle de galpão, não cartão de site.
-   Cantos vivos, estrutura de 1px, tipografia condensada técnica,
-   LED de status e faixa de demarcação de piso no posto assumido.
+   Direção tirada do próprio logotipo da NVS Tech: trilhas de
+   circuito com nós vazados, dobras em 45 graus, geometria
+   chanfrada, navy profundo com azul elétrico e a cunha amarela
+   como único acento. A marca vira a estrutura da tela.
    ============================================================ */
 
-.posto {
-  --aco-900: #090c11;
-  --aco-800: #0e131a;
-  --aco-700: #141b24;
-  --aco-linha: #1d2733;
-  --aco-texto: #e9eef6;
-  --aco-fraco: #78859a;
-  --demarca: #f5c400;
+.nvsp {
+  --fundo: #04102a;
+  --painel: #071a3c;
+  --painel-alto: #0a2350;
+  --linha: #12356f;
+  --azul: #1a6dff;
+  --azul-claro: #6aa9ff;
+  --amarelo: #ffc400;
+  --texto: #e7efff;
+  --fraco: #7e97c4;
 
   min-height: 100vh;
   display: grid;
-  grid-template-rows: auto auto 1fr auto;
-  background-color: var(--aco-900);
+  grid-template-rows: auto auto auto 1fr auto;
+  background-color: var(--fundo);
   background-image:
-    linear-gradient(rgba(255, 255, 255, 0.016) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(255, 255, 255, 0.016) 1px, transparent 1px);
-  background-size: 46px 46px;
-  color: var(--aco-texto);
-  font-family: 'Barlow Condensed', 'Arial Narrow', system-ui, sans-serif;
+    radial-gradient(circle at 50% -10%, rgba(26, 109, 255, 0.16), transparent 52%),
+    linear-gradient(rgba(26, 109, 255, 0.045) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(26, 109, 255, 0.045) 1px, transparent 1px);
+  background-size: auto, 52px 52px, 52px 52px;
+  color: var(--texto);
+  font-family: 'Chakra Petch', system-ui, sans-serif;
 }
 
-/* --- barra de identificação, tipo plaqueta de equipamento --- */
-.posto__barra {
+/* --- marca --------------------------------------------------- */
+.nvsp__topo {
   display: flex;
   align-items: center;
-  gap: 14px;
-  padding: 0 22px;
-  height: 46px;
-  border-bottom: 1px solid var(--aco-linha);
-  background: var(--aco-800);
+  padding: 18px 26px;
+}
+
+.nvsp__marca {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  line-height: 1;
+}
+
+.nvsp__marca-nvs {
+  font-size: 1.66rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: var(--texto);
+}
+
+.nvsp__marca-v {
+  position: relative;
+  color: var(--azul);
+}
+
+/* a cunha amarela encaixada no vão do V, como no logotipo */
+.nvsp__marca-cunha {
+  position: absolute;
+  top: 0.12em;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 0.4em;
+  height: 0.34em;
+  background: var(--amarelo);
+  clip-path: polygon(0 0, 100% 0, 50% 100%);
+}
+
+.nvsp__marca-tech {
+  margin-top: 3px;
   font-family: 'IBM Plex Mono', ui-monospace, monospace;
-  font-size: 0.68rem;
-  letter-spacing: 0.16em;
+  font-size: 0.6rem;
+  font-weight: 500;
+  letter-spacing: 0.62em;
   text-transform: uppercase;
-  color: var(--aco-fraco);
+  color: var(--azul);
+  text-indent: 0.62em;
 }
 
-.posto__barra-marca {
-  color: var(--demarca);
-  font-weight: 600;
-}
-
-.posto__barra-sep {
-  width: 1px;
-  height: 14px;
-  background: var(--aco-linha);
-}
-
-.posto__barra-dir {
+.nvsp__topo-dir {
   margin-left: auto;
   display: flex;
   align-items: center;
-  gap: 14px;
-}
-
-.posto__barra-op {
-  color: var(--aco-texto);
-}
-
-/* --- chamada --- */
-.posto__intro {
-  padding: 46px 22px 30px;
-  text-align: center;
-}
-
-.posto__h1 {
-  font-size: clamp(2.6rem, 6.5vw, 4.4rem);
-  font-weight: 700;
-  line-height: 0.94;
-  letter-spacing: 0.005em;
-  text-transform: uppercase;
-  color: var(--aco-texto);
-}
-
-.posto__sub {
-  margin-top: 12px;
+  gap: 16px;
   font-family: 'IBM Plex Mono', ui-monospace, monospace;
-  font-size: 0.78rem;
-  letter-spacing: 0.1em;
-  color: var(--aco-fraco);
-  text-transform: none;
+  font-size: 0.7rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--fraco);
 }
 
-/* --- as três baias, separadas por estrutura de 1px --- */
-.posto__baias {
+.nvsp__topo-op {
+  color: var(--texto);
+}
+
+/* --- chamada ------------------------------------------------- */
+.nvsp__chamada {
+  text-align: center;
+  padding: 26px 22px 0;
+}
+
+.nvsp__eyebrow {
+  font-family: 'IBM Plex Mono', ui-monospace, monospace;
+  font-size: 0.66rem;
+  font-weight: 500;
+  letter-spacing: 0.42em;
+  text-transform: uppercase;
+  color: var(--azul);
+  text-indent: 0.42em;
+}
+
+.nvsp__h1 {
+  margin-top: 12px;
+  font-size: clamp(2.1rem, 5vw, 3.3rem);
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: -0.015em;
+  color: var(--texto);
+}
+
+/* --- barramento de trilhas ----------------------------------- */
+.nvsp__barramento {
+  width: 100%;
+  height: 92px;
+  display: block;
+  margin-top: 18px;
+}
+
+.nvsp__trilha {
+  fill: none;
+  stroke: var(--linha);
+  stroke-width: 2;
+}
+
+.nvsp__no {
+  fill: var(--fundo);
+  stroke: var(--linha);
+  stroke-width: 2;
+}
+
+.nvsp__pulso {
+  fill: none;
+  stroke: var(--azul);
+  stroke-width: 2.4;
+  stroke-linecap: round;
+  stroke-dasharray: 108 566;
+  stroke-dashoffset: 674;
+  opacity: 0;
+  filter: drop-shadow(0 0 7px var(--azul)) drop-shadow(0 0 14px rgba(26, 109, 255, 0.5));
+}
+
+@keyframes nvsp-pulso {
+  from { stroke-dashoffset: 674; }
+  to   { stroke-dashoffset: 0; }
+}
+
+/* O ramo acende quando o módulo é apontado, e fica batendo devagar
+   no módulo já assumido. */
+.nvsp:has(.nvsp__mod--ml:hover) .nvsp__ramo--ml .nvsp__pulso,
+.nvsp:has(.nvsp__mod--shopee:hover) .nvsp__ramo--shopee .nvsp__pulso,
+.nvsp:has(.nvsp__mod--operacao:hover) .nvsp__ramo--operacao .nvsp__pulso {
+  opacity: 1;
+  animation: nvsp-pulso 1.15s linear infinite;
+}
+
+.nvsp--atual-ml .nvsp__ramo--ml .nvsp__pulso,
+.nvsp--atual-shopee .nvsp__ramo--shopee .nvsp__pulso,
+.nvsp--atual-operacao .nvsp__ramo--operacao .nvsp__pulso {
+  opacity: 1;
+  animation: nvsp-pulso 2.9s linear infinite;
+}
+
+.nvsp--atual-ml .nvsp__ramo--ml .nvsp__trilha,
+.nvsp--atual-shopee .nvsp__ramo--shopee .nvsp__trilha,
+.nvsp--atual-operacao .nvsp__ramo--operacao .nvsp__trilha {
+  stroke: #1c4a95;
+}
+
+.nvsp--atual-ml .nvsp__ramo--ml .nvsp__no,
+.nvsp--atual-shopee .nvsp__ramo--shopee .nvsp__no,
+.nvsp--atual-operacao .nvsp__ramo--operacao .nvsp__no {
+  stroke: var(--azul);
+}
+
+/* --- módulos ------------------------------------------------- */
+.nvsp__modulos {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
-  gap: 1px;
-  background: var(--aco-linha);
-  border-top: 1px solid var(--aco-linha);
-  border-bottom: 1px solid var(--aco-linha);
+  gap: 22px;
+  padding: 0 26px;
+  align-content: start;
 }
 
-.posto__baia {
-  --marca: #2b7fff;
+.nvsp__mod {
+  --marca: var(--azul);
   position: relative;
   isolation: isolate;
   border: 0;
-  border-radius: 0;
-  background: var(--aco-800);
-  color: inherit;
-  font-family: inherit;
+  padding: 22px 22px 20px;
   cursor: pointer;
-  padding: 34px 26px 30px;
+  font-family: inherit;
+  color: inherit;
+  text-align: left;
   display: flex;
   flex-direction: column;
-  align-items: center;
-  gap: 16px;
-  overflow: hidden;
-  transition: background 0.32s ease;
-  animation: posto-subir 0.5s cubic-bezier(0.16, 0.84, 0.44, 1) backwards;
-  animation-delay: calc(var(--baia-i) * 90ms);
+  gap: 14px;
+  background: var(--painel);
+  box-shadow: inset 0 0 0 1px var(--linha);
+  /* chanfro de 45 graus, como os cortes das letras do logotipo */
+  clip-path: polygon(
+    0 0,
+    calc(100% - 22px) 0,
+    100% 22px,
+    100% 100%,
+    22px 100%,
+    0 calc(100% - 22px)
+  );
+  transition: background 0.3s ease, transform 0.3s cubic-bezier(0.16, 0.84, 0.44, 1);
+  animation: nvsp-entrar 0.5s cubic-bezier(0.16, 0.84, 0.44, 1) backwards;
+  animation-delay: calc(var(--i) * 90ms);
 }
 
-.posto__baia--ml { --marca: #ffe600; }
-.posto__baia--shopee { --marca: #ee4d2d; }
-.posto__baia--operacao { --marca: #3f9bff; }
+.nvsp__mod--ml { --marca: #ffe600; }
+.nvsp__mod--shopee { --marca: #ee4d2d; }
+.nvsp__mod--operacao { --marca: #3f9bff; }
 
-@keyframes posto-subir {
-  from { opacity: 0; transform: translateY(26px); }
+@keyframes nvsp-entrar {
+  from { opacity: 0; transform: translateY(20px); }
   to   { opacity: 1; transform: translateY(0); }
 }
 
-.posto__baia:hover,
-.posto__baia:focus-visible {
-  background: var(--aco-700);
+.nvsp__mod:hover,
+.nvsp__mod:focus-visible {
+  background: var(--painel-alto);
+  transform: translateY(-4px);
   outline: none;
 }
 
-/* A cor da marca entra como luz vinda do piso, nunca como fundo de
-   texto — assim o contraste do conteúdo não depende da marca. */
-.posto__luz {
-  position: absolute;
-  inset: auto 0 0 0;
-  height: 3px;
-  z-index: -1;
-  background: var(--marca);
-  box-shadow: 0 0 0 rgba(0, 0, 0, 0);
-  transition: height 0.42s cubic-bezier(0.16, 0.84, 0.44, 1), opacity 0.42s ease;
-  opacity: 0.42;
+.nvsp__mod.is-atual {
+  background: var(--painel-alto);
+  box-shadow: inset 0 0 0 1px var(--azul);
 }
 
-.posto__baia:hover .posto__luz,
-.posto__baia:focus-visible .posto__luz,
-.posto__baia.is-atual .posto__luz {
-  height: 62%;
+/* Luz da plataforma subindo do rodapé do módulo. Fica atrás do
+   conteúdo, então o texto nunca depende da cor da marca. */
+.nvsp__mod-luz {
+  position: absolute;
+  inset: auto 0 0 0;
+  height: 2px;
+  z-index: -1;
+  background: var(--marca);
+  opacity: 0.5;
+  transition: height 0.42s cubic-bezier(0.16, 0.84, 0.44, 1), opacity 0.42s ease;
+}
+
+.nvsp__mod:hover .nvsp__mod-luz,
+.nvsp__mod:focus-visible .nvsp__mod-luz,
+.nvsp__mod.is-atual .nvsp__mod-luz {
+  height: 58%;
   opacity: 1;
   background: linear-gradient(
     to top,
-    color-mix(in srgb, var(--marca) 46%, transparent) 0%,
-    color-mix(in srgb, var(--marca) 12%, transparent) 42%,
+    color-mix(in srgb, var(--marca) 34%, transparent) 0%,
+    color-mix(in srgb, var(--marca) 8%, transparent) 46%,
     transparent 100%
   );
 }
 
-.posto__baia.is-atual {
-  background: var(--aco-700);
+.nvsp__mod-topo {
+  display: flex;
+  align-items: center;
+  gap: 10px;
 }
 
-/* Número do posto: estêncil pintado na coluna */
-.posto__num {
-  position: absolute;
-  top: 16px;
-  left: 20px;
+.nvsp__mod-ref {
   font-family: 'IBM Plex Mono', ui-monospace, monospace;
-  font-size: 0.82rem;
-  font-weight: 600;
-  letter-spacing: 0.12em;
-  color: var(--aco-fraco);
-  opacity: 0.6;
+  font-size: 0.66rem;
+  font-weight: 500;
+  letter-spacing: 0.2em;
+  color: var(--fraco);
 }
 
-.posto__num::before {
-  content: 'POSTO ';
+/* cunha amarela: mesma marca gráfica do logotipo, aponta o módulo ativo */
+.nvsp__mod-cunha {
+  width: 13px;
+  height: 11px;
+  background: var(--amarelo);
+  clip-path: polygon(0 0, 100% 0, 50% 100%);
 }
 
-/* --- logo com sombra dura, luz de galpão vindo de cima --- */
-.posto__palco {
-  height: 128px;
+/* --- logo da plataforma -------------------------------------- */
+.nvsp__palco {
+  height: 116px;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: flex-end;
-  gap: 14px;
-  margin-top: 12px;
+  gap: 12px;
 }
 
-.posto__logo {
+.nvsp__logo {
   display: flex;
   align-items: center;
   justify-content: center;
-  animation: posto-flutuar 5s ease-in-out infinite;
-  animation-delay: calc(var(--baia-i) * 0.8s);
+  animation: nvsp-flutuar 5s ease-in-out infinite;
+  animation-delay: calc(var(--i) * 0.8s);
 }
 
-.posto__sombra {
-  width: 92px;
-  height: 7px;
+.nvsp__reflexo {
+  width: 84px;
+  height: 6px;
   border-radius: 50%;
-  background: rgba(0, 0, 0, 0.62);
+  background: rgba(0, 8, 24, 0.7);
   filter: blur(3px);
-  animation: posto-sombra 5s ease-in-out infinite;
-  animation-delay: calc(var(--baia-i) * 0.8s);
+  animation: nvsp-reflexo 5s ease-in-out infinite;
+  animation-delay: calc(var(--i) * 0.8s);
 }
 
-@keyframes posto-flutuar {
+@keyframes nvsp-flutuar {
   0%, 100% { transform: translateY(0); }
-  50%      { transform: translateY(-11px); }
+  50%      { transform: translateY(-10px); }
 }
 
-@keyframes posto-sombra {
-  0%, 100% { transform: scaleX(1);    opacity: 0.72; }
-  50%      { transform: scaleX(0.76); opacity: 0.34; }
+@keyframes nvsp-reflexo {
+  0%, 100% { transform: scaleX(1);    opacity: 0.7; }
+  50%      { transform: scaleX(0.76); opacity: 0.32; }
 }
 
-.posto__moeda-ml {
+.nvsp__moeda-ml {
   display: block;
   position: relative;
-  width: 138px;
-  height: 96px;
+  width: 128px;
+  height: 89px;
   overflow: hidden;
 }
 
-.posto__moeda-ml img {
+.nvsp__moeda-ml img {
   position: absolute;
   top: 0;
   left: 0;
-  height: 96px;
-  width: 379px;
+  height: 89px;
+  width: 351px;
   max-width: none;
 }
 
-.posto__marca-shopee {
-  width: 92px;
-  height: 92px;
+.nvsp__marca-shopee {
+  width: 84px;
+  height: 84px;
   display: block;
 }
 
-/* --- identificação --- */
-.posto__nome {
-  font-size: 1.9rem;
+/* --- identificação ------------------------------------------- */
+.nvsp__mod-nome {
+  font-size: 1.5rem;
   font-weight: 600;
   line-height: 1;
-  letter-spacing: 0.02em;
-  text-transform: uppercase;
+  letter-spacing: -0.005em;
 }
 
-.posto__status {
+.nvsp__mod-status {
   display: inline-flex;
   align-items: center;
   gap: 8px;
   font-family: 'IBM Plex Mono', ui-monospace, monospace;
   font-size: 0.7rem;
-  letter-spacing: 0.06em;
-  color: var(--aco-fraco);
+  letter-spacing: 0.05em;
+  color: var(--fraco);
 }
 
-.posto__led {
+.nvsp__led {
   width: 7px;
   height: 7px;
-  border-radius: 50%;
   background: var(--marca);
   box-shadow: 0 0 8px var(--marca);
-  animation: posto-led 2.6s ease-in-out infinite;
-  animation-delay: calc(var(--baia-i) * 0.5s);
+  clip-path: polygon(50% 0, 100% 50%, 50% 100%, 0 50%);
+  animation: nvsp-led 2.6s ease-in-out infinite;
+  animation-delay: calc(var(--i) * 0.5s);
 }
 
-@keyframes posto-led {
+@keyframes nvsp-led {
   0%, 100% { opacity: 1; }
-  50%      { opacity: 0.28; }
+  50%      { opacity: 0.26; }
 }
 
-.posto__lista {
+.nvsp__mod-lista {
   list-style: none;
-  margin: 4px 0 0;
-  padding: 0;
+  margin: 0;
+  padding: 12px 0 0;
+  border-top: 1px solid var(--linha);
   display: flex;
   flex-direction: column;
-  gap: 5px;
+  gap: 6px;
   font-family: 'IBM Plex Mono', ui-monospace, monospace;
   font-size: 0.72rem;
-  letter-spacing: 0.04em;
-  color: var(--aco-fraco);
+  color: var(--fraco);
 }
 
-.posto__lista li::before {
-  content: '· ';
-  color: var(--marca);
+.nvsp__mod-lista li::before {
+  content: '';
+  display: inline-block;
+  width: 5px;
+  height: 5px;
+  margin-right: 9px;
+  vertical-align: middle;
+  background: var(--azul);
+  clip-path: polygon(50% 0, 100% 50%, 50% 100%, 0 50%);
 }
 
-/* --- ação --- */
-.posto__acao {
+.nvsp__mod-acao {
   margin-top: auto;
-  padding-top: 22px;
+  padding-top: 16px;
   display: inline-flex;
   align-items: center;
   gap: 9px;
   font-family: 'IBM Plex Mono', ui-monospace, monospace;
-  font-size: 0.74rem;
+  font-size: 0.72rem;
   font-weight: 600;
-  letter-spacing: 0.16em;
+  letter-spacing: 0.18em;
   text-transform: uppercase;
-  color: var(--aco-texto);
-  transition: gap 0.26s ease, color 0.26s ease;
+  color: var(--texto);
+  transition: gap 0.26s ease;
 }
 
-.posto__baia:hover .posto__acao,
-.posto__baia:focus-visible .posto__acao {
-  gap: 15px;
+.nvsp__mod:hover .nvsp__mod-acao,
+.nvsp__mod:focus-visible .nvsp__mod-acao {
+  gap: 16px;
+  color: var(--azul-claro);
 }
 
-/* Faixa de demarcação de piso: marca o posto que já está assumido */
-.posto__faixa {
-  position: absolute;
-  inset: auto 0 0 0;
-  height: 7px;
-  background: repeating-linear-gradient(
-    -45deg,
-    var(--demarca) 0 9px,
-    #0b0e13 9px 18px
-  );
-}
-
-/* --- rodapé --- */
-.posto__rodape {
-  height: 62px;
+/* --- rodapé -------------------------------------------------- */
+.nvsp__rodape {
+  height: 70px;
   display: flex;
   align-items: center;
   justify-content: center;
 }
 
-.posto__rodape-nota,
-.posto__cancelar {
+.nvsp__rodape-nota,
+.nvsp__voltar {
   font-family: 'IBM Plex Mono', ui-monospace, monospace;
-  font-size: 0.72rem;
-  letter-spacing: 0.1em;
+  font-size: 0.7rem;
+  letter-spacing: 0.14em;
   text-transform: uppercase;
-  color: var(--aco-fraco);
+  color: var(--fraco);
 }
 
-.posto__cancelar {
-  border: 1px solid var(--aco-linha);
-  border-radius: 0;
+.nvsp__voltar {
+  border: 1px solid var(--linha);
   background: transparent;
-  padding: 9px 20px;
+  padding: 9px 22px;
   cursor: pointer;
+  clip-path: polygon(0 0, calc(100% - 9px) 0, 100% 9px, 100% 100%, 9px 100%, 0 calc(100% - 9px));
 }
 
-.posto__cancelar:hover {
-  color: var(--aco-texto);
-  border-color: var(--aco-fraco);
+.nvsp__voltar:hover {
+  color: var(--texto);
+  border-color: var(--azul);
 }
 
-@media (max-width: 860px) {
-  .posto__baias {
+@media (max-width: 900px) {
+  .nvsp__barramento {
+    display: none;
+  }
+  .nvsp__modulos {
     grid-template-columns: 1fr;
+    gap: 16px;
+    padding: 22px 18px 0;
   }
-  .posto__baia {
-    padding: 26px 22px 24px;
-  }
-  .posto__palco {
-    height: 104px;
+  .nvsp__palco {
+    height: 96px;
   }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .posto__baia,
-  .posto__logo,
-  .posto__sombra,
-  .posto__led {
+  .nvsp__mod,
+  .nvsp__logo,
+  .nvsp__reflexo,
+  .nvsp__led,
+  .nvsp__pulso {
     animation: none;
   }
-  .posto__luz,
-  .posto__acao {
+  .nvsp__mod-luz,
+  .nvsp__mod-acao {
     transition: none;
   }
 }
 
 /* ============================================================
-   TEMA POR PLATAFORMA — a lateral se veste do posto assumido
+   TEMA POR PLATAFORMA — a lateral se veste do módulo aberto
    ============================================================ */
 
 /* --- Mercado Livre: amarelo com texto navy (contraste AA) --- */
@@ -467,7 +571,7 @@
   background: rgba(6, 52, 107, 0.16);
 }
 
-/* Trocar de posto, ancorado logo abaixo da marca na lateral */
+/* Trocar de módulo, ancorado logo abaixo da marca na lateral */
 .nvs-sidebar__trocar {
   margin-top: 10px;
   width: 100%;

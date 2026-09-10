@@ -15,31 +15,31 @@ interface PlataformaSelecaoProps {
 }
 
 /* Moeda oficial do Mercado Livre, recortada do logo horizontal da CDN da marca.
-   O wordmark fica de fora porque o nome já aparece no posto, em português. */
+   O wordmark fica de fora porque o nome já aparece no módulo, em português. */
 function LogoMercadoLivre() {
   return (
-    <span className="posto__moeda-ml">
+    <span className="nvsp__moeda-ml">
       <img src="/assets/marcas/mercado-livre.png" alt="" />
     </span>
   )
 }
 
 function LogoShopee() {
-  return <img className="posto__marca-shopee" src="/assets/marcas/shopee.svg" alt="" />
+  return <img className="nvsp__marca-shopee" src="/assets/marcas/shopee.svg" alt="" />
 }
 
 function LogoOperacao() {
   return (
-    <svg viewBox="0 0 160 140" width="104" height="91" aria-hidden="true">
+    <svg viewBox="0 0 160 140" width="96" height="84" aria-hidden="true">
       <defs>
         <linearGradient id="op-cx" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stopColor="#5cb0ff" />
-          <stop offset="100%" stopColor="#0552b5" />
+          <stop offset="0%" stopColor="#5ba4ff" />
+          <stop offset="100%" stopColor="#0a3fa8" />
         </linearGradient>
       </defs>
       <path d="M80 22 128 46v48L80 118 32 94V46z" fill="url(#op-cx)" />
       <path d="M80 22 128 46 80 70 32 46z" fill="#7cc2ff" />
-      <path d="M80 70v48L32 94V46z" fill="#000" opacity="0.16" />
+      <path d="M80 70v48L32 94V46z" fill="#00102e" opacity="0.24" />
       <circle cx="80" cy="82" r="17" fill="none" stroke="#fff" strokeWidth="6" opacity="0.92" />
       <circle cx="80" cy="82" r="5" fill="#fff" />
       <g stroke="#fff" strokeWidth="6" strokeLinecap="round" opacity="0.92">
@@ -49,30 +49,102 @@ function LogoOperacao() {
   )
 }
 
-const POSTOS: Array<{
+/* Marca NVS TECH redesenhada em tipo: o V em azul elétrico com a cunha
+   amarela por cima, e o TECH espacejado, como no logotipo. */
+function MarcaNVS() {
+  return (
+    <span className="nvsp__marca">
+      <span className="nvsp__marca-nvs">
+        N
+        <span className="nvsp__marca-v">
+          V<span className="nvsp__marca-cunha" aria-hidden="true" />
+        </span>
+        S
+      </span>
+      <span className="nvsp__marca-tech">Tech</span>
+    </span>
+  )
+}
+
+/* Barramento: as trilhas saem da marca e descem até cada módulo, com as
+   dobras em 45 graus e os nós vazados do logotipo. Cada ramo tem uma
+   camada viva que acende quando o módulo é apontado ou está assumido. */
+function Barramento() {
+  const ramos: Array<{ id: Platform; d: string; nos: Array<[number, number]> }> = [
+    {
+      id: 'ml',
+      d: 'M600 0 V26 L574 52 H226 L200 78 V120',
+      nos: [
+        [226, 52],
+        [200, 96],
+      ],
+    },
+    {
+      id: 'shopee',
+      d: 'M600 0 V120',
+      nos: [[600, 96]],
+    },
+    {
+      id: 'operacao',
+      d: 'M600 0 V26 L626 52 H974 L1000 78 V120',
+      nos: [
+        [974, 52],
+        [1000, 96],
+      ],
+    },
+  ]
+
+  return (
+    <svg
+      className="nvsp__barramento"
+      viewBox="0 0 1200 120"
+      preserveAspectRatio="none"
+      aria-hidden="true"
+    >
+      {ramos.map((r) => (
+        <g key={r.id} className={`nvsp__ramo nvsp__ramo--${r.id}`}>
+          <path className="nvsp__trilha" d={r.d} vectorEffect="non-scaling-stroke" />
+          <path className="nvsp__pulso" d={r.d} vectorEffect="non-scaling-stroke" />
+          {r.nos.map(([cx, cy]) => (
+            <circle
+              key={`${cx}-${cy}`}
+              className="nvsp__no"
+              cx={cx}
+              cy={cy}
+              r="5"
+              vectorEffect="non-scaling-stroke"
+            />
+          ))}
+        </g>
+      ))}
+    </svg>
+  )
+}
+
+const MODULOS: Array<{
   id: Platform
-  numero: string
+  ref: string
   nome: string
   linhas: string[]
   logo: () => JSX.Element
 }> = [
   {
     id: 'ml',
-    numero: '01',
+    ref: 'MOD-01',
     nome: 'Mercado Livre',
     linhas: ['Anúncios', 'Inbound FULL', 'Devoluções'],
     logo: LogoMercadoLivre,
   },
   {
     id: 'shopee',
-    numero: '02',
+    ref: 'MOD-02',
     nome: 'Shopee',
     linhas: ['Catálogo', 'Pedidos', 'Repasses'],
     logo: LogoShopee,
   },
   {
     id: 'operacao',
-    numero: '03',
+    ref: 'MOD-03',
     nome: 'Operação',
     linhas: ['Lista de compra', 'Embalagens', 'Radar de envio'],
     logo: LogoOperacao,
@@ -96,88 +168,81 @@ export function PlataformaSelecao({
   resumo,
 }: PlataformaSelecaoProps) {
   const agora = useRelogio()
-  const carimbo = agora
-    .toLocaleString('pt-BR', {
-      day: '2-digit',
-      month: 'short',
-      hour: '2-digit',
-      minute: '2-digit',
-    })
-    .replace('.', '')
-    .toUpperCase()
+  const hora = agora.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
 
   return (
-    <div className="posto">
-      <header className="posto__barra">
-        <span className="posto__barra-marca">NVS TECH</span>
-        <span className="posto__barra-sep" />
-        <span className="posto__barra-titulo">Controle de operação</span>
-        <span className="posto__barra-dir">
-          {operadorNome && <span className="posto__barra-op">{operadorNome}</span>}
-          <span className="posto__barra-hora">{carimbo}</span>
+    <div className={`nvsp${atual ? ` nvsp--atual-${atual}` : ''}`}>
+      <header className="nvsp__topo">
+        <MarcaNVS />
+        <span className="nvsp__topo-dir">
+          {operadorNome && <span className="nvsp__topo-op">{operadorNome}</span>}
+          <span className="nvsp__topo-hora">{hora}</span>
         </span>
       </header>
 
-      <div className="posto__intro">
-        <h1 className="posto__h1">Assuma um posto</h1>
-        <p className="posto__sub">O painel abre só com as ferramentas dele.</p>
+      <div className="nvsp__chamada">
+        <p className="nvsp__eyebrow">Central de operação</p>
+        <h1 className="nvsp__h1">Escolha o módulo</h1>
       </div>
 
-      <div className="posto__baias">
-        {POSTOS.map((p, i) => {
-          const Logo = p.logo
-          const eAtual = atual === p.id
+      <Barramento />
+
+      <div className="nvsp__modulos">
+        {MODULOS.map((m, i) => {
+          const Logo = m.logo
+          const eAtual = atual === m.id
           return (
             <button
-              key={p.id}
-              className={`posto__baia posto__baia--${p.id}${eAtual ? ' is-atual' : ''}`}
-              style={{ ['--baia-i' as string]: String(i) }}
-              onClick={() => onEscolher(p.id)}
+              key={m.id}
+              className={`nvsp__mod nvsp__mod--${m.id}${eAtual ? ' is-atual' : ''}`}
+              style={{ ['--i' as string]: String(i) }}
+              onClick={() => onEscolher(m.id)}
             >
-              <span className="posto__luz" aria-hidden="true" />
+              <span className="nvsp__mod-luz" aria-hidden="true" />
 
-              <span className="posto__num">{p.numero}</span>
+              <span className="nvsp__mod-topo">
+                <span className="nvsp__mod-ref">{m.ref}</span>
+                {eAtual && <span className="nvsp__mod-cunha" aria-hidden="true" />}
+              </span>
 
-              <span className="posto__palco">
-                <span className="posto__logo">
+              <span className="nvsp__palco">
+                <span className="nvsp__logo">
                   <Logo />
                 </span>
-                <span className="posto__sombra" aria-hidden="true" />
+                <span className="nvsp__reflexo" aria-hidden="true" />
               </span>
 
-              <span className="posto__nome">{p.nome}</span>
+              <span className="nvsp__mod-nome">{m.nome}</span>
 
-              <span className="posto__status">
-                <span className="posto__led" aria-hidden="true" />
-                {resumo?.[p.id] ?? '—'}
+              <span className="nvsp__mod-status">
+                <span className="nvsp__led" aria-hidden="true" />
+                {resumo?.[m.id] ?? '—'}
               </span>
 
-              <ul className="posto__lista">
-                {p.linhas.map((l) => (
+              <ul className="nvsp__mod-lista">
+                {m.linhas.map((l) => (
                   <li key={l}>{l}</li>
                 ))}
               </ul>
 
-              <span className="posto__acao">
-                {eAtual ? 'Continuar' : 'Assumir'}
-                <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round">
+              <span className="nvsp__mod-acao">
+                {eAtual ? 'Continuar' : 'Abrir'}
+                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2.8" strokeLinecap="round" strokeLinejoin="round">
                   <path d="M4 12h15M13 6l6 6-6 6" />
                 </svg>
               </span>
-
-              {eAtual && <span className="posto__faixa" aria-hidden="true" />}
             </button>
           )
         })}
       </div>
 
-      <footer className="posto__rodape">
+      <footer className="nvsp__rodape">
         {onVoltar && atual ? (
-          <button className="posto__cancelar" onClick={onVoltar}>
+          <button className="nvsp__voltar" onClick={onVoltar}>
             Voltar ao painel
           </button>
         ) : (
-          <span className="posto__rodape-nota">Dá para trocar de posto a qualquer momento.</span>
+          <span className="nvsp__rodape-nota">Dá para trocar de módulo a qualquer momento.</span>
         )}
       </footer>
     </div>
