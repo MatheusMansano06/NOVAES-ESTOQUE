@@ -18,6 +18,7 @@ import json
 import os
 import threading
 import time
+import urllib.error
 import urllib.parse
 import urllib.request
 from typing import Any, Dict, Optional
@@ -140,6 +141,7 @@ class ShopeeAPI:
             os.getenv("SHOPEE_HOST") or "https://openplatform.shopee.com.br"
         ).rstrip("/")
         self._token_lock = threading.Lock()
+        self._ultimo_erro_refresh = ""
 
     # ---------------------------------------------------------------- infra
 
@@ -181,11 +183,29 @@ class ShopeeAPI:
         req = urllib.request.Request(
             url,
             data=json.dumps(corpo).encode("utf-8"),
-            headers={"Content-Type": "application/json"},
+            headers={
+                "Content-Type": "application/json",
+                # Sem User-Agent explícito o urllib se anuncia como Python-urllib,
+                # que parte da borda da Shopee rejeita com 403 antes da API.
+                "User-Agent": "NVS-Estoque/1.0",
+            },
             method="POST",
         )
-        with urllib.request.urlopen(req, timeout=20) as resp:
-            return json.loads(resp.read().decode("utf-8"))
+        try:
+            with urllib.request.urlopen(req, timeout=20) as resp:
+                return json.loads(resp.read().decode("utf-8"))
+        except urllib.error.HTTPError as e:
+            # A Shopee costuma explicar o motivo no corpo mesmo em 4xx —
+            # engolir isso deixa a falha impossível de diagnosticar.
+            bruto = ""
+            try:
+                bruto = e.read().decode("utf-8", errors="replace")[:500]
+            except Exception:
+                pass
+            try:
+                return json.loads(bruto)
+            except (json.JSONDecodeError, ValueError):
+                return {"error": f"http_{e.code}", "message": bruto or str(e)}
 
     # ----------------------------------------------------------- autorização
 
@@ -238,11 +258,16 @@ class ShopeeAPI:
                 {"partner_id": self.partner_id, "timestamp": ts, "sign": self._sign_publico(path, ts)},
             )
         except Exception as e:
-            print(f"[SHOPEE] Falha na renovação: {e}")
+            print(f"[SHOPEE] Falha na renovação: {type(e).__name__}: {e}")
             return None
 
         if resposta.get("error") or not resposta.get("access_token"):
-            print(f"[SHOPEE] Renovação recusada: {resposta.get('error')} {resposta.get('message')}")
+            print(f"[SHOPEE] Renovação recusada: {resposta.get('error')} | {resposta.get('message')}")
+            # Guarda o motivo para o status conseguir explicar a falha sem
+            # obrigar a caçar log de produção.
+            self._ultimo_erro_refresh = (
+                f"{resposta.get('error')}: {resposta.get('message')}"
+            )
             return None
 
         self._gravar_token({
@@ -398,11 +423,14 @@ class ShopeeAPI:
 
         dados = self._ler_token()
         autorizado = bool(dados.get("access_token") and dados.get("shop_id"))
+        expira = int(dados.get("expires_at") or 0)
         return {
             "autorizado": autorizado,
             "configurado": True,
             "shop_id": dados.get("shop_id"),
             "expira_em": dados.get("expires_at"),
+            "expirado": autorizado and expira and int(time.time()) >= expira,
+            "erro_refresh": self._ultimo_erro_refresh or None,
             "url_autorizacao": self.url_autorizacao(),
         }
 
