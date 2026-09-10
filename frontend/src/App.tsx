@@ -13,7 +13,8 @@ import { ListaCompra } from './components/ListaCompra'
 import { RadarFull } from './components/RadarFull'
 import { EstoqueEmbalagens } from './components/EstoqueEmbalagens'
 import { Devolucoes } from './components/Devolucoes'
-import { PlatformTabs, type Platform } from './components/MarketplaceSwitch'
+import { PlataformaSelecao, type Platform } from './components/PlataformaSelecao'
+import './platform-theme.css'
 import { AppShell, type ShellNavGroup, type ShellStatusItem } from './components/AppShell'
 import {
   baixarMultiplosOuPdfs,
@@ -221,6 +222,10 @@ function App() {
     const saved = localStorage.getItem('platform-tab')
     return (saved === 'ml' || saved === 'shopee' || saved === 'operacao') ? (saved as Platform) : 'ml'
   })
+  // Porta de entrada: sem posto salvo, a primeira tela é a escolha da plataforma.
+  const [escolhendoPlataforma, setEscolhendoPlataforma] = useState(
+    () => !localStorage.getItem('platform-tab'),
+  )
   const [notaSelecionada, setNotaSelecionada] = useState<NotaFiscal | null>(null)
   const [produtosNota, setProdutosNota] = useState<ItemNota[]>([])
   const [operadoresDisponiveis, setOperadoresDisponiveis] = useState<OperadorOption[]>([])
@@ -1737,6 +1742,8 @@ function App() {
   const handlePlatformChange = (p: Platform) => {
     setPlatform(p)
     localStorage.setItem('platform-tab', p)
+    setEscolhendoPlataforma(false)
+    setPagina('inicial')
   }
 
   const renderComShell = (title: string, subtitle: string, conteudo: ReactNode) => (
@@ -1749,6 +1756,8 @@ function App() {
       profileSubtitle={operadorSessao?.role === 'master' ? 'Master conectado' : 'Operador conectado'}
       onProfileClick={operadorSessao ? trocarOperador : undefined}
       syncTimeLabel={fmtHora(ultimaSincronizacao)}
+      platform={platform}
+      onTrocarPlataforma={() => setEscolhendoPlataforma(true)}
     >
       {conteudo}
     </AppShell>
@@ -2156,19 +2165,44 @@ function App() {
     )
   }
 
+  if (escolhendoPlataforma) {
+    return (
+      <PlataformaSelecao
+        onEscolher={handlePlatformChange}
+        operadorNome={operadorSessao?.operadorNome}
+        atual={localStorage.getItem('platform-tab') ? platform : null}
+        onVoltar={() => setEscolhendoPlataforma(false)}
+        resumo={{
+          ml: mlStatus?.autorizado ? 'Conta conectada' : 'Conta desconectada',
+          shopee: 'Integração em preparo',
+          operacao: `${notas.length} notas no fluxo`,
+        }}
+      />
+    )
+  }
+
   if (pagina === 'inicial') {
     return renderComShell(
-      'Dashboard Operacional',
-      'Visao geral da sua operacao em tempo real.',
+      platform === 'ml' ? 'Dashboard Mercado Livre'
+        : platform === 'shopee' ? 'Dashboard Shopee'
+        : 'Dashboard Operacional',
+      platform === 'ml' ? 'Anúncios, inbound FULL e conferência do ML.'
+        : platform === 'shopee' ? 'Catálogo e pedidos Shopee. Integração em preparo.'
+        : 'Compras, embalagens e radar de envio.',
       <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
-          <PlatformTabs active={platform} onChange={handlePlatformChange} />
           <section className="nvs-kpi-grid" style={{ marginBottom: '1.5rem' }}>
             {[
               { tag: 'FN', cor: 'blue', titulo: 'Fornecedores', valor: estoque.length > 0 ? new Set(estoque.flatMap(e => e.notas_fiscais.map(n => n.fornecedor))).size : 0, helper: 'Fornecedores cadastrados', ir: 'fornecedores' as Pagina },
               { tag: 'IT', cor: 'green', titulo: 'Itens sincronizados', valor: itensSincronizados, helper: `${todosItens.length} itens no fluxo`, ir: 'anuncios' as Pagina },
               { tag: 'IN', cor: 'yellow', titulo: 'Inbounds ativos', valor: inboundsAtivos.length, helper: inboundsAtivos.length > 0 ? `${progressoBaixasInbound.restante} un pendente` : 'Sem inbound em aberto', ir: 'full-operacoes' as Pagina },
               { tag: 'DG', cor: 'red', titulo: 'Itens divergentes', valor: divergencias.length, helper: divergencias.length > 0 ? 'Exigem ação imediata' : 'Nenhuma divergência', ir: 'full-operacoes' as Pagina },
-            ].map((item) => (
+              { tag: 'NF', cor: 'blue', titulo: 'Notas no fluxo', valor: notas.length, helper: 'Notas fiscais recebidas', ir: 'notas-fiscais' as Pagina },
+            ]
+              // Fora do posto do ML, esconde os indicadores que abrem telas do ML.
+              .filter((item) => platform === 'ml'
+                ? item.tag !== 'NF'
+                : item.ir !== 'anuncios' && item.ir !== 'full-operacoes')
+              .map((item) => (
               <div className="nvs-kpi-card" key={item.titulo} role="button" tabIndex={0} title={`Abrir ${item.titulo}`}
                 onClick={() => setPagina(item.ir)}
                 onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setPagina(item.ir) } }}
@@ -2269,8 +2303,25 @@ function App() {
             )}
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-              {/* Card da conta do Mercado Livre */}
-              <ContaMLCard />
+              {/* Card da conta do Mercado Livre — só no posto do ML */}
+              {platform === 'ml' && <ContaMLCard />}
+
+              {platform === 'shopee' && (
+                <div className="card" style={{ border: '2px solid #ffccc0' }}>
+                  <div className="card-body" style={{ padding: '1.25rem' }}>
+                    <div style={{ color: '#ee4d2d', fontWeight: 800, fontSize: '0.74rem', letterSpacing: '0.04em', textTransform: 'uppercase', marginBottom: '0.6rem' }}>
+                      Minha conta Shopee
+                    </div>
+                    <div style={{ fontWeight: 700, color: '#061a35', marginBottom: '0.35rem' }}>
+                      Loja ainda não conectada
+                    </div>
+                    <p style={{ fontSize: '0.88rem', color: '#5b6b7f', lineHeight: 1.5 }}>
+                      O webhook já responde à Shopee. Falta autorizar a loja para
+                      trazer pedidos, estoque e repasses para cá.
+                    </p>
+                  </div>
+                </div>
+              )}
 
               {/* Notas sem estar 100% — compacto */}
               <div className="card" style={{ border: '2px solid #ffd54f', boxShadow: '0 10px 24px rgba(255, 152, 0, 0.08)' }}>
@@ -2290,6 +2341,7 @@ function App() {
           </section>
 
           {/* CARROSSEL: anúncios pausados SEM estoque no Mercado Livre */}
+          {platform === 'ml' && (
           <section className="card" style={{ marginBottom: '1.5rem' }}>
             <div className="card-body" style={{ padding: '1.25rem' }}>
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1rem', flexWrap: 'wrap', gap: '0.5rem' }}>
@@ -2345,6 +2397,7 @@ function App() {
               )}
             </div>
           </section>
+          )}
 
       </div>
     )

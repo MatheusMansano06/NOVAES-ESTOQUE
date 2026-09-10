@@ -1,0 +1,360 @@
+/* ============================================================
+   ESCOLHA DE POSTO — porta de entrada do painel.
+   As logos flutuam e a sombra encolhe junto: dá peso físico
+   em vez de um translateY solto.
+   ============================================================ */
+
+.nvs-posto {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 48px;
+  padding: 56px 24px;
+  background:
+    radial-gradient(circle at 12% 18%, rgba(255, 196, 0, 0.1), transparent 42%),
+    radial-gradient(circle at 88% 26%, rgba(238, 77, 45, 0.1), transparent 40%),
+    linear-gradient(165deg, #061a35 0%, #0a2b55 62%, #0e3f74 100%);
+}
+
+.nvs-posto__topo {
+  text-align: center;
+  max-width: 620px;
+}
+
+.nvs-posto__eyebrow {
+  font-size: 0.74rem;
+  font-weight: 800;
+  letter-spacing: 0.28em;
+  text-transform: uppercase;
+  color: var(--nvs-yellow);
+  margin-bottom: 14px;
+}
+
+.nvs-posto__titulo {
+  font-size: clamp(1.9rem, 4vw, 2.9rem);
+  font-weight: 800;
+  color: #fff;
+  line-height: 1.12;
+  letter-spacing: -0.02em;
+}
+
+.nvs-posto__sub {
+  margin-top: 12px;
+  font-size: 1.02rem;
+  color: rgba(255, 255, 255, 0.66);
+}
+
+.nvs-posto__cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(258px, 1fr));
+  gap: 26px;
+  width: 100%;
+  max-width: 1000px;
+}
+
+.nvs-posto__card {
+  position: relative;
+  border: 0;
+  border-radius: 26px;
+  padding: 30px 24px 24px;
+  cursor: pointer;
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 18px;
+  box-shadow: 0 22px 44px rgba(0, 0, 0, 0.32);
+  transition: transform 0.28s ease, box-shadow 0.28s ease;
+  font-family: inherit;
+  overflow: hidden;
+}
+
+.nvs-posto__card::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: 26px;
+  border: 3px solid transparent;
+  transition: border-color 0.28s ease;
+  pointer-events: none;
+}
+
+.nvs-posto__card:hover,
+.nvs-posto__card:focus-visible {
+  transform: translateY(-10px);
+  box-shadow: 0 34px 60px rgba(0, 0, 0, 0.4);
+  outline: none;
+}
+
+.nvs-posto__card:hover::after,
+.nvs-posto__card:focus-visible::after,
+.nvs-posto__card.is-atual::after {
+  border-color: var(--card-cor);
+}
+
+.nvs-posto__palco {
+  height: 156px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.nvs-posto__logo {
+  animation: nvs-flutuar 4.4s ease-in-out infinite;
+  animation-delay: var(--card-delay);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 122px;
+}
+
+/* Recorte da moeda: o PNG da marca tem 268x68 e a moeda ocupa os
+   primeiros ~100px. Escalando 1.55x, a moeda fica em 155x105. */
+.nvs-posto__moeda-ml {
+  display: block;
+  position: relative;
+  width: 152px;
+  height: 105px;
+  overflow: hidden;
+}
+
+.nvs-posto__moeda-ml img {
+  position: absolute;
+  top: 0;
+  left: 0;
+  height: 105px;
+  width: 415px;
+  max-width: none;
+}
+
+.nvs-posto__marca-shopee {
+  width: 106px;
+  height: 106px;
+  display: block;
+}
+
+.nvs-posto__sombra {
+  width: 116px;
+  height: 16px;
+  border-radius: 50%;
+  background: radial-gradient(ellipse at center, rgba(18, 10, 0, 0.55) 0%, rgba(18, 10, 0, 0.3) 48%, transparent 72%);
+  filter: blur(3px);
+  animation: nvs-sombra 4.4s ease-in-out infinite;
+  animation-delay: var(--card-delay);
+}
+
+@keyframes nvs-flutuar {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-16px);
+  }
+}
+
+@keyframes nvs-sombra {
+  0%,
+  100% {
+    transform: scaleX(1);
+    opacity: 0.85;
+  }
+  50% {
+    transform: scaleX(0.78);
+    opacity: 0.42;
+  }
+}
+
+.nvs-posto__info {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.nvs-posto__nome {
+  font-size: 1.22rem;
+  font-weight: 800;
+  color: var(--nvs-navy);
+  letter-spacing: -0.01em;
+}
+
+.nvs-posto__papel {
+  font-size: 0.9rem;
+  color: var(--nvs-slate);
+}
+
+.nvs-posto__resumo {
+  margin-top: 6px;
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: var(--nvs-slate);
+  opacity: 0.78;
+}
+
+.nvs-posto__entrar {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.9rem;
+  font-weight: 800;
+  color: var(--nvs-navy);
+  padding: 10px 18px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.78);
+  transition: gap 0.24s ease;
+}
+
+.nvs-posto__card:hover .nvs-posto__entrar {
+  gap: 14px;
+}
+
+.nvs-posto__cancelar {
+  border: 0;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.62);
+  font-size: 0.92rem;
+  font-weight: 700;
+  cursor: pointer;
+  padding: 10px 18px;
+  border-radius: 999px;
+  font-family: inherit;
+}
+
+.nvs-posto__cancelar:hover {
+  color: #fff;
+  background: rgba(255, 255, 255, 0.1);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .nvs-posto__logo,
+  .nvs-posto__sombra {
+    animation: none;
+  }
+  .nvs-posto__card {
+    transition: none;
+  }
+}
+
+/* ============================================================
+   TEMA POR PLATAFORMA — a lateral se veste do posto escolhido
+   ============================================================ */
+
+/* --- Mercado Livre: amarelo com texto navy (contraste AA) --- */
+.nvs-shell[data-platform='ml'] .nvs-sidebar {
+  background: linear-gradient(180deg, #ffe600 0%, #ffcf00 100%);
+  color: var(--nvs-navy);
+}
+
+.nvs-shell[data-platform='ml'] .nvs-sidebar__brand-card {
+  border-color: rgba(6, 26, 53, 0.28);
+  box-shadow: 0 14px 26px rgba(120, 90, 0, 0.24);
+}
+
+.nvs-shell[data-platform='ml'] .nvs-sidebar__group-label {
+  color: rgba(6, 26, 53, 0.55);
+}
+
+.nvs-shell[data-platform='ml'] .nvs-sidebar__item {
+  color: rgba(6, 26, 53, 0.86);
+}
+
+.nvs-shell[data-platform='ml'] .nvs-sidebar__item:hover {
+  background: rgba(6, 26, 53, 0.08);
+}
+
+.nvs-shell[data-platform='ml'] .nvs-sidebar__item.is-active {
+  background: linear-gradient(135deg, #06264d, #0a3a72);
+  color: #ffe600;
+  box-shadow: 0 14px 24px rgba(90, 68, 0, 0.32);
+}
+
+.nvs-shell[data-platform='ml'] .nvs-sidebar__item-badge {
+  background: rgba(6, 26, 53, 0.14);
+}
+
+.nvs-shell[data-platform='ml'] .nvs-sidebar__item.is-active .nvs-sidebar__item-badge {
+  background: rgba(255, 230, 0, 0.24);
+}
+
+/* --- Shopee: laranja, texto branco --- */
+.nvs-shell[data-platform='shopee'] .nvs-sidebar {
+  background: linear-gradient(180deg, #ee4d2d 0%, #c93b1f 100%);
+}
+
+.nvs-shell[data-platform='shopee'] .nvs-sidebar__brand-card {
+  border-color: rgba(255, 255, 255, 0.7);
+}
+
+.nvs-shell[data-platform='shopee'] .nvs-sidebar__item:hover {
+  background: rgba(255, 255, 255, 0.14);
+}
+
+.nvs-shell[data-platform='shopee'] .nvs-sidebar__item.is-active {
+  background: linear-gradient(135deg, #ffffff, #ffe9e3);
+  color: #c93b1f;
+  box-shadow: 0 14px 24px rgba(120, 30, 10, 0.34);
+}
+
+.nvs-shell[data-platform='shopee'] .nvs-sidebar__item.is-active .nvs-sidebar__item-badge {
+  background: rgba(201, 59, 31, 0.16);
+}
+
+/* --- Operação: azul NVS --- */
+.nvs-shell[data-platform='operacao'] .nvs-sidebar {
+  background: linear-gradient(180deg, #06346b 0%, #0878ff 100%);
+}
+
+.nvs-shell[data-platform='operacao'] .nvs-sidebar__brand-card {
+  border-color: rgba(255, 255, 255, 0.62);
+}
+
+.nvs-shell[data-platform='operacao'] .nvs-sidebar__item.is-active {
+  background: linear-gradient(135deg, #ffffff, #dff0ff);
+  color: #06346b;
+  box-shadow: 0 14px 24px rgba(4, 40, 90, 0.34);
+}
+
+.nvs-shell[data-platform='operacao'] .nvs-sidebar__item.is-active .nvs-sidebar__item-badge {
+  background: rgba(6, 52, 107, 0.16);
+}
+
+/* Trocar de posto, ancorado logo abaixo da marca na lateral */
+.nvs-sidebar__trocar {
+  margin-top: 10px;
+  width: 100%;
+  border: 0;
+  border-radius: 14px;
+  padding: 9px 12px;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 0.76rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  background: rgba(255, 255, 255, 0.16);
+  color: inherit;
+}
+
+.nvs-shell[data-platform='ml'] .nvs-sidebar__trocar {
+  background: rgba(6, 26, 53, 0.12);
+}
+
+.nvs-sidebar__trocar:hover {
+  background: rgba(255, 255, 255, 0.28);
+}
+
+.nvs-shell[data-platform='ml'] .nvs-sidebar__trocar:hover {
+  background: rgba(6, 26, 53, 0.2);
+}
+
+.nvs-shell.is-collapsed .nvs-sidebar__trocar span {
+  display: none;
+}

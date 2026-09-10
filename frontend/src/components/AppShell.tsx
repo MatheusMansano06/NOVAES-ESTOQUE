@@ -51,6 +51,8 @@ interface AppShellProps {
     label: string
     onClick: () => void
   }
+  platform?: 'ml' | 'shopee' | 'operacao'
+  onTrocarPlataforma?: () => void
   children: ReactNode
 }
 
@@ -202,17 +204,31 @@ export function AppShell({
   onProfileClick,
   syncTimeLabel,
   primaryAction,
+  platform,
+  onTrocarPlataforma,
   children,
 }: AppShellProps) {
   const [collapsed, setCollapsed] = useState(false)
 
   return (
-    <div className={`nvs-shell${collapsed ? ' is-collapsed' : ''}`}>
+    <div className={`nvs-shell${collapsed ? ' is-collapsed' : ''}`} data-platform={platform}>
       <aside className="nvs-sidebar">
         <div className="nvs-sidebar__brand">
           <div className="nvs-sidebar__brand-card">
             <img src="/assets/nvs-tech-full.jpeg" alt="NVS Tech" />
           </div>
+          {onTrocarPlataforma && (
+            <button
+              className="nvs-sidebar__trocar"
+              onClick={onTrocarPlataforma}
+              title="Trocar de plataforma"
+            >
+              <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M4 8h13l-3-3M20 16H7l3 3" />
+              </svg>
+              <span>Trocar</span>
+            </button>
+          )}
         </div>
 
         <div className="nvs-sidebar__groups">
