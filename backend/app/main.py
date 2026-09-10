@@ -40,6 +40,7 @@ from app.utils.embalagens import (
 )
 from app.integracoes_olist import olist
 from app.integracoes_ml import ml
+from app.integracoes_shopee import shopee
 from app.jobs import iniciar_scheduler
 from app.handlers_devolucoes import (
     buscar_devolucao as dev_buscar_devolucao,
@@ -5421,6 +5422,43 @@ async def ml_notificacoes(request: Request):
     return JSONResponse({"ok": True}, status_code=200)
 
 
+async def shopee_status(request: Request):
+    """GET /api/shopee/status — mesmo formato de /api/ml|olist/status."""
+    return JSONResponse(shopee.status())
+
+
+async def shopee_conectar(request: Request):
+    """GET /api/shopee/conectar — manda o lojista autorizar a loja."""
+    if not shopee.configurado:
+        return HTMLResponse(
+            "<h2>Configure SHOPEE_PARTNER_ID/SHOPEE_PARTNER_KEY no .env</h2>",
+            status_code=400,
+        )
+    return RedirectResponse(shopee.url_autorizacao())
+
+
+async def shopee_callback(request: Request):
+    """GET /api/shopee/callback — recebe code + shop_id e troca por token."""
+    code = request.query_params.get("code")
+    shop_id = request.query_params.get("shop_id")
+    if not code or not shop_id:
+        return HTMLResponse(
+            "<h2>Retorno sem code/shop_id — refaça a autorização</h2>", status_code=400
+        )
+
+    resposta = shopee.trocar_code(code, shop_id)
+    if resposta.get("error"):
+        return HTMLResponse(
+            f"<h2 style='color:#d32f2f'>Falha ao conectar: {resposta.get('message') or resposta.get('error')}</h2>",
+            status_code=502,
+        )
+
+    return HTMLResponse("""<html><body style="font-family:sans-serif;text-align:center;padding:50px">
+        <h1 style="color:#2e7d32">✓ Shopee conectada!</h1>
+        <a href="/" style="display:inline-block;margin-top:20px;padding:12px 30px;background:#1976d2;color:#fff;text-decoration:none;border-radius:6px">Voltar</a>
+        </body></html>""")
+
+
 async def shopee_webhook(request: Request):
     """
     POST /api/shopee/webhook — callback de push notification da Shopee Open
@@ -5825,7 +5863,10 @@ routes = [
     Route("/api/devolucoes/{item_id:int}/ml-review", dev_ml_review, methods=["POST"]),
     Route("/api/devolucoes/{item_id:int}/ml-resolucao", dev_ml_resolucao, methods=["POST"]),
 
-    # Webhook Shopee (push notification)
+    # Shopee (OAuth + push notification)
+    Route("/api/shopee/status", shopee_status, methods=["GET"]),
+    Route("/api/shopee/conectar", shopee_conectar, methods=["GET"]),
+    Route("/api/shopee/callback", shopee_callback, methods=["GET"]),
     Route("/api/shopee/webhook", shopee_webhook, methods=["GET", "POST"]),
 ]
 
