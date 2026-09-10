@@ -1756,7 +1756,6 @@ function App() {
       profileSubtitle={operadorSessao?.role === 'master' ? 'Master conectado' : 'Operador conectado'}
       onProfileClick={operadorSessao ? trocarOperador : undefined}
       syncTimeLabel={fmtHora(ultimaSincronizacao)}
-      platform={platform}
       onTrocarPlataforma={() => setEscolhendoPlataforma(true)}
     >
       {conteudo}
@@ -2169,14 +2168,17 @@ function App() {
     return (
       <PlataformaSelecao
         onEscolher={handlePlatformChange}
-        operadorNome={operadorSessao?.operadorNome}
         atual={localStorage.getItem('platform-tab') ? platform : null}
         onVoltar={() => setEscolhendoPlataforma(false)}
-        resumo={{
-          ml: mlStatus?.autorizado ? 'Conta conectada' : 'Conta desconectada',
-          shopee: 'Integração em preparo',
-          operacao: `${notas.length} notas no fluxo`,
-        }}
+        mlConectado={Boolean(mlStatus?.autorizado)}
+        inboundsAtivos={inboundsAtivos.length}
+        notas={notas.length}
+        divergencias={divergencias.length}
+        recentes={notas.slice(0, 3).map((n) => ({
+          id: n.id,
+          titulo: `NF ${n.numero_nf}${n.fornecedor ? ` · ${n.fornecedor}` : ''}`,
+          quando: n.data_upload ? `${fmtData(n.data_upload)} às ${fmtHora(n.data_upload)}` : null,
+        }))}
       />
     )
   }

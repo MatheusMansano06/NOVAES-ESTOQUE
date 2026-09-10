@@ -1,577 +1,449 @@
 /* ============================================================
-   ESCOLHA DE MÓDULO — porta de entrada do painel.
-
-   Direção tirada do próprio logotipo da NVS Tech: trilhas de
-   circuito com nós vazados, dobras em 45 graus, geometria
-   chanfrada, navy profundo com azul elétrico e a cunha amarela
-   como único acento. A marca vira a estrutura da tela.
+   CENTRAL DE OPERAÇÕES — porta de entrada do painel.
+   Claro e direto: o número que importa na frente, um cartão por
+   plataforma, azul NVS só no que é ação.
    ============================================================ */
 
-.nvsp {
-  --fundo: #04102a;
-  --painel: #071a3c;
-  --painel-alto: #0a2350;
-  --linha: #12356f;
-  --azul: #1a6dff;
-  --azul-claro: #6aa9ff;
-  --amarelo: #ffc400;
-  --texto: #e7efff;
-  --fraco: #7e97c4;
+.cop {
+  --fundo: #f4f7fb;
+  --papel: #ffffff;
+  --borda: #e4eaf3;
+  --navy: #061a35;
+  --texto: #35455c;
+  --fraco: #7a8ba1;
+  --azul: #0878ff;
+  --verde: #12a150;
 
   min-height: 100vh;
-  display: grid;
-  grid-template-rows: auto auto auto 1fr auto;
-  background-color: var(--fundo);
-  background-image:
-    radial-gradient(circle at 50% -10%, rgba(26, 109, 255, 0.16), transparent 52%),
-    linear-gradient(rgba(26, 109, 255, 0.045) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(26, 109, 255, 0.045) 1px, transparent 1px);
-  background-size: auto, 52px 52px, 52px 52px;
+  background: var(--fundo);
+  padding: 44px 24px 56px;
   color: var(--texto);
-  font-family: 'Chakra Petch', system-ui, sans-serif;
 }
 
-/* --- marca --------------------------------------------------- */
-.nvsp__topo {
-  display: flex;
-  align-items: center;
-  padding: 18px 26px;
-}
-
-.nvsp__marca {
+.cop__wrap {
+  max-width: 1120px;
+  margin: 0 auto;
   display: flex;
   flex-direction: column;
-  align-items: flex-start;
-  line-height: 1;
+  gap: 26px;
 }
 
-.nvsp__marca-nvs {
-  font-size: 1.66rem;
-  font-weight: 700;
-  letter-spacing: -0.02em;
-  color: var(--texto);
-}
-
-.nvsp__marca-v {
-  position: relative;
-  color: var(--azul);
-}
-
-/* a cunha amarela encaixada no vão do V, como no logotipo */
-.nvsp__marca-cunha {
-  position: absolute;
-  top: 0.12em;
-  left: 50%;
-  transform: translateX(-50%);
-  width: 0.4em;
-  height: 0.34em;
-  background: var(--amarelo);
-  clip-path: polygon(0 0, 100% 0, 50% 100%);
-}
-
-.nvsp__marca-tech {
-  margin-top: 3px;
-  font-family: 'IBM Plex Mono', ui-monospace, monospace;
-  font-size: 0.6rem;
-  font-weight: 500;
-  letter-spacing: 0.62em;
-  text-transform: uppercase;
-  color: var(--azul);
-  text-indent: 0.62em;
-}
-
-.nvsp__topo-dir {
-  margin-left: auto;
+/* --- cabeçalho ----------------------------------------------- */
+.cop__topo {
   display: flex;
-  align-items: center;
-  gap: 16px;
-  font-family: 'IBM Plex Mono', ui-monospace, monospace;
-  font-size: 0.7rem;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 24px;
+}
+
+.cop__h1 {
+  font-size: clamp(1.9rem, 3.6vw, 2.5rem);
+  font-weight: 800;
+  letter-spacing: -0.025em;
+  color: var(--navy);
+  line-height: 1.1;
+}
+
+.cop__sub {
+  margin-top: 8px;
+  font-size: 1rem;
   color: var(--fraco);
 }
 
-.nvsp__topo-op {
-  color: var(--texto);
-}
-
-/* --- chamada ------------------------------------------------- */
-.nvsp__chamada {
-  text-align: center;
-  padding: 26px 22px 0;
-}
-
-.nvsp__eyebrow {
-  font-family: 'IBM Plex Mono', ui-monospace, monospace;
-  font-size: 0.66rem;
-  font-weight: 500;
-  letter-spacing: 0.42em;
-  text-transform: uppercase;
-  color: var(--azul);
-  text-indent: 0.42em;
-}
-
-.nvsp__h1 {
-  margin-top: 12px;
-  font-size: clamp(2.1rem, 5vw, 3.3rem);
+.cop__lema {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 3px;
+  font-size: 0.62rem;
   font-weight: 700;
-  line-height: 1;
-  letter-spacing: -0.015em;
-  color: var(--texto);
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--fraco);
+  padding-top: 4px;
 }
 
-/* --- barramento de trilhas ----------------------------------- */
-.nvsp__barramento {
-  width: 100%;
-  height: 92px;
-  display: block;
-  margin-top: 18px;
+.cop__lema i {
+  margin-top: 7px;
+  width: 34px;
+  height: 3px;
+  background: var(--azul);
 }
 
-.nvsp__trilha {
-  fill: none;
-  stroke: var(--linha);
-  stroke-width: 2;
-}
-
-.nvsp__no {
-  fill: var(--fundo);
-  stroke: var(--linha);
-  stroke-width: 2;
-}
-
-.nvsp__pulso {
-  fill: none;
-  stroke: var(--azul);
-  stroke-width: 2.4;
-  stroke-linecap: round;
-  stroke-dasharray: 108 566;
-  stroke-dashoffset: 674;
-  opacity: 0;
-  filter: drop-shadow(0 0 7px var(--azul)) drop-shadow(0 0 14px rgba(26, 109, 255, 0.5));
-}
-
-@keyframes nvsp-pulso {
-  from { stroke-dashoffset: 674; }
-  to   { stroke-dashoffset: 0; }
-}
-
-/* O ramo acende quando o módulo é apontado, e fica batendo devagar
-   no módulo já assumido. */
-.nvsp:has(.nvsp__mod--ml:hover) .nvsp__ramo--ml .nvsp__pulso,
-.nvsp:has(.nvsp__mod--shopee:hover) .nvsp__ramo--shopee .nvsp__pulso,
-.nvsp:has(.nvsp__mod--operacao:hover) .nvsp__ramo--operacao .nvsp__pulso {
-  opacity: 1;
-  animation: nvsp-pulso 1.15s linear infinite;
-}
-
-.nvsp--atual-ml .nvsp__ramo--ml .nvsp__pulso,
-.nvsp--atual-shopee .nvsp__ramo--shopee .nvsp__pulso,
-.nvsp--atual-operacao .nvsp__ramo--operacao .nvsp__pulso {
-  opacity: 1;
-  animation: nvsp-pulso 2.9s linear infinite;
-}
-
-.nvsp--atual-ml .nvsp__ramo--ml .nvsp__trilha,
-.nvsp--atual-shopee .nvsp__ramo--shopee .nvsp__trilha,
-.nvsp--atual-operacao .nvsp__ramo--operacao .nvsp__trilha {
-  stroke: #1c4a95;
-}
-
-.nvsp--atual-ml .nvsp__ramo--ml .nvsp__no,
-.nvsp--atual-shopee .nvsp__ramo--shopee .nvsp__no,
-.nvsp--atual-operacao .nvsp__ramo--operacao .nvsp__no {
-  stroke: var(--azul);
-}
-
-/* --- módulos ------------------------------------------------- */
-.nvsp__modulos {
+/* --- cartões -------------------------------------------------- */
+.cop__grid {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 22px;
-  padding: 0 26px;
-  align-content: start;
+  grid-template-columns: repeat(auto-fit, minmax(270px, 1fr));
+  gap: 20px;
 }
 
-.nvsp__mod {
-  --marca: var(--azul);
-  position: relative;
-  isolation: isolate;
-  border: 0;
-  padding: 22px 22px 20px;
-  cursor: pointer;
-  font-family: inherit;
-  color: inherit;
-  text-align: left;
+.cop__card {
+  background: var(--papel);
+  border: 1px solid var(--borda);
+  border-radius: 14px;
+  padding: 22px;
   display: flex;
   flex-direction: column;
   gap: 14px;
-  background: var(--painel);
-  box-shadow: inset 0 0 0 1px var(--linha);
-  /* chanfro de 45 graus, como os cortes das letras do logotipo */
-  clip-path: polygon(
-    0 0,
-    calc(100% - 22px) 0,
-    100% 22px,
-    100% 100%,
-    22px 100%,
-    0 calc(100% - 22px)
-  );
-  transition: background 0.3s ease, transform 0.3s cubic-bezier(0.16, 0.84, 0.44, 1);
-  animation: nvsp-entrar 0.5s cubic-bezier(0.16, 0.84, 0.44, 1) backwards;
-  animation-delay: calc(var(--i) * 90ms);
+  box-shadow: 0 1px 2px rgba(6, 26, 53, 0.04);
+  transition: box-shadow 0.24s ease, transform 0.24s ease, border-color 0.24s ease;
 }
 
-.nvsp__mod--ml { --marca: #ffe600; }
-.nvsp__mod--shopee { --marca: #ee4d2d; }
-.nvsp__mod--operacao { --marca: #3f9bff; }
-
-@keyframes nvsp-entrar {
-  from { opacity: 0; transform: translateY(20px); }
-  to   { opacity: 1; transform: translateY(0); }
+.cop__card:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 14px 30px rgba(6, 26, 53, 0.09);
 }
 
-.nvsp__mod:hover,
-.nvsp__mod:focus-visible {
-  background: var(--painel-alto);
-  transform: translateY(-4px);
-  outline: none;
+.cop__card.is-atual {
+  border-color: var(--azul);
+  box-shadow: 0 0 0 3px rgba(8, 120, 255, 0.1);
 }
 
-.nvsp__mod.is-atual {
-  background: var(--painel-alto);
-  box-shadow: inset 0 0 0 1px var(--azul);
-}
-
-/* Luz da plataforma subindo do rodapé do módulo. Fica atrás do
-   conteúdo, então o texto nunca depende da cor da marca. */
-.nvsp__mod-luz {
-  position: absolute;
-  inset: auto 0 0 0;
-  height: 2px;
-  z-index: -1;
-  background: var(--marca);
-  opacity: 0.5;
-  transition: height 0.42s cubic-bezier(0.16, 0.84, 0.44, 1), opacity 0.42s ease;
-}
-
-.nvsp__mod:hover .nvsp__mod-luz,
-.nvsp__mod:focus-visible .nvsp__mod-luz,
-.nvsp__mod.is-atual .nvsp__mod-luz {
-  height: 58%;
-  opacity: 1;
-  background: linear-gradient(
-    to top,
-    color-mix(in srgb, var(--marca) 34%, transparent) 0%,
-    color-mix(in srgb, var(--marca) 8%, transparent) 46%,
-    transparent 100%
-  );
-}
-
-.nvsp__mod-topo {
+.cop__card-topo {
   display: flex;
-  align-items: center;
-  gap: 10px;
-}
-
-.nvsp__mod-ref {
-  font-family: 'IBM Plex Mono', ui-monospace, monospace;
-  font-size: 0.66rem;
-  font-weight: 500;
-  letter-spacing: 0.2em;
-  color: var(--fraco);
-}
-
-/* cunha amarela: mesma marca gráfica do logotipo, aponta o módulo ativo */
-.nvsp__mod-cunha {
-  width: 13px;
-  height: 11px;
-  background: var(--amarelo);
-  clip-path: polygon(0 0, 100% 0, 50% 100%);
-}
-
-/* --- logo da plataforma -------------------------------------- */
-.nvsp__palco {
-  height: 116px;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: flex-end;
+  align-items: flex-start;
+  justify-content: space-between;
   gap: 12px;
+  min-height: 62px;
 }
 
-.nvsp__logo {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  animation: nvsp-flutuar 5s ease-in-out infinite;
-  animation-delay: calc(var(--i) * 0.8s);
-}
-
-.nvsp__reflexo {
-  width: 84px;
-  height: 6px;
-  border-radius: 50%;
-  background: rgba(0, 8, 24, 0.7);
-  filter: blur(3px);
-  animation: nvsp-reflexo 5s ease-in-out infinite;
-  animation-delay: calc(var(--i) * 0.8s);
-}
-
-@keyframes nvsp-flutuar {
-  0%, 100% { transform: translateY(0); }
-  50%      { transform: translateY(-10px); }
-}
-
-@keyframes nvsp-reflexo {
-  0%, 100% { transform: scaleX(1);    opacity: 0.7; }
-  50%      { transform: scaleX(0.76); opacity: 0.32; }
-}
-
-.nvsp__moeda-ml {
+/* logos ------------------------------------------------------- */
+.cop__moeda-ml {
   display: block;
   position: relative;
-  width: 128px;
-  height: 89px;
+  width: 84px;
+  height: 58px;
   overflow: hidden;
+  flex-shrink: 0;
 }
 
-.nvsp__moeda-ml img {
+.cop__moeda-ml img {
   position: absolute;
   top: 0;
   left: 0;
-  height: 89px;
-  width: 351px;
+  height: 58px;
+  width: 229px;
   max-width: none;
 }
 
-.nvsp__marca-shopee {
-  width: 84px;
-  height: 84px;
+.cop__marca-shopee {
+  width: 56px;
+  height: 56px;
   display: block;
+  flex-shrink: 0;
 }
 
-/* --- identificação ------------------------------------------- */
-.nvsp__mod-nome {
-  font-size: 1.5rem;
-  font-weight: 600;
-  line-height: 1;
-  letter-spacing: -0.005em;
+.cop__marca-op {
+  width: 60px;
+  height: 53px;
+  display: block;
+  flex-shrink: 0;
 }
 
-.nvsp__mod-status {
+/* selo de estado ---------------------------------------------- */
+.cop__badge {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
-  font-family: 'IBM Plex Mono', ui-monospace, monospace;
-  font-size: 0.7rem;
-  letter-spacing: 0.05em;
-  color: var(--fraco);
+  gap: 7px;
+  padding: 5px 11px;
+  border-radius: 999px;
+  font-size: 0.74rem;
+  font-weight: 600;
+  white-space: nowrap;
+  background: #f1f5f9;
+  color: #64748b;
 }
 
-.nvsp__led {
-  width: 7px;
-  height: 7px;
-  background: var(--marca);
-  box-shadow: 0 0 8px var(--marca);
-  clip-path: polygon(50% 0, 100% 50%, 50% 100%, 0 50%);
-  animation: nvsp-led 2.6s ease-in-out infinite;
-  animation-delay: calc(var(--i) * 0.5s);
-}
-
-@keyframes nvsp-led {
-  0%, 100% { opacity: 1; }
-  50%      { opacity: 0.26; }
-}
-
-.nvsp__mod-lista {
-  list-style: none;
-  margin: 0;
-  padding: 12px 0 0;
-  border-top: 1px solid var(--linha);
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  font-family: 'IBM Plex Mono', ui-monospace, monospace;
-  font-size: 0.72rem;
-  color: var(--fraco);
-}
-
-.nvsp__mod-lista li::before {
+.cop__badge::before {
   content: '';
-  display: inline-block;
-  width: 5px;
-  height: 5px;
-  margin-right: 9px;
-  vertical-align: middle;
-  background: var(--azul);
-  clip-path: polygon(50% 0, 100% 50%, 50% 100%, 0 50%);
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
 }
 
-.nvsp__mod-acao {
+.cop__badge.is-ok {
+  background: #e8f7ee;
+  color: var(--verde);
+}
+
+.cop__badge.is-prep {
+  background: #fff4e6;
+  color: #b45309;
+}
+
+.cop__badge.is-off {
+  background: #fdeaea;
+  color: #c53434;
+}
+
+/* texto -------------------------------------------------------- */
+.cop__card-nome {
+  font-size: 1.34rem;
+  font-weight: 800;
+  letter-spacing: -0.015em;
+  color: var(--navy);
+  line-height: 1.15;
+}
+
+.cop__card-desc {
+  font-size: 0.92rem;
+  line-height: 1.5;
+  color: var(--fraco);
+}
+
+/* números ------------------------------------------------------ */
+.cop__metricas {
   margin-top: auto;
   padding-top: 16px;
+  border-top: 1px solid var(--borda);
+  display: grid;
+  grid-template-columns: 1fr 1px 1fr;
+  align-items: center;
+  gap: 14px;
+}
+
+.cop__metricas::before {
+  content: '';
+  grid-column: 2;
+  grid-row: 1;
+  width: 1px;
+  height: 34px;
+  background: var(--borda);
+}
+
+.cop__metrica {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.cop__metrica:first-child { grid-column: 1; }
+.cop__metrica:last-child { grid-column: 3; }
+
+.cop__metrica strong {
+  font-size: 1.7rem;
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  color: var(--navy);
+  line-height: 1;
+}
+
+.cop__metrica span {
+  font-size: 0.78rem;
+  color: var(--fraco);
+}
+
+/* estado sem dado: diz o que falta, em vez de mostrar zero ------ */
+.cop__aviso {
+  margin-top: auto;
+  padding-top: 16px;
+  border-top: 1px solid var(--borda);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.cop__aviso strong {
+  font-size: 0.9rem;
+  font-weight: 700;
+  color: var(--navy);
+}
+
+.cop__aviso span {
+  font-size: 0.8rem;
+  line-height: 1.45;
+  color: var(--fraco);
+}
+
+/* ferramentas do módulo de operação ---------------------------- */
+.cop__ferramentas {
+  margin-top: auto;
+  padding-top: 16px;
+  border-top: 1px solid var(--borda);
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+}
+
+.cop__ferramenta {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 7px;
+  text-align: center;
+  color: var(--azul);
+}
+
+.cop__ferramenta span {
+  font-size: 0.72rem;
+  line-height: 1.25;
+  color: var(--fraco);
+}
+
+/* ação --------------------------------------------------------- */
+.cop__btn {
+  margin-top: 4px;
+  width: 100%;
+  border: 1px solid var(--borda);
+  border-radius: 10px;
+  background: var(--papel);
+  color: var(--navy);
+  font-family: inherit;
+  font-size: 0.92rem;
+  font-weight: 700;
+  padding: 12px 16px;
+  cursor: pointer;
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   gap: 9px;
-  font-family: 'IBM Plex Mono', ui-monospace, monospace;
-  font-size: 0.72rem;
-  font-weight: 600;
-  letter-spacing: 0.18em;
-  text-transform: uppercase;
-  color: var(--texto);
-  transition: gap 0.26s ease;
+  transition: background 0.2s ease, border-color 0.2s ease, gap 0.2s ease;
 }
 
-.nvsp__mod:hover .nvsp__mod-acao,
-.nvsp__mod:focus-visible .nvsp__mod-acao {
-  gap: 16px;
-  color: var(--azul-claro);
+.cop__btn:hover {
+  background: #f7fafd;
+  border-color: #cfdcec;
+  gap: 13px;
 }
 
-/* --- rodapé -------------------------------------------------- */
-.nvsp__rodape {
-  height: 70px;
+.cop__btn--primario {
+  background: var(--azul);
+  border-color: var(--azul);
+  color: #fff;
+}
+
+.cop__btn--primario:hover {
+  background: #0668df;
+  border-color: #0668df;
+}
+
+.cop__btn:focus-visible {
+  outline: 2px solid var(--azul);
+  outline-offset: 2px;
+}
+
+/* --- atividade recente ---------------------------------------- */
+.cop__atividade {
+  background: var(--papel);
+  border: 1px solid var(--borda);
+  border-radius: 14px;
+  padding: 20px 22px;
+  box-shadow: 0 1px 2px rgba(6, 26, 53, 0.04);
+}
+
+.cop__atividade-topo {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 14px;
+}
+
+.cop__atividade-topo h3 {
+  font-size: 1rem;
+  font-weight: 800;
+  color: var(--navy);
+}
+
+.cop__atividade-topo p {
+  margin-top: 3px;
+  font-size: 0.84rem;
+  color: var(--fraco);
+}
+
+.cop__alerta {
+  padding: 5px 11px;
+  border-radius: 999px;
+  background: #fdeaea;
+  color: #c53434;
+  font-size: 0.76rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.cop__atividade-lista {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 1px;
+  background: var(--borda);
+  border-top: 1px solid var(--borda);
+}
+
+.cop__atividade-lista li {
+  background: var(--papel);
+  padding: 13px 16px 13px 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.cop__atividade-lista li + li {
+  padding-left: 16px;
+}
+
+.cop__atividade-titulo {
+  font-size: 0.88rem;
+  font-weight: 700;
+  color: var(--navy);
+}
+
+.cop__atividade-quando {
+  font-size: 0.8rem;
+  color: var(--fraco);
+}
+
+/* --- rodapé ---------------------------------------------------- */
+.cop__rodape {
+  display: flex;
   justify-content: center;
 }
 
-.nvsp__rodape-nota,
-.nvsp__voltar {
-  font-family: 'IBM Plex Mono', ui-monospace, monospace;
-  font-size: 0.7rem;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
+.cop__voltar {
+  border: 1px solid var(--borda);
+  border-radius: 10px;
+  background: var(--papel);
   color: var(--fraco);
-}
-
-.nvsp__voltar {
-  border: 1px solid var(--linha);
-  background: transparent;
-  padding: 9px 22px;
+  font-family: inherit;
+  font-size: 0.88rem;
+  font-weight: 600;
+  padding: 10px 20px;
   cursor: pointer;
-  clip-path: polygon(0 0, calc(100% - 9px) 0, 100% 9px, 100% 100%, 9px 100%, 0 calc(100% - 9px));
 }
 
-.nvsp__voltar:hover {
-  color: var(--texto);
-  border-color: var(--azul);
+.cop__voltar:hover {
+  color: var(--navy);
+  border-color: #cfdcec;
 }
 
-@media (max-width: 900px) {
-  .nvsp__barramento {
-    display: none;
+@media (max-width: 720px) {
+  .cop {
+    padding: 28px 16px 40px;
   }
-  .nvsp__modulos {
-    grid-template-columns: 1fr;
-    gap: 16px;
-    padding: 22px 18px 0;
+  .cop__topo {
+    flex-direction: column;
   }
-  .nvsp__palco {
-    height: 96px;
+  .cop__lema {
+    align-items: flex-start;
   }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .nvsp__mod,
-  .nvsp__logo,
-  .nvsp__reflexo,
-  .nvsp__led,
-  .nvsp__pulso {
-    animation: none;
-  }
-  .nvsp__mod-luz,
-  .nvsp__mod-acao {
+  .cop__card,
+  .cop__btn {
     transition: none;
   }
 }
 
 /* ============================================================
-   TEMA POR PLATAFORMA — a lateral se veste do módulo aberto
+   Botão de trocar de plataforma, na lateral do painel.
+   O painel em si mantém a cor do sistema: a plataforma escolhida
+   muda o que aparece no menu, não a identidade visual.
    ============================================================ */
 
-/* --- Mercado Livre: amarelo com texto navy (contraste AA) --- */
-.nvs-shell[data-platform='ml'] .nvs-sidebar {
-  background: linear-gradient(180deg, #ffe600 0%, #ffcf00 100%);
-  color: var(--nvs-navy);
-}
-
-.nvs-shell[data-platform='ml'] .nvs-sidebar__brand-card {
-  border-color: rgba(6, 26, 53, 0.28);
-  box-shadow: 0 14px 26px rgba(120, 90, 0, 0.24);
-}
-
-.nvs-shell[data-platform='ml'] .nvs-sidebar__group-label {
-  color: rgba(6, 26, 53, 0.55);
-}
-
-.nvs-shell[data-platform='ml'] .nvs-sidebar__item {
-  color: rgba(6, 26, 53, 0.86);
-}
-
-.nvs-shell[data-platform='ml'] .nvs-sidebar__item:hover {
-  background: rgba(6, 26, 53, 0.08);
-}
-
-.nvs-shell[data-platform='ml'] .nvs-sidebar__item.is-active {
-  background: linear-gradient(135deg, #06264d, #0a3a72);
-  color: #ffe600;
-  box-shadow: 0 14px 24px rgba(90, 68, 0, 0.32);
-}
-
-.nvs-shell[data-platform='ml'] .nvs-sidebar__item-badge {
-  background: rgba(6, 26, 53, 0.14);
-}
-
-.nvs-shell[data-platform='ml'] .nvs-sidebar__item.is-active .nvs-sidebar__item-badge {
-  background: rgba(255, 230, 0, 0.24);
-}
-
-/* --- Shopee: laranja, texto branco --- */
-.nvs-shell[data-platform='shopee'] .nvs-sidebar {
-  background: linear-gradient(180deg, #ee4d2d 0%, #c93b1f 100%);
-}
-
-.nvs-shell[data-platform='shopee'] .nvs-sidebar__brand-card {
-  border-color: rgba(255, 255, 255, 0.7);
-}
-
-.nvs-shell[data-platform='shopee'] .nvs-sidebar__item:hover {
-  background: rgba(255, 255, 255, 0.14);
-}
-
-.nvs-shell[data-platform='shopee'] .nvs-sidebar__item.is-active {
-  background: linear-gradient(135deg, #ffffff, #ffe9e3);
-  color: #c93b1f;
-  box-shadow: 0 14px 24px rgba(120, 30, 10, 0.34);
-}
-
-.nvs-shell[data-platform='shopee'] .nvs-sidebar__item.is-active .nvs-sidebar__item-badge {
-  background: rgba(201, 59, 31, 0.16);
-}
-
-/* --- Operação: azul NVS --- */
-.nvs-shell[data-platform='operacao'] .nvs-sidebar {
-  background: linear-gradient(180deg, #06346b 0%, #0878ff 100%);
-}
-
-.nvs-shell[data-platform='operacao'] .nvs-sidebar__brand-card {
-  border-color: rgba(255, 255, 255, 0.62);
-}
-
-.nvs-shell[data-platform='operacao'] .nvs-sidebar__item.is-active {
-  background: linear-gradient(135deg, #ffffff, #dff0ff);
-  color: #06346b;
-  box-shadow: 0 14px 24px rgba(4, 40, 90, 0.34);
-}
-
-.nvs-shell[data-platform='operacao'] .nvs-sidebar__item.is-active .nvs-sidebar__item-badge {
-  background: rgba(6, 52, 107, 0.16);
-}
-
-/* Trocar de módulo, ancorado logo abaixo da marca na lateral */
 .nvs-sidebar__trocar {
   margin-top: 10px;
   width: 100%;
@@ -592,16 +464,8 @@
   color: inherit;
 }
 
-.nvs-shell[data-platform='ml'] .nvs-sidebar__trocar {
-  background: rgba(6, 26, 53, 0.12);
-}
-
 .nvs-sidebar__trocar:hover {
   background: rgba(255, 255, 255, 0.28);
-}
-
-.nvs-shell[data-platform='ml'] .nvs-sidebar__trocar:hover {
-  background: rgba(6, 26, 53, 0.2);
 }
 
 .nvs-shell.is-collapsed .nvs-sidebar__trocar span {
