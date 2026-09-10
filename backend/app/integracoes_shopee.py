@@ -228,6 +228,37 @@ class ShopeeAPI:
             dados.setdefault("shop_id", self._ler_token().get("shop_id"))
         return dados
 
+    def diagnostico(self) -> Dict[str, Any]:
+        """Sonda os endpoints que interessam e devolve o formato cru de cada um.
+
+        Serve para descobrir o que esta loja realmente expõe antes de construir
+        em cima — e depois, para saber onde a integração quebrou.
+        """
+        agora = int(time.time())
+        sondas = [
+            ("produtos", "/api/v2/product/get_item_list",
+             {"offset": 0, "page_size": 5, "item_status": "NORMAL"}),
+            ("pedidos_15d", "/api/v2/order/get_order_list",
+             {"time_range_field": "create_time", "time_from": agora - 14 * 86400,
+              "time_to": agora, "page_size": 5}),
+            ("performance", "/api/v2/account_health/get_shop_performance", {}),
+            ("repasses", "/api/v2/payment/get_escrow_list",
+             {"release_time_from": agora - 14 * 86400, "release_time_to": agora,
+              "page_size": 5}),
+        ]
+
+        saida: Dict[str, Any] = {}
+        for nome, path, params in sondas:
+            resposta = self.chamar(path, params)
+            erro = resposta.get("error")
+            saida[nome] = {
+                "ok": not erro,
+                "erro": erro or None,
+                "mensagem": resposta.get("message") if erro else None,
+                "amostra": None if erro else resposta.get("response"),
+            }
+        return saida
+
     def status(self) -> Dict[str, Any]:
         """Campos em português, no mesmo formato de /api/ml|olist/status."""
         if not self.configurado:
