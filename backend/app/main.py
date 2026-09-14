@@ -620,11 +620,17 @@ async def get_nf(request: Request):
     finally:
         db.close()
 
+def _so_digitos(ncm: str) -> str:
+    return "".join(c for c in (ncm or "") if c.isdigit())
+
+
 async def conferencia_ncm(request: Request):
     """
     GET /api/notas-fiscais/conferencia-ncm
     Somente leitura. Para cada item de cada NF (com XML salvo), extrai o NCM
     declarado na nota e compara com o NCM cadastrado no produto vinculado na Olist.
+    A Olist devolve o NCM formatado com pontos (8714.10.00); a NF vem só com
+    dígitos (87141000) — comparamos por dígito, ignorando a formatação.
     """
     db = SessionLocal()
     try:
@@ -667,7 +673,7 @@ async def conferencia_ncm(request: Request):
                     "sem_xml": sem_xml,
                     "ncm_nf": ncm_nf,
                     "ncm_olist": ncm_olist,
-                    "bate": (bool(ncm_nf) and bool(ncm_olist) and ncm_nf == ncm_olist),
+                    "bate": (bool(ncm_nf) and bool(ncm_olist) and _so_digitos(ncm_nf) == _so_digitos(ncm_olist)),
                 })
 
         return JSONResponse({"total": len(resultado), "itens": resultado})
