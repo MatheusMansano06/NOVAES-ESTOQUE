@@ -620,6 +620,22 @@ async def get_nf(request: Request):
     finally:
         db.close()
 
+async def atualizar_ncm_olist(request: Request):
+    """POST /api/olist/atualizar-ncm  Body: {produto_id, ncm} — corrige o NCM cadastrado."""
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"sucesso": False, "erro": "JSON inválido"}, status_code=400)
+
+    produto_id = body.get("produto_id")
+    ncm = body.get("ncm")
+    if not produto_id or not ncm:
+        return JSONResponse({"sucesso": False, "erro": "Informe produto_id e ncm"}, status_code=400)
+
+    resultado = olist.atualizar_ncm_produto(str(produto_id), str(ncm))
+    return JSONResponse(resultado, status_code=200 if resultado.get("sucesso") else 502)
+
+
 def _so_digitos(ncm: str) -> str:
     return "".join(c for c in (ncm or "") if c.isdigit())
 
@@ -5895,6 +5911,7 @@ routes = [
     Route("/api/olist/sugestao-vinculo", olist_sugestao_vinculo, methods=["GET"]),
     Route("/api/olist/vinculos", olist_listar_vinculos, methods=["GET"]),
     Route("/api/olist/vinculos/deletar", olist_deletar_vinculo, methods=["POST"]),
+    Route("/api/olist/atualizar-ncm", atualizar_ncm_olist, methods=["POST"]),
     # Inbound / Lista de Separação para FU
     Route("/api/embaldes/upload", upload_embale, methods=["POST"]),
     Route("/api/embaldes", listar_embaldes, methods=["GET"]),
