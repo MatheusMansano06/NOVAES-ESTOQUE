@@ -148,6 +148,7 @@ class NFeParsing:
                         "descricao": prod.find('nfe:xProd', ns).text if prod.find('nfe:xProd', ns) is not None else "",
                         "quantidade": float(prod.find('nfe:qCom', ns).text) if prod.find('nfe:qCom', ns) is not None else 0.0,
                         "preco": float(prod.find('nfe:vUnCom', ns).text) if prod.find('nfe:vUnCom', ns) is not None else 0.0,
+                        "ncm": prod.find('nfe:NCM', ns).text if prod.find('nfe:NCM', ns) is not None else "",
                     }
                     itens.append(item)
 

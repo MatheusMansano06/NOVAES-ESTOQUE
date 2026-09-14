@@ -620,6 +620,61 @@ async def get_nf(request: Request):
     finally:
         db.close()
 
+async def conferencia_ncm(request: Request):
+    """
+    GET /api/notas-fiscais/conferencia-ncm
+    Somente leitura. Para cada item de cada NF (com XML salvo), extrai o NCM
+    declarado na nota e compara com o NCM cadastrado no produto vinculado na Olist.
+    """
+    db = SessionLocal()
+    try:
+        notas = db.query(NotaFiscal).order_by(NotaFiscal.data_upload.desc()).all()
+        cache_olist_ncm = {}
+        resultado = []
+
+        for nf in notas:
+            ncm_por_codigo = {}
+            sem_xml = not nf.xml_processado
+            if not sem_xml:
+                parsed = NFeParsing.parse_xml(nf.xml_processado.encode('utf-8', errors='ignore'))
+                if parsed.get("sucesso") is not False:
+                    for it in parsed.get("itens", []):
+                        ncm_por_codigo[it.get("codigo")] = it.get("ncm") or ""
+
+            for item in nf.itens:
+                ncm_nf = ncm_por_codigo.get(item.codigo_produto, "") if not sem_xml else ""
+
+                ncm_olist = ""
+                if item.olist_produto_id:
+                    if item.olist_produto_id in cache_olist_ncm:
+                        ncm_olist = cache_olist_ncm[item.olist_produto_id]
+                    else:
+                        detalhe = olist.obter_detalhes_completo(str(item.olist_produto_id)) or {}
+                        ncm_olist = detalhe.get("ncm") or ""
+                        cache_olist_ncm[item.olist_produto_id] = ncm_olist
+
+                resultado.append({
+                    "nf_id": nf.id,
+                    "numero_nf": nf.numero_nf,
+                    "fornecedor": nf.fornecedor,
+                    "data_upload": nf.data_upload.isoformat() if nf.data_upload else None,
+                    "item_id": item.id,
+                    "codigo_produto": item.codigo_produto,
+                    "descricao": item.descricao,
+                    "olist_produto_id": item.olist_produto_id,
+                    "olist_sku": item.olist_sku,
+                    "olist_nome": item.olist_nome,
+                    "sem_xml": sem_xml,
+                    "ncm_nf": ncm_nf,
+                    "ncm_olist": ncm_olist,
+                    "bate": (bool(ncm_nf) and bool(ncm_olist) and ncm_nf == ncm_olist),
+                })
+
+        return JSONResponse({"total": len(resultado), "itens": resultado})
+    finally:
+        db.close()
+
+
 async def get_estoque_virtual(request: Request):
     """Get consolidated virtual inventory - sum of all products"""
     from sqlalchemy.orm import joinedload
@@ -5799,6 +5854,7 @@ routes = [
     Route("/api/ml/notificacoes", ml_notificacoes_recentes, methods=["GET"]),
     Route("/api/upload-nfe", upload_nfe, methods=["POST"]),
     Route("/api/notas-fiscais", get_nfs, methods=["GET"]),
+    Route("/api/notas-fiscais/conferencia-ncm", conferencia_ncm, methods=["GET"]),
     Route("/api/notas-fiscais/{nf_id}", get_nf, methods=["GET"]),
     Route("/api/notas-fiscais/{nf_id}/baixar", baixar_nota_fiscal, methods=["GET"]),
     Route("/api/notas-fiscais/{nf_id}/pdf", gerar_pdf_nota_fiscal, methods=["GET"]),
