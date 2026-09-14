@@ -1021,6 +1021,59 @@ class OlistIntegration:
         self._ultimo_erro_estoque = "Olist recusou após retentativas (rate limit 429)."
         return False
 
+    def listar_ativos_com_estoque_zero(self) -> List[Dict]:
+        """
+        Produtos ativos (situacao=A) com estoque zerado — para a lista de compra.
+
+        A listagem em lote (/produtos?situacao=A) não traz a quantidade (só
+        localização), então após listar precisamos consultar /estoque/{id} um a
+        um — daí a varredura ser mais lenta que uma listagem simples (throttle
+        de 120/min da Olist).
+        """
+        token = self.get_access_token() or self.token_v2
+        if not token:
+            return []
+
+        produtos = []
+        offset = 0
+        page_size = 100
+        while True:
+            self._throttle()
+            url = f"{self.API_BASE}/produtos?situacao=A&limit={page_size}&offset={offset}"
+            headers = {"Accept": "application/json", "Authorization": f"Bearer {token}"}
+            try:
+                req = urllib.request.Request(url, headers=headers, method="GET")
+                with urllib.request.urlopen(req, timeout=15) as response:
+                    resposta = json.loads(response.read().decode("utf-8"))
+            except Exception as e:
+                print(f"[OLIST] Erro ao listar produtos ativos (offset {offset}): {e}")
+                break
+
+            itens = resposta.get("itens") or []
+            if not itens:
+                break
+            produtos.extend(itens)
+            offset += len(itens)
+            total = (resposta.get("paginacao") or {}).get("total")
+            if total is not None and offset >= total:
+                break
+
+        zerados = []
+        for prod in produtos:
+            produto_id = prod.get("id")
+            if not produto_id:
+                continue
+            est = self.obter_estoque(str(produto_id))
+            saldo = (est or {}).get("disponivel", (est or {}).get("saldo"))
+            if saldo == 0:
+                zerados.append({
+                    "produto_id": str(produto_id),
+                    "sku": prod.get("sku") or "",
+                    "nome": prod.get("descricao") or "",
+                    "estoque": 0,
+                })
+        return zerados
+
     def atualizar_ncm_produto(self, produto_id: str, novo_ncm: str, max_retries: int = 3) -> Dict:
         """
         Atualiza SOMENTE o NCM de um produto no cadastro da Olist.

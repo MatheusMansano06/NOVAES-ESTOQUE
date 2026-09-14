@@ -317,7 +317,9 @@ class ShopeeAPI:
             "sign": self._sign_loja(path, ts, token, shop_id),
             **(params or {}),
         }
-        url = f"{self.host}{path}?{urllib.parse.urlencode(query)}"
+        # doseq=True: parâmetro tipo lista (ex.: item_status) vira chave repetida
+        # (item_status=UNLIST&item_status=NORMAL), do jeito que a doc da Shopee pede.
+        url = f"{self.host}{path}?{urllib.parse.urlencode(query, doseq=True)}"
         try:
             req = urllib.request.Request(url, headers={"Accept": "application/json"})
             with urllib.request.urlopen(req, timeout=20) as resp:
@@ -450,6 +452,53 @@ class ShopeeAPI:
                 "amostra": None if erro else resposta.get("response"),
             }
         return saida
+
+    def listar_pausados_sem_estoque(self) -> list:
+        """
+        Itens pausados (UNLIST) e sem estoque disponível — para a lista de compra.
+
+        1) get_item_list pagina os item_id com status UNLIST.
+        2) get_item_base_info traz sku/nome/estoque em lotes de até 50 ids.
+        Filtra por total_available_stock == 0 (pausado por outro motivo, com
+        estoque ainda disponível, não entra na lista).
+        """
+        item_ids = []
+        offset = 0
+        while True:
+            resp = self.chamar("/api/v2/product/get_item_list", {
+                "offset": offset,
+                "page_size": 100,
+                "item_status": ["UNLIST"],
+            })
+            if resp.get("error"):
+                print(f"[SHOPEE] Erro ao listar itens UNLIST: {resp.get('error')} {resp.get('message')}")
+                break
+            corpo = resp.get("response") or {}
+            pagina = [it.get("item_id") for it in (corpo.get("item") or []) if it.get("item_id")]
+            item_ids.extend(pagina)
+            if not corpo.get("has_next_page") or not pagina:
+                break
+            offset = corpo.get("next_offset", offset + len(pagina))
+
+        parados = []
+        for i in range(0, len(item_ids), 50):
+            lote = item_ids[i:i + 50]
+            resp = self.chamar("/api/v2/product/get_item_base_info", {
+                "item_id_list": ",".join(str(x) for x in lote),
+            })
+            if resp.get("error"):
+                print(f"[SHOPEE] Erro ao buscar base_info do lote {lote}: {resp.get('error')} {resp.get('message')}")
+                continue
+            for item in (resp.get("response") or {}).get("item_list") or []:
+                estoque = ((item.get("stock_info_v2") or {}).get("summary_info") or {}).get("total_available_stock")
+                if estoque == 0:
+                    parados.append({
+                        "item_id": str(item.get("item_id")),
+                        "sku": item.get("item_sku") or "",
+                        "nome": item.get("item_name") or "",
+                        "estoque": 0,
+                    })
+        return parados
 
     def status(self) -> Dict[str, Any]:
         """Campos em português, no mesmo formato de /api/ml|olist/status."""

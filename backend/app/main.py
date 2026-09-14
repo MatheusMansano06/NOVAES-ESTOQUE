@@ -636,19 +636,65 @@ async def atualizar_ncm_olist(request: Request):
     return JSONResponse(resultado, status_code=200 if resultado.get("sucesso") else 502)
 
 
-async def debug_olist_listagem_raw(request: Request):
-    """DEBUG TEMPORARIO: GET /api/olist/listagem-raw?situacao=A&limit=3 — JSON bruto da listagem."""
-    token = olist.get_access_token() or olist.token_v2
-    if not token:
-        return JSONResponse({"erro": "sem token"}, status_code=400)
-    import urllib.request as _ur
-    situacao = request.query_params.get("situacao", "A")
-    limit = request.query_params.get("limit", "3")
-    url = f"{olist.API_BASE}/produtos?situacao={situacao}&limit={limit}&offset=0"
-    headers = {"Accept": "application/json", "Authorization": f"Bearer {token}"}
-    req = _ur.Request(url, headers=headers, method="GET")
-    with _ur.urlopen(req, timeout=15) as resp:
-        return JSONResponse(json.loads(resp.read().decode("utf-8")))
+async def lista_compra_parados(request: Request):
+    """
+    GET /api/lista-compra/parados
+    Junta, num só lugar, tudo que está parado por falta de estoque nos três
+    canais: anúncio pausado no ML, item pausado (UNLIST) na Shopee, e produto
+    ativo com estoque zerado na Olist. Agrupa por SKU quando o mesmo produto
+    aparece em mais de um canal.
+    """
+    db = SessionLocal()
+    try:
+        ml_parados = db.query(MercadoLivreItemCache).filter(
+            MercadoLivreItemCache.status == "paused",
+            MercadoLivreItemCache.estoque_disponivel == 0,
+        ).all()
+    finally:
+        db.close()
+
+    shopee_parados = shopee.listar_pausados_sem_estoque() if shopee.configurado else []
+    olist_parados = olist.listar_ativos_com_estoque_zero()
+
+    por_sku: Dict[str, Dict] = {}
+
+    def _chave(sku: str) -> str:
+        return (sku or "").strip().upper()
+
+    for item in ml_parados:
+        chave = _chave(item.sku)
+        if not chave:
+            continue
+        registro = por_sku.setdefault(chave, {"sku": item.sku, "nome": item.titulo, "canais": {}})
+        registro["canais"]["mercado_livre"] = {"item_id": item.item_id, "estoque": item.estoque_disponivel or 0}
+        registro["nome"] = registro["nome"] or item.titulo
+
+    for item in shopee_parados:
+        chave = _chave(item["sku"])
+        if not chave:
+            continue
+        registro = por_sku.setdefault(chave, {"sku": item["sku"], "nome": item["nome"], "canais": {}})
+        registro["canais"]["shopee"] = {"item_id": item["item_id"], "estoque": item["estoque"]}
+        registro["nome"] = registro["nome"] or item["nome"]
+
+    for item in olist_parados:
+        chave = _chave(item["sku"])
+        if not chave:
+            continue
+        registro = por_sku.setdefault(chave, {"sku": item["sku"], "nome": item["nome"], "canais": {}})
+        registro["canais"]["olist"] = {"produto_id": item["produto_id"], "estoque": item["estoque"]}
+        registro["nome"] = registro["nome"] or item["nome"]
+
+    lista = sorted(por_sku.values(), key=lambda r: (-len(r["canais"]), r["sku"]))
+    return JSONResponse({
+        "total": len(lista),
+        "por_canal": {
+            "mercado_livre": len(ml_parados),
+            "shopee": len(shopee_parados),
+            "olist": len(olist_parados),
+        },
+        "itens": lista,
+    })
 
 
 def _so_digitos(ncm: str) -> str:
@@ -5927,7 +5973,7 @@ routes = [
     Route("/api/olist/vinculos", olist_listar_vinculos, methods=["GET"]),
     Route("/api/olist/vinculos/deletar", olist_deletar_vinculo, methods=["POST"]),
     Route("/api/olist/atualizar-ncm", atualizar_ncm_olist, methods=["POST"]),
-    Route("/api/olist/listagem-raw", debug_olist_listagem_raw, methods=["GET"]),
+    Route("/api/lista-compra/parados", lista_compra_parados, methods=["GET"]),
     # Inbound / Lista de Separação para FU
     Route("/api/embaldes/upload", upload_embale, methods=["POST"]),
     Route("/api/embaldes", listar_embaldes, methods=["GET"]),
