@@ -620,6 +620,15 @@ async def get_nf(request: Request):
     finally:
         db.close()
 
+async def debug_olist_produto_raw(request: Request):
+    """DEBUG TEMPORARIO: GET /api/olist/produto-raw?id=... devolve o JSON bruto da Olist."""
+    produto_id = request.query_params.get("id")
+    if not produto_id:
+        return JSONResponse({"erro": "informe ?id="}, status_code=400)
+    detalhe = olist.obter_detalhes_completo(str(produto_id))
+    return JSONResponse({"produto_id": produto_id, "detalhe": detalhe})
+
+
 def _so_digitos(ncm: str) -> str:
     return "".join(c for c in (ncm or "") if c.isdigit())
 
@@ -5861,6 +5870,7 @@ routes = [
     Route("/api/upload-nfe", upload_nfe, methods=["POST"]),
     Route("/api/notas-fiscais", get_nfs, methods=["GET"]),
     Route("/api/notas-fiscais/conferencia-ncm", conferencia_ncm, methods=["GET"]),
+    Route("/api/olist/produto-raw", debug_olist_produto_raw, methods=["GET"]),
     Route("/api/notas-fiscais/{nf_id}", get_nf, methods=["GET"]),
     Route("/api/notas-fiscais/{nf_id}/baixar", baixar_nota_fiscal, methods=["GET"]),
     Route("/api/notas-fiscais/{nf_id}/pdf", gerar_pdf_nota_fiscal, methods=["GET"]),
