@@ -710,24 +710,43 @@ class OlistIntegration:
         print(f"[OLIST] Busca '{termo}': {len(resultado)} resultados (cache={len(todos)})")
         return resultado
 
-    def obter_detalhes_completo(self, produto_id: str) -> Optional[Dict]:
-        """Obtém os detalhes COMPLETOS de um produto incluindo composição de kit"""
+    def obter_detalhes_completo(self, produto_id: str, max_retries: int = 3) -> Optional[Dict]:
+        """Obtém os detalhes COMPLETOS de um produto incluindo composição de kit.
+        Aplica throttle e retentativa em 429, igual obter_estoque — sem isso, uma
+        varredura em lote (ex.: conferencia de NCM) apanha rate limit e devolve
+        None (interpretado como "produto sem dado") para uma fração dos itens.
+        """
         token = self.get_access_token()
         if not token:
             token = self.token_v2
             if not token:
                 return None
 
-        try:
-            url = f"{self.API_BASE}/produtos/{produto_id}"
-            headers = {"Accept": "application/json", "Authorization": f"Bearer {token}"}
-            req = urllib.request.Request(url, headers=headers, method="GET")
+        url = f"{self.API_BASE}/produtos/{produto_id}"
+        headers = {"Accept": "application/json", "Authorization": f"Bearer {token}"}
 
-            with urllib.request.urlopen(req, timeout=15) as response:
-                return json.loads(response.read().decode("utf-8"))
-        except Exception as e:
-            print(f"[OLIST] Erro ao obter detalhes de {produto_id}: {e}")
-            return None
+        for tentativa in range(max_retries):
+            self._throttle()
+            try:
+                req = urllib.request.Request(url, headers=headers, method="GET")
+                with urllib.request.urlopen(req, timeout=15) as response:
+                    return json.loads(response.read().decode("utf-8"))
+            except urllib.error.HTTPError as e:
+                if e.code == 429 and tentativa < max_retries - 1:
+                    reset = e.headers.get("x-ratelimit-reset") or e.headers.get("Retry-After")
+                    try:
+                        espera = float(reset)
+                    except (TypeError, ValueError):
+                        espera = 2.0 * (tentativa + 1)
+                    espera = min(espera, 15.0)
+                    print(f"[OLIST] 429 em detalhes de {produto_id}, aguardando {espera:.1f}s (tentativa {tentativa+1})")
+                    time.sleep(espera)
+                    continue
+                print(f"[OLIST] Erro HTTP {e.code} ao obter detalhes de {produto_id}")
+                return None
+            except Exception as e:
+                print(f"[OLIST] Erro ao obter detalhes de {produto_id}: {e}")
+                return None
 
     def detectar_e_buscar_kit(self, termo: str) -> Optional[Dict]:
         """
