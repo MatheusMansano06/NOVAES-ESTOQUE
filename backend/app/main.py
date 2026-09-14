@@ -636,6 +636,21 @@ async def atualizar_ncm_olist(request: Request):
     return JSONResponse(resultado, status_code=200 if resultado.get("sucesso") else 502)
 
 
+async def debug_olist_listagem_raw(request: Request):
+    """DEBUG TEMPORARIO: GET /api/olist/listagem-raw?situacao=A&limit=3 — JSON bruto da listagem."""
+    token = olist.get_access_token() or olist.token_v2
+    if not token:
+        return JSONResponse({"erro": "sem token"}, status_code=400)
+    import urllib.request as _ur
+    situacao = request.query_params.get("situacao", "A")
+    limit = request.query_params.get("limit", "3")
+    url = f"{olist.API_BASE}/produtos?situacao={situacao}&limit={limit}&offset=0"
+    headers = {"Accept": "application/json", "Authorization": f"Bearer {token}"}
+    req = _ur.Request(url, headers=headers, method="GET")
+    with _ur.urlopen(req, timeout=15) as resp:
+        return JSONResponse(json.loads(resp.read().decode("utf-8")))
+
+
 def _so_digitos(ncm: str) -> str:
     return "".join(c for c in (ncm or "") if c.isdigit())
 
@@ -5912,6 +5927,7 @@ routes = [
     Route("/api/olist/vinculos", olist_listar_vinculos, methods=["GET"]),
     Route("/api/olist/vinculos/deletar", olist_deletar_vinculo, methods=["POST"]),
     Route("/api/olist/atualizar-ncm", atualizar_ncm_olist, methods=["POST"]),
+    Route("/api/olist/listagem-raw", debug_olist_listagem_raw, methods=["GET"]),
     # Inbound / Lista de Separação para FU
     Route("/api/embaldes/upload", upload_embale, methods=["POST"]),
     Route("/api/embaldes", listar_embaldes, methods=["GET"]),
