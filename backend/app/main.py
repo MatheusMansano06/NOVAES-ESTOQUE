@@ -879,6 +879,7 @@ def _rodar_comparacao_fiscal_ml_olist() -> None:
             sem_dados_ml = fiscal_ml is None
             ml_ncm = (fiscal_ml or {}).get("ncm") or ""
             ml_ean = (fiscal_ml or {}).get("ean") or ""
+            ml_cest = (fiscal_ml or {}).get("cest") or ""
 
             diffs = []
             if not sem_dados_ml:
@@ -896,6 +897,7 @@ def _rodar_comparacao_fiscal_ml_olist() -> None:
                 "ml_ncm": ml_ncm,
                 "olist_gtin": olist_gtin,
                 "ml_ean": ml_ean,
+                "ml_cest": ml_cest,
                 "sem_dados_ml": sem_dados_ml,
                 "divergencias": diffs,
                 "status": "sem_dados_ml" if sem_dados_ml else ("divergente" if diffs else "correto"),

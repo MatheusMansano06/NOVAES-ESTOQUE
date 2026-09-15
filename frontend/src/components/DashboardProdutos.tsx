@@ -19,6 +19,7 @@ interface ItemFiscal {
   ml_ncm: string
   olist_gtin: string
   ml_ean: string
+  ml_cest: string
   sem_dados_ml: boolean
   divergencias: string[]
   status: 'correto' | 'divergente' | 'sem_dados_ml'
@@ -264,9 +265,18 @@ function SecaoFiscal() {
         const partes = [d.olist?.erro, d.ml?.erro].filter(Boolean)
         throw new Error(partes.join(' | ') || 'Falha ao corrigir')
       }
+      const cestNovo = d.ml?.cest_novo
       setItens((prev) => prev.map((p) => (
         p.item_id === item.item_id
-          ? { ...p, olist_ncm: ncmDesejado, ml_ncm: ncmDesejado, divergencias: p.divergencias.filter((x) => x !== 'ncm'), status: p.divergencias.filter((x) => x !== 'ncm').length ? 'divergente' : 'correto' }
+          ? {
+              ...p,
+              olist_ncm: ncmDesejado,
+              ml_ncm: ncmDesejado,
+              ml_cest: cestNovo != null ? cestNovo : p.ml_cest,
+              sem_dados_ml: false,
+              divergencias: p.divergencias.filter((x) => x !== 'ncm'),
+              status: p.divergencias.filter((x) => x !== 'ncm').length ? 'divergente' : 'correto',
+            }
           : p
       )))
       return null
@@ -276,7 +286,11 @@ function SecaoFiscal() {
   }
 
   const corrigirItem = async (item: ItemFiscal) => {
-    if (!window.confirm(`Corrigir NCM de "${item.nome}" (SKU ${item.sku}) para ${ncmDesejado}${cestDesejado.trim() ? ` (CEST ${cestDesejado.trim()} no ML)` : ''}, na Olist e no ML?`)) return
+    if (!ncmDesejado.trim() || !cestDesejado.trim()) {
+      alert('Preencha o NCM e o CEST desejados antes de corrigir — o CEST muda junto com o NCM, sempre.')
+      return
+    }
+    if (!window.confirm(`Corrigir NCM de "${item.nome}" (SKU ${item.sku}) para ${ncmDesejado} e CEST para ${cestDesejado.trim()} no ML, na Olist e no ML?`)) return
     setCorrigindoId(item.item_id)
     const erroItem = await executarCorrecao(item)
     setCorrigindoId(null)
@@ -302,7 +316,11 @@ function SecaoFiscal() {
   const corrigirSelecionadosEmMassa = async () => {
     const alvos = itens.filter((i) => selecionados.has(i.item_id))
     if (alvos.length === 0) return
-    if (!window.confirm(`Corrigir NCM de ${alvos.length} produto(s) selecionado(s) para ${ncmDesejado}${cestDesejado.trim() ? ` (CEST ${cestDesejado.trim()} no ML)` : ''}, na Olist e no ML?`)) return
+    if (!ncmDesejado.trim() || !cestDesejado.trim()) {
+      alert('Preencha o NCM e o CEST desejados antes de corrigir — o CEST muda junto com o NCM, sempre.')
+      return
+    }
+    if (!window.confirm(`Corrigir NCM de ${alvos.length} produto(s) selecionado(s) para ${ncmDesejado} e CEST para ${cestDesejado.trim()} no ML, na Olist e no ML?`)) return
 
     setEmMassa({ total: alvos.length, feito: 0 })
     const erros: string[] = []
@@ -367,18 +385,19 @@ function SecaoFiscal() {
                 <input value={ncmDesejado} onChange={(e) => setNcmDesejado(e.target.value)} style={{ padding: '0.45rem 0.6rem', borderRadius: '8px', border: '1px solid #cfd8dc' }} />
               </div>
               <div>
-                <label style={{ fontSize: '0.75rem', color: '#667085', display: 'block', marginBottom: '0.2rem' }}>CEST desejado (só ML, opcional)</label>
+                <label style={{ fontSize: '0.75rem', color: '#667085', display: 'block', marginBottom: '0.2rem' }}>CEST desejado (ML) — muda sempre junto com o NCM</label>
                 <input value={cestDesejado} onChange={(e) => setCestDesejado(e.target.value)} placeholder="ex.: 0100700" style={{ padding: '0.45rem 0.6rem', borderRadius: '8px', border: '1px solid #cfd8dc' }} />
               </div>
               {corrigiveis.length > 0 && (
                 <button
                   type="button"
                   onClick={corrigirSelecionadosEmMassa}
-                  disabled={selecionados.size === 0 || !!emMassa}
+                  disabled={selecionados.size === 0 || !ncmDesejado.trim() || !cestDesejado.trim() || !!emMassa}
+                  title={!cestDesejado.trim() ? 'Preencha o CEST desejado' : undefined}
                   style={{
                     marginLeft: 'auto', padding: '0.5rem 1rem', borderRadius: '8px', border: 'none',
-                    background: selecionados.size === 0 ? '#e0a0a0' : '#c62828', color: '#fff',
-                    fontWeight: 700, fontSize: '0.82rem', cursor: selecionados.size === 0 ? 'default' : 'pointer',
+                    background: (selecionados.size === 0 || !ncmDesejado.trim() || !cestDesejado.trim()) ? '#e0a0a0' : '#c62828', color: '#fff',
+                    fontWeight: 700, fontSize: '0.82rem', cursor: (selecionados.size === 0 || !ncmDesejado.trim() || !cestDesejado.trim()) ? 'default' : 'pointer',
                   }}
                 >
                   {emMassa ? `Corrigindo ${emMassa.feito}/${emMassa.total}...` : `Corrigir selecionados (${selecionados.size})`}
@@ -404,6 +423,7 @@ function SecaoFiscal() {
                       <th style={th}>NCM ML</th>
                       <th style={th}>GTIN Olist</th>
                       <th style={th}>EAN ML</th>
+                      <th style={th}>CEST ML</th>
                       <th style={th}>Status</th>
                       <th style={th}></th>
                     </tr>
@@ -438,6 +458,11 @@ function SecaoFiscal() {
                           {item.sem_dados_ml ? <em style={{ color: '#999' }}>sem dados</em> : (item.ml_ean || <em style={{ color: '#999' }}>vazio</em>)}
                         </td>
                         <td style={td}>
+                          {item.sem_dados_ml
+                            ? <em style={{ color: '#999' }}>sem dados</em>
+                            : (item.ml_cest || <em style={{ color: '#c62828', fontWeight: 700 }}>faltando</em>)}
+                        </td>
+                        <td style={td}>
                           {item.status === 'correto' && <span style={{ color: '#2e7d32', fontWeight: 700 }}>✅ Correto</span>}
                           {item.status === 'divergente' && <span style={{ color: '#c62828', fontWeight: 700 }}>⚠️ Divergente</span>}
                           {item.status === 'sem_dados_ml' && <span style={{ color: '#8d6e00', fontWeight: 700 }}>— Sem dados no ML</span>}
@@ -447,7 +472,8 @@ function SecaoFiscal() {
                             <button
                               type="button"
                               onClick={() => corrigirItem(item)}
-                              disabled={corrigindoId === item.item_id || !!emMassa}
+                              disabled={corrigindoId === item.item_id || !!emMassa || !ncmDesejado.trim() || !cestDesejado.trim()}
+                              title={!cestDesejado.trim() ? 'Preencha o CEST desejado acima' : undefined}
                               style={{ padding: '0.35rem 0.75rem', borderRadius: '8px', border: 'none', background: '#c62828', color: '#fff', fontWeight: 700, fontSize: '0.78rem', cursor: 'pointer' }}
                             >
                               {corrigindoId === item.item_id ? 'Corrigindo...' : 'Corrigir'}
