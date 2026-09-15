@@ -636,6 +636,21 @@ async def atualizar_ncm_olist(request: Request):
     return JSONResponse(resultado, status_code=200 if resultado.get("sucesso") else 502)
 
 
+async def debug_olist_detalhe_produto(request: Request):
+    """DEBUG TEMPORARIO: GET /api/olist/debug-detalhe?sku=RETROBMW — JSON bruto
+    do produto, pra achar o campo que marca as integracoes com marketplace
+    (icones de ML/Shopee/TikTok na tela de Produtos da Olist). Remover depois."""
+    sku = (request.query_params.get("sku") or "").strip()
+    if not sku:
+        return JSONResponse({"erro": "informe ?sku="}, status_code=400)
+    achados = olist.buscar_produtos(sku, limite_resultados=5)
+    if not achados:
+        return JSONResponse({"erro": f"produto '{sku}' nao encontrado"}, status_code=404)
+    produto_id = achados[0].get("id")
+    detalhe = olist.obter_detalhes_completo(str(produto_id))
+    return JSONResponse({"produto_id": produto_id, "detalhe": detalhe})
+
+
 _conferencia_ncm_lock = threading.Lock()
 _conferencia_ncm_estado: Dict = {
     "status": "idle",  # idle | rodando | pronto | erro
@@ -6086,6 +6101,7 @@ routes = [
     Route("/api/olist/vinculos", olist_listar_vinculos, methods=["GET"]),
     Route("/api/olist/vinculos/deletar", olist_deletar_vinculo, methods=["POST"]),
     Route("/api/olist/atualizar-ncm", atualizar_ncm_olist, methods=["POST"]),
+    Route("/api/olist/debug-detalhe", debug_olist_detalhe_produto, methods=["GET"]),
     Route("/api/olist/conferencia-ncm", conferencia_ncm_olist_status, methods=["GET"]),
     Route("/api/olist/conferencia-ncm/iniciar", conferencia_ncm_olist_iniciar, methods=["POST"]),
     Route("/api/lista-compra/parados", lista_compra_parados_status, methods=["GET"]),
