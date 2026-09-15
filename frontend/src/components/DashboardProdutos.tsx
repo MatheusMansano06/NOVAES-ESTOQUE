@@ -43,12 +43,52 @@ function chipStyle(ativo: boolean, cor = '#2d3277'): React.CSSProperties {
   }
 }
 
+function PieChart({ fatias, tamanho = 140 }: { fatias: Array<{ valor: number; cor: string }>; tamanho?: number }) {
+  const total = fatias.reduce((s, f) => s + f.valor, 0)
+  let acc = 0
+  const stops = fatias.map((f) => {
+    const inicio = total ? (acc / total) * 360 : 0
+    acc += f.valor
+    const fim = total ? (acc / total) * 360 : 0
+    return `${f.cor} ${inicio}deg ${fim}deg`
+  })
+  return (
+    <div
+      style={{
+        width: tamanho, height: tamanho, borderRadius: '50%', flexShrink: 0,
+        background: total > 0 ? `conic-gradient(${stops.join(', ')})` : '#eee',
+      }}
+    />
+  )
+}
+
+// Botão de legenda: bolinha da cor + rótulo, usado junto do gráfico de pizza.
+function LegendaBotao({ ativo, cor, onClick, children }: { ativo: boolean; cor: string; onClick: () => void; children: React.ReactNode }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      style={{
+        display: 'flex', alignItems: 'center', gap: '0.5rem', textAlign: 'left',
+        padding: '0.35rem 0.6rem', borderRadius: '8px', fontSize: '0.82rem', fontWeight: 700,
+        border: ativo ? `1px solid ${cor}` : '1px solid transparent',
+        background: ativo ? `${cor}18` : 'transparent',
+        color: '#333', cursor: 'pointer',
+      }}
+    >
+      <span style={{ width: 10, height: 10, borderRadius: '50%', background: cor, flexShrink: 0 }} />
+      {children}
+    </button>
+  )
+}
+
 // ===== Seção 1: Classificação Kit x Simples =====
 function SecaoTipos() {
   const [itens, setItens] = useState<ProdutoTipo[]>([])
   const [carregando, setCarregando] = useState(false)
   const [erro, setErro] = useState('')
   const [palavra, setPalavra] = useState('')
+  const [filtroTipo, setFiltroTipo] = useState<string | null>(null)
 
   const carregar = useCallback(async () => {
     setCarregando(true)
@@ -61,6 +101,7 @@ function SecaoTipos() {
         const d = await r.json()
         if (d.status === 'pronto') {
           setItens(d.resultado?.itens || [])
+          setFiltroTipo(null)
           break
         }
         if (d.status === 'erro') throw new Error(d.erro || 'Falha na varredura')
@@ -74,16 +115,20 @@ function SecaoTipos() {
 
   useEffect(() => { carregar() }, [carregar])
 
-  const filtrados = palavra.trim()
+  const filtradosPorPalavra = palavra.trim()
     ? itens.filter((i) => i.nome.toLowerCase().includes(palavra.trim().toLowerCase()))
     : itens
 
   const contagem = new Map<string, number>()
-  for (const item of filtrados) {
+  for (const item of filtradosPorPalavra) {
     contagem.set(item.tipo || '', (contagem.get(item.tipo || '') || 0) + 1)
   }
   const grupos = Array.from(contagem.entries()).sort((a, b) => b[1] - a[1])
-  const total = filtrados.length
+  const total = filtradosPorPalavra.length
+
+  const filtrados = filtroTipo === null
+    ? filtradosPorPalavra
+    : filtradosPorPalavra.filter((i) => (i.tipo || '') === filtroTipo)
 
   return (
     <div className="card" style={{ marginBottom: '1.5rem' }}>
@@ -93,7 +138,7 @@ function SecaoTipos() {
           <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
             <input
               value={palavra}
-              onChange={(e) => setPalavra(e.target.value)}
+              onChange={(e) => { setPalavra(e.target.value); setFiltroTipo(null) }}
               placeholder="Filtrar por palavra (ex.: KIT)"
               style={{ padding: '0.5rem 0.7rem', borderRadius: '8px', border: '1px solid #cfd8dc', minWidth: 220 }}
             />
@@ -118,26 +163,18 @@ function SecaoTipos() {
 
         {total > 0 && (
           <>
-            <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '0.5rem', flexWrap: 'wrap' }}>
-              <span style={{ fontSize: '0.82rem', color: '#667085', fontWeight: 700, alignSelf: 'center' }}>{total} produto(s):</span>
-              {grupos.map(([tipo, qtd]) => (
-                <span
-                  key={tipo}
-                  style={{
-                    padding: '0.35rem 0.8rem', borderRadius: '999px', fontSize: '0.8rem', fontWeight: 700,
-                    background: `${corTipo(tipo)}18`, color: corTipo(tipo),
-                  }}
-                >
-                  {labelTipo(tipo)}: {qtd} ({total ? Math.round((qtd * 1000) / total) / 10 : 0}%)
-                </span>
-              ))}
-            </div>
-
-            {/* barra de proporção visual */}
-            <div style={{ display: 'flex', height: 10, borderRadius: '999px', overflow: 'hidden', marginBottom: '1rem' }}>
-              {grupos.map(([tipo, qtd]) => (
-                <div key={tipo} style={{ width: `${(qtd * 100) / total}%`, background: corTipo(tipo) }} title={`${labelTipo(tipo)}: ${qtd}`} />
-              ))}
+            <div style={{ display: 'flex', gap: '1.5rem', alignItems: 'center', flexWrap: 'wrap', marginBottom: '1.25rem' }}>
+              <PieChart fatias={grupos.map(([tipo, qtd]) => ({ valor: qtd, cor: corTipo(tipo) }))} />
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+                <LegendaBotao ativo={filtroTipo === null} cor="#444" onClick={() => setFiltroTipo(null)}>
+                  Todos: {total} (100%)
+                </LegendaBotao>
+                {grupos.map(([tipo, qtd]) => (
+                  <LegendaBotao key={tipo} ativo={filtroTipo === tipo} cor={corTipo(tipo)} onClick={() => setFiltroTipo(tipo)}>
+                    {labelTipo(tipo)}: {qtd} ({total ? Math.round((qtd * 1000) / total) / 10 : 0}%)
+                  </LegendaBotao>
+                ))}
+              </div>
             </div>
 
             <div style={{ overflowX: 'auto', maxHeight: 420, overflowY: 'auto' }}>
