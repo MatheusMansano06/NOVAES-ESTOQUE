@@ -416,6 +416,16 @@ class MLIntegration:
                 db.rollback()
         return ids
 
+    def obter_dados_fiscais(self, item_id: str) -> Optional[Dict]:
+        """GET /items/{id}/fiscal_information — traz tax_information (ncm, ean,
+        origin_type, net_weight, gross_weight, ...) usado na comparação com a
+        Olist. Retorna None se o item não tiver dados fiscais configurados no
+        ML ou se a conta não tiver essa permissão (404/403)."""
+        body = self._get(f"/items/{item_id}/fiscal_information")
+        if not body:
+            return None
+        return body.get("tax_information") or {}
+
     def stock_fulfillment(self, inventory_id: str) -> Optional[Dict[str, int]]:
         """Estoque de um inventory no Full: {available, chegando, total}.
         available = liberado p/ venda; chegando = em trânsito/processo (não liberado)."""

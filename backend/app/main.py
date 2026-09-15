@@ -730,6 +730,188 @@ async def conferencia_ncm_olist_status(request: Request):
     return JSONResponse(_conferencia_ncm_estado)
 
 
+_produtos_tipos_lock = threading.Lock()
+_produtos_tipos_estado: Dict = {
+    "status": "idle",  # idle | rodando | pronto | erro
+    "resultado": None,
+    "erro": None,
+    "iniciado_em": None,
+    "concluido_em": None,
+}
+
+
+def _rodar_produtos_tipos() -> None:
+    """Traz TODOS os produtos com o campo 'tipo' (S=Simples, K=Kit, ...) —
+    esse campo já vem de graça na listagem paginada (GET /produtos), sem
+    precisar de 1 chamada por produto. Roda em thread só porque forçamos
+    refresh do cache (a listagem antiga, de antes desse campo ser lido,
+    não teria 'tipo'); a filtragem por palavra é feita no frontend, sem
+    nova consulta à Olist a cada busca."""
+    global _produtos_tipos_estado
+    try:
+        todos = olist.listar_todos_produtos(limite=3000, forcar_refresh=True)
+        itens = [
+            {
+                "id": p.get("id"),
+                "sku": p.get("sku") or p.get("codigo_produto") or "",
+                "nome": p.get("nome") or "",
+                "situacao": p.get("situacao") or "",
+                "tipo": p.get("tipo") or "",
+            }
+            for p in todos
+            if p.get("situacao") != "E"
+        ]
+        _produtos_tipos_estado.update({
+            "status": "pronto",
+            "resultado": {"itens": itens, "total": len(itens)},
+            "erro": None,
+            "concluido_em": datetime.utcnow().isoformat(),
+        })
+    except Exception as e:
+        print(f"[ERRO] Produtos por tipo: {e}")
+        _produtos_tipos_estado.update({"status": "erro", "erro": str(e), "concluido_em": datetime.utcnow().isoformat()})
+
+
+async def produtos_tipos_iniciar(request: Request):
+    """POST /api/olist/produtos-tipos/iniciar — dispara a varredura em background e devolve na hora."""
+    with _produtos_tipos_lock:
+        if _produtos_tipos_estado["status"] == "rodando":
+            return JSONResponse({"status": "rodando", "iniciado_em": _produtos_tipos_estado["iniciado_em"]})
+        _produtos_tipos_estado.update({
+            "status": "rodando", "resultado": None, "erro": None,
+            "iniciado_em": datetime.utcnow().isoformat(), "concluido_em": None,
+        })
+        threading.Thread(target=_rodar_produtos_tipos, daemon=True).start()
+    return JSONResponse({"status": "rodando", "iniciado_em": _produtos_tipos_estado["iniciado_em"]})
+
+
+async def produtos_tipos_status(request: Request):
+    """GET /api/olist/produtos-tipos — status/resultado da última varredura disparada."""
+    return JSONResponse(_produtos_tipos_estado)
+
+
+_fiscal_ml_olist_lock = threading.Lock()
+_fiscal_ml_olist_estado: Dict = {
+    "status": "idle",  # idle | rodando | pronto | erro
+    "resultado": None,
+    "erro": None,
+    "iniciado_em": None,
+    "concluido_em": None,
+}
+
+
+def _norm_digitos(valor) -> str:
+    return re.sub(r"\D", "", str(valor or ""))
+
+
+def _rodar_comparacao_fiscal_ml_olist() -> None:
+    """Casa produto Olist x anúncio ML pelo SKU e compara os dados fiscais
+    (NCM e GTIN/EAN) de cada lado. 1 chamada por produto em cada API (throttle
+    de ambas) — por isso roda em thread, nunca no event loop (mesmo motivo de
+    _rodar_conferencia_ncm)."""
+    global _fiscal_ml_olist_estado
+    try:
+        db = SessionLocal()
+        try:
+            ml_itens = (
+                db.query(MercadoLivreItemCache)
+                .filter(MercadoLivreItemCache.sku.isnot(None), MercadoLivreItemCache.status == "active")
+                .all()
+            )
+            ml_por_sku = {}
+            for row in ml_itens:
+                chave = re.sub(r"[^a-z0-9]", "", (row.sku or "").lower())
+                if chave:
+                    ml_por_sku[chave] = row
+        finally:
+            db.close()
+
+        olist_produtos = olist.listar_todos_produtos(limite=3000)
+        olist_por_sku = {}
+        for p in olist_produtos:
+            if p.get("situacao") == "E":
+                continue
+            chave = re.sub(r"[^a-z0-9]", "", (p.get("sku") or p.get("codigo_produto") or "").lower())
+            if chave:
+                olist_por_sku.setdefault(chave, p)
+
+        chaves_comuns = sorted(set(ml_por_sku) & set(olist_por_sku))
+
+        itens = []
+        for chave in chaves_comuns:
+            p_olist = olist_por_sku[chave]
+            item_ml = ml_por_sku[chave]
+
+            detalhe = olist.obter_detalhes_completo(str(p_olist.get("id"))) or {}
+            olist_ncm = detalhe.get("ncm") or ""
+            olist_gtin = detalhe.get("gtin") or ""
+
+            fiscal_ml = ml.obter_dados_fiscais(item_ml.item_id)
+            sem_dados_ml = fiscal_ml is None
+            ml_ncm = (fiscal_ml or {}).get("ncm") or ""
+            ml_ean = (fiscal_ml or {}).get("ean") or ""
+
+            diffs = []
+            if not sem_dados_ml:
+                if _norm_digitos(olist_ncm) != _norm_digitos(ml_ncm):
+                    diffs.append("ncm")
+                if olist_gtin and ml_ean and _norm_digitos(olist_gtin) != _norm_digitos(ml_ean):
+                    diffs.append("gtin")
+
+            itens.append({
+                "sku": p_olist.get("sku") or p_olist.get("codigo_produto") or "",
+                "nome": item_ml.titulo or p_olist.get("nome") or "",
+                "produto_id": p_olist.get("id"),
+                "item_id": item_ml.item_id,
+                "olist_ncm": olist_ncm,
+                "ml_ncm": ml_ncm,
+                "olist_gtin": olist_gtin,
+                "ml_ean": ml_ean,
+                "sem_dados_ml": sem_dados_ml,
+                "divergencias": diffs,
+                "status": "sem_dados_ml" if sem_dados_ml else ("divergente" if diffs else "correto"),
+            })
+
+        total = len(itens)
+        corretos = sum(1 for i in itens if i["status"] == "correto")
+        divergentes = sum(1 for i in itens if i["status"] == "divergente")
+        sem_dados = sum(1 for i in itens if i["status"] == "sem_dados_ml")
+
+        _fiscal_ml_olist_estado.update({
+            "status": "pronto",
+            "resultado": {
+                "itens": itens,
+                "total": total,
+                "corretos": corretos,
+                "divergentes": divergentes,
+                "sem_dados_ml": sem_dados,
+            },
+            "erro": None,
+            "concluido_em": datetime.utcnow().isoformat(),
+        })
+    except Exception as e:
+        print(f"[ERRO] Comparação fiscal ML x Olist: {e}")
+        _fiscal_ml_olist_estado.update({"status": "erro", "erro": str(e), "concluido_em": datetime.utcnow().isoformat()})
+
+
+async def fiscal_ml_olist_iniciar(request: Request):
+    """POST /api/fiscal/ml-olist/iniciar — dispara a comparação em background e devolve na hora."""
+    with _fiscal_ml_olist_lock:
+        if _fiscal_ml_olist_estado["status"] == "rodando":
+            return JSONResponse({"status": "rodando", "iniciado_em": _fiscal_ml_olist_estado["iniciado_em"]})
+        _fiscal_ml_olist_estado.update({
+            "status": "rodando", "resultado": None, "erro": None,
+            "iniciado_em": datetime.utcnow().isoformat(), "concluido_em": None,
+        })
+        threading.Thread(target=_rodar_comparacao_fiscal_ml_olist, daemon=True).start()
+    return JSONResponse({"status": "rodando", "iniciado_em": _fiscal_ml_olist_estado["iniciado_em"]})
+
+
+async def fiscal_ml_olist_status(request: Request):
+    """GET /api/fiscal/ml-olist — status/resultado da última comparação disparada."""
+    return JSONResponse(_fiscal_ml_olist_estado)
+
+
 _lista_compra_lock = threading.Lock()
 _lista_compra_estado: Dict = {
     "status": "idle",  # idle | rodando | pronto | erro
@@ -6108,6 +6290,10 @@ routes = [
     Route("/api/olist/atualizar-ncm", atualizar_ncm_olist, methods=["POST"]),
     Route("/api/olist/conferencia-ncm", conferencia_ncm_olist_status, methods=["GET"]),
     Route("/api/olist/conferencia-ncm/iniciar", conferencia_ncm_olist_iniciar, methods=["POST"]),
+    Route("/api/olist/produtos-tipos", produtos_tipos_status, methods=["GET"]),
+    Route("/api/olist/produtos-tipos/iniciar", produtos_tipos_iniciar, methods=["POST"]),
+    Route("/api/fiscal/ml-olist", fiscal_ml_olist_status, methods=["GET"]),
+    Route("/api/fiscal/ml-olist/iniciar", fiscal_ml_olist_iniciar, methods=["POST"]),
     Route("/api/lista-compra/parados", lista_compra_parados_status, methods=["GET"]),
     Route("/api/lista-compra/parados/iniciar", lista_compra_parados_iniciar, methods=["POST"]),
     # Inbound / Lista de Separação para FU

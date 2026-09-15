@@ -13,6 +13,7 @@ import { ListaCompra } from './components/ListaCompra'
 import { RadarFull } from './components/RadarFull'
 import { EstoqueEmbalagens } from './components/EstoqueEmbalagens'
 import { ConferenciaNcm } from './components/ConferenciaNcm'
+import { DashboardProdutos } from './components/DashboardProdutos'
 import { Devolucoes } from './components/Devolucoes'
 import { PlataformaSelecao, type Platform, LogoMercadoLivre, LogoShopee, LogoOperacao } from './components/PlataformaSelecao'
 import { LoginNVS } from './components/LoginNVS'
@@ -92,7 +93,7 @@ interface ProdutoEstoque {
   }>
 }
 
-type Pagina = 'bemvindo' | 'inicial' | 'conferencia' | 'produtos_nota' | 'relacionamento_produto' | 'fornecedores' | 'full-operacoes' | 'anuncios' | 'notas-fiscais' | 'operadores' | 'garimpador' | 'lista-compra' | 'radar-full' | 'estoque-embalagens' | 'devolucoes' | 'conferencia-ncm'
+type Pagina = 'bemvindo' | 'inicial' | 'conferencia' | 'produtos_nota' | 'relacionamento_produto' | 'fornecedores' | 'full-operacoes' | 'anuncios' | 'notas-fiscais' | 'operadores' | 'garimpador' | 'lista-compra' | 'radar-full' | 'estoque-embalagens' | 'devolucoes' | 'conferencia-ncm' | 'dashboard-produtos'
 
 interface Divergencia {
   item_id: number
@@ -1677,6 +1678,7 @@ function App() {
       items: [
         { key: 'garimpador', label: 'Garimpador', icon: 'search', active: pagina === 'garimpador', onClick: () => setPagina('garimpador') },
         { key: 'conferencia-ncm', label: 'Conferência NCM', icon: 'warning', active: pagina === 'conferencia-ncm', onClick: () => setPagina('conferencia-ncm') },
+        { key: 'dashboard-produtos', label: 'Dashboard de Produtos', icon: 'dashboard', active: pagina === 'dashboard-produtos', onClick: () => setPagina('dashboard-produtos') },
       ],
     },
     // === ARQUIVADOS ===
@@ -3098,6 +3100,15 @@ function App() {
       'Conferência de NCM',
       'Compara o NCM cadastrado na Olist com o esperado e permite corrigir. Só entram produtos com anúncio no Mercado Livre ou na Shopee.',
       <ConferenciaNcm />
+    )
+  }
+
+  // ===== DASHBOARD DE PRODUTOS (kit x simples, fiscal ML x Olist) =====
+  if (pagina === 'dashboard-produtos') {
+    return renderComShell(
+      'Dashboard de Produtos',
+      'Classificação Simples x Kit e comparação de dados fiscais entre Mercado Livre e Olist.',
+      <DashboardProdutos />
     )
   }
 
