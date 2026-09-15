@@ -3096,7 +3096,7 @@ function App() {
   if (pagina === 'conferencia-ncm') {
     return renderComShell(
       'Conferência de NCM',
-      'Compara o NCM cadastrado na Olist com o esperado e permite corrigir.',
+      'Compara o NCM cadastrado na Olist com o esperado e permite corrigir. Só entram produtos com anúncio no Mercado Livre ou na Shopee.',
       <ConferenciaNcm />
     )
   }

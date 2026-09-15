@@ -13,6 +13,7 @@ Por isso get_access_token() renova sob lock, com dupla checagem.
 """
 
 import hashlib
+import re
 import hmac
 import json
 import os
@@ -499,6 +500,43 @@ class ShopeeAPI:
                         "estoque": 0,
                     })
         return parados
+
+    def listar_todos_skus(self) -> set:
+        """SKUs (normalizados) de todo item ativo ou pausado na Shopee — usado
+        para saber se um produto da Olist tem anúncio na Shopee, já que a
+        Shopee não expõe isso no cadastro do produto (é por item_id próprio).
+        """
+        skus = set()
+        for status in ("NORMAL", "UNLIST"):
+            offset = 0
+            while True:
+                resp = self.chamar("/api/v2/product/get_item_list", {
+                    "offset": offset,
+                    "page_size": 100,
+                    "item_status": [status],
+                })
+                if resp.get("error"):
+                    print(f"[SHOPEE] Erro ao listar itens {status}: {resp.get('error')} {resp.get('message')}")
+                    break
+                corpo = resp.get("response") or {}
+                item_ids = [it.get("item_id") for it in (corpo.get("item") or []) if it.get("item_id")]
+
+                for i in range(0, len(item_ids), 50):
+                    lote = item_ids[i:i + 50]
+                    r2 = self.chamar("/api/v2/product/get_item_base_info", {
+                        "item_id_list": ",".join(str(x) for x in lote),
+                    })
+                    if r2.get("error"):
+                        continue
+                    for item in (r2.get("response") or {}).get("item_list") or []:
+                        sku = re.sub(r"[^a-z0-9]", "", (item.get("item_sku") or "").lower())
+                        if sku:
+                            skus.add(sku)
+
+                if not corpo.get("has_next_page") or not item_ids:
+                    break
+                offset = corpo.get("next_offset", offset + len(item_ids))
+        return skus
 
     def status(self) -> Dict[str, Any]:
         """Campos em português, no mesmo formato de /api/ml|olist/status."""
