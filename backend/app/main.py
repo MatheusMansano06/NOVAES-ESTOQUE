@@ -636,6 +636,17 @@ async def atualizar_ncm_olist(request: Request):
     return JSONResponse(resultado, status_code=200 if resultado.get("sucesso") else 502)
 
 
+async def debug_olist_tem_cest(request: Request):
+    """DEBUG TEMPORARIO: GET /api/olist/debug-cest?produto_id=776615551 — dump
+    completo do detalhe do produto, pra confirmar se a Olist tem campo CEST
+    em algum lugar do schema v3. Remover depois de checar."""
+    produto_id = request.query_params.get("produto_id", "")
+    if not produto_id:
+        return JSONResponse({"erro": "informe ?produto_id="}, status_code=400)
+    detalhe = olist.obter_detalhes_completo(produto_id)
+    return JSONResponse({"detalhe": detalhe})
+
+
 async def atualizar_fiscal_combinado(request: Request):
     """POST /api/fiscal/atualizar  Body: {produto_id?, item_id?, ncm, cest?}
     Corrige o NCM na Olist e o NCM/CEST no Mercado Livre do mesmo produto,
@@ -842,9 +853,12 @@ def _rodar_comparacao_fiscal_ml_olist() -> None:
     try:
         db = SessionLocal()
         try:
+            # Antes só pegava status=="active" e deixava de fora os pausados
+            # (ex.: sem estoque) — esses continuam precisando do NCM/CEST
+            # corretos. Só exclui "closed" (anúncio finalizado de verdade).
             ml_itens = (
                 db.query(MercadoLivreItemCache)
-                .filter(MercadoLivreItemCache.sku.isnot(None), MercadoLivreItemCache.status == "active")
+                .filter(MercadoLivreItemCache.sku.isnot(None), MercadoLivreItemCache.sku != "", MercadoLivreItemCache.status != "closed")
                 .all()
             )
             ml_por_sku = {}
@@ -6319,6 +6333,7 @@ routes = [
     Route("/api/olist/vinculos", olist_listar_vinculos, methods=["GET"]),
     Route("/api/olist/vinculos/deletar", olist_deletar_vinculo, methods=["POST"]),
     Route("/api/olist/atualizar-ncm", atualizar_ncm_olist, methods=["POST"]),
+    Route("/api/olist/debug-cest", debug_olist_tem_cest, methods=["GET"]),
     Route("/api/fiscal/atualizar", atualizar_fiscal_combinado, methods=["POST"]),
     Route("/api/olist/conferencia-ncm", conferencia_ncm_olist_status, methods=["GET"]),
     Route("/api/olist/conferencia-ncm/iniciar", conferencia_ncm_olist_iniciar, methods=["POST"]),
