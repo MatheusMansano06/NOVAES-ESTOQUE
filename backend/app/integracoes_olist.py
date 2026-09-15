@@ -1115,15 +1115,12 @@ class OlistIntegration:
             "origem": origem,
             "garantia": detalhe.get("garantia"),
             "observacoes": detalhe.get("observacoes"),
-            "marca": {"id": marca.get("id")},
-            "categoria": {"id": categoria.get("id")},
             "precos": {
                 "preco": precos.get("preco"),
                 "precoPromocional": precos.get("precoPromocional"),
                 "precoCusto": precos.get("precoCusto"),
             },
             "dimensoes": {
-                "embalagem": {"id": emb.get("id"), "tipo": emb.get("tipo")},
                 "largura": dim.get("largura"),
                 "altura": dim.get("altura"),
                 "comprimento": dim.get("comprimento"),
@@ -1146,6 +1143,14 @@ class OlistIntegration:
             },
             "fornecedores": detalhe.get("fornecedores") or [],
         }
+        # A Olist rejeita esses sub-objetos com id nulo ("Este valor não deve
+        # ser nulo") — só reenvia quando o cadastro atual já tem um id.
+        if marca.get("id"):
+            body["marca"] = {"id": marca.get("id")}
+        if categoria.get("id"):
+            body["categoria"] = {"id": categoria.get("id")}
+        if emb.get("id"):
+            body["dimensoes"]["embalagem"] = {"id": emb.get("id"), "tipo": emb.get("tipo")}
 
         token = self.get_access_token()
         if not token:
