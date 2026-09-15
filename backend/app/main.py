@@ -642,23 +642,31 @@ async def conferencia_ncm_olist(request: Request):
     Olist comparado ao esperado — base para o botão "alterar NCM"."""
     termo = (request.query_params.get("termo") or "Viseira").strip().lower()
     ncm_esperado = (request.query_params.get("ncm_esperado") or "65070000").strip()
+    ncm_esperado_digitos = re.sub(r"\D", "", ncm_esperado)
+    incluir_excluidos = (request.query_params.get("incluir_excluidos") or "").lower() in ("1", "true", "sim")
 
     try:
         todos = olist.listar_todos_produtos(limite=3000)
-        candidatos = [p for p in todos if termo in (p.get("nome") or "").lower()]
+        candidatos = [
+            p for p in todos
+            if termo in (p.get("nome") or "").lower()
+            and (incluir_excluidos or p.get("situacao") != "E")
+        ]
 
         itens = []
         for p in candidatos:
             produto_id = p.get("id")
             detalhe = olist.obter_detalhes_completo(str(produto_id)) if produto_id else None
             ncm_atual = str((detalhe or {}).get("ncm") or "")
+            # A Olist devolve o NCM formatado com pontos (ex.: "6506.10.10") —
+            # comparar só os dígitos, senão nunca bate mesmo quando é o mesmo NCM.
             itens.append({
                 "id": produto_id,
                 "sku": p.get("sku") or p.get("codigo_produto") or "",
                 "nome": p.get("nome") or "",
                 "situacao": p.get("situacao") or "",
                 "ncm_atual": ncm_atual,
-                "bate": ncm_atual == ncm_esperado,
+                "bate": re.sub(r"\D", "", ncm_atual) == ncm_esperado_digitos,
             })
 
         return JSONResponse({
