@@ -24,10 +24,10 @@ interface ItemFiscal {
   status: 'correto' | 'divergente' | 'sem_dados_ml'
 }
 
-const LABEL_TIPO: Record<string, string> = { S: 'Simples', K: 'Kit', F: 'Fabricado', M: 'Matéria-prima' }
+const LABEL_TIPO: Record<string, string> = { S: 'Simples', K: 'Kit', F: 'Fabricado', M: 'Matéria-prima', V: 'Variação' }
 const labelTipo = (tipo: string) => LABEL_TIPO[tipo] || tipo || '(desconhecido)'
 
-const CORES_TIPO: Record<string, string> = { S: '#2d3277', K: '#c62828', F: '#2e7d32', M: '#8d6e00' }
+const CORES_TIPO: Record<string, string> = { S: '#2d3277', K: '#c62828', F: '#2e7d32', M: '#8d6e00', V: '#6a1b9a' }
 const corTipo = (tipo: string) => CORES_TIPO[tipo] || '#888'
 
 const th: React.CSSProperties = { textAlign: 'left', padding: '0.6rem 0.8rem', fontSize: '0.78rem', color: '#667085', borderBottom: '1px solid #eee' }
