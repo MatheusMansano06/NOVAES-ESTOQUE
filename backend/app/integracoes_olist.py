@@ -50,6 +50,25 @@ if _token_seed and not os.path.exists(TOKEN_FILE):
         print(f"[OLIST] Falha ao gravar token inicial: {_e}")
 
 
+def _fornecedores_validos(fornecedores: list) -> list:
+    """Filtra fornecedores sem id válido e conserta 'padrao' nulo — a Olist
+    rejeita o PUT inteiro se algum fornecedor.id não for > 0 ou padrao vier
+    nulo (mesma classe de bug do marca/categoria.id nulo)."""
+    validos = []
+    for forn in fornecedores:
+        try:
+            fid = int(forn.get("id") or 0)
+        except (TypeError, ValueError):
+            fid = 0
+        if fid <= 0:
+            continue
+        forn = dict(forn)
+        if forn.get("padrao") is None:
+            forn["padrao"] = False
+        validos.append(forn)
+    return validos
+
+
 class OlistIntegration:
     """Integracao com Olist/Tiny ERP - API v3 OAuth2 Authorization Code"""
 
@@ -1143,7 +1162,7 @@ class OlistIntegration:
                 "diasPreparacao": estoque.get("diasPreparacao"),
                 "localizacao": estoque.get("localizacao"),
             },
-            "fornecedores": detalhe.get("fornecedores") or [],
+            "fornecedores": _fornecedores_validos(detalhe.get("fornecedores") or []),
         }
         # A Olist rejeita esses sub-objetos com id nulo ("Este valor não deve
         # ser nulo") — só reenvia quando o cadastro atual já tem um id.
