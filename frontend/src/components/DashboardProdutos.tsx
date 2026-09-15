@@ -83,6 +83,130 @@ function LegendaBotao({ ativo, cor, onClick, children }: { ativo: boolean; cor: 
   )
 }
 
+const norm = (v: string) => (v || '').replace(/\D/g, '')
+
+// Modal por item: escolhe Olist/ML/ambos, mostra se já bate, corrige só o que
+// estiver diferente — se os dois já baterem, não chama nenhuma API.
+function ModalCorrigirFiscal({ item, onClose, onSalvo }: {
+  item: ItemFiscal
+  onClose: () => void
+  onSalvo: (patch: Partial<ItemFiscal>) => void
+}) {
+  const [corrigirOlist, setCorrigirOlist] = useState(true)
+  const [corrigirMl, setCorrigirMl] = useState(true)
+  const [ncm, setNcm] = useState(item.olist_ncm || item.ml_ncm || '')
+  const [cest, setCest] = useState(item.ml_cest || '')
+  const [salvando, setSalvando] = useState(false)
+  const [msg, setMsg] = useState<{ tipo: 'ok' | 'erro'; texto: string } | null>(null)
+
+  const olistBate = !!ncm.trim() && norm(item.olist_ncm) === norm(ncm)
+  const mlBate = !!ncm.trim() && norm(item.ml_ncm) === norm(ncm) && !!cest.trim() && (item.ml_cest || '').trim() === cest.trim()
+
+  const salvar = async () => {
+    setMsg(null)
+    if (!corrigirOlist && !corrigirMl) { setMsg({ tipo: 'erro', texto: 'Escolha pelo menos uma plataforma.' }); return }
+    if (!ncm.trim()) { setMsg({ tipo: 'erro', texto: 'Informe o NCM.' }); return }
+    if (corrigirMl && !cest.trim()) { setMsg({ tipo: 'erro', texto: 'Informe o CEST para corrigir no Mercado Livre.' }); return }
+
+    const precisaOlist = corrigirOlist && !olistBate
+    const precisaMl = corrigirMl && !mlBate
+    if (!precisaOlist && !precisaMl) {
+      setMsg({ tipo: 'ok', texto: '✅ Já está 100% concluído — nada para corrigir.' })
+      return
+    }
+
+    setSalvando(true)
+    try {
+      const body: Record<string, unknown> = { ncm: ncm.trim() }
+      if (precisaOlist) body.produto_id = item.produto_id
+      if (precisaMl) { body.item_id = item.item_id; body.cest = cest.trim() }
+
+      const r = await fetch(`${API_BASE}/api/fiscal/atualizar`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      })
+      const d = await r.json()
+      if (!r.ok || !d.sucesso) {
+        const partes = [d.olist?.erro, d.ml?.erro].filter(Boolean)
+        throw new Error(partes.join(' | ') || 'Falha ao corrigir')
+      }
+      onSalvo({
+        olist_ncm: precisaOlist ? ncm.trim() : item.olist_ncm,
+        ml_ncm: precisaMl ? ncm.trim() : item.ml_ncm,
+        ml_cest: precisaMl ? cest.trim() : item.ml_cest,
+        sem_dados_ml: precisaMl ? false : item.sem_dados_ml,
+      })
+      setMsg({ tipo: 'ok', texto: '✅ Corrigido com sucesso.' })
+    } catch (e) {
+      setMsg({ tipo: 'erro', texto: String(e instanceof Error ? e.message : e) })
+    } finally {
+      setSalvando(false)
+    }
+  }
+
+  return (
+    <div
+      style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: '1rem' }}
+      onClick={onClose}
+    >
+      <div
+        style={{ background: '#fff', borderRadius: '14px', padding: '1.4rem', width: '100%', maxWidth: 480, maxHeight: '90vh', overflowY: 'auto' }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <h3 style={{ margin: '0 0 0.25rem' }}>Corrigir dados fiscais</h3>
+        <p style={{ margin: '0 0 1rem', fontSize: '0.85rem', color: '#667085' }}>{item.nome} — SKU {item.sku}</p>
+
+        <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', padding: '0.6rem', borderRadius: '8px', background: '#f7f8fa', marginBottom: '0.5rem', cursor: 'pointer' }}>
+          <input type="checkbox" checked={corrigirOlist} onChange={(e) => setCorrigirOlist(e.target.checked)} />
+          <span style={{ fontSize: '0.85rem' }}>
+            <strong>Olist</strong> — NCM atual: {item.olist_ncm || 'vazio'} {olistBate && <span style={{ color: '#2e7d32' }}>✅ bate</span>}
+          </span>
+        </label>
+
+        <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', padding: '0.6rem', borderRadius: '8px', background: '#f7f8fa', marginBottom: '1rem', cursor: 'pointer' }}>
+          <input type="checkbox" checked={corrigirMl} onChange={(e) => setCorrigirMl(e.target.checked)} />
+          <span style={{ fontSize: '0.85rem' }}>
+            <strong>Mercado Livre</strong> — NCM atual: {item.ml_ncm || 'vazio'}, CEST atual: {item.ml_cest || 'faltando'} {mlBate && <span style={{ color: '#2e7d32' }}>✅ bate</span>}
+          </span>
+        </label>
+
+        <div style={{ marginBottom: '0.75rem' }}>
+          <label style={{ fontSize: '0.75rem', color: '#667085', display: 'block', marginBottom: '0.25rem' }}>NCM desejado</label>
+          <input value={ncm} onChange={(e) => setNcm(e.target.value)} style={{ width: '100%', boxSizing: 'border-box', padding: '0.5rem 0.6rem', borderRadius: '8px', border: '1px solid #cfd8dc' }} />
+        </div>
+
+        {corrigirMl && (
+          <div style={{ marginBottom: '1rem' }}>
+            <label style={{ fontSize: '0.75rem', color: '#667085', display: 'block', marginBottom: '0.25rem' }}>CEST desejado (Mercado Livre)</label>
+            <input value={cest} onChange={(e) => setCest(e.target.value)} placeholder="ex.: 0100700" style={{ width: '100%', boxSizing: 'border-box', padding: '0.5rem 0.6rem', borderRadius: '8px', border: '1px solid #cfd8dc' }} />
+          </div>
+        )}
+
+        {msg && (
+          <div style={{ marginBottom: '1rem', color: msg.tipo === 'erro' ? '#c62828' : '#2e7d32', fontWeight: 700, fontSize: '0.85rem' }}>
+            {msg.texto}
+          </div>
+        )}
+
+        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.5rem' }}>
+          <button type="button" onClick={onClose} style={{ padding: '0.5rem 1rem', borderRadius: '8px', border: '1px solid #dfe3e8', background: '#fff', fontWeight: 700, cursor: 'pointer' }}>
+            Fechar
+          </button>
+          <button
+            type="button"
+            onClick={salvar}
+            disabled={salvando}
+            style={{ padding: '0.5rem 1.2rem', borderRadius: '8px', border: 'none', background: '#2d3277', color: '#fff', fontWeight: 700, cursor: 'pointer' }}
+          >
+            {salvando ? 'Salvando...' : 'Salvar'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ===== Seção 1: Classificação Kit x Simples =====
 function SecaoTipos() {
   const [itens, setItens] = useState<ProdutoTipo[]>([])
@@ -218,8 +342,8 @@ function SecaoFiscal() {
   const [ncmDesejado, setNcmDesejado] = useState('65070000')
   const [cestDesejado, setCestDesejado] = useState('')
   const [selecionados, setSelecionados] = useState<Set<string>>(new Set())
-  const [corrigindoId, setCorrigindoId] = useState<string | null>(null)
   const [emMassa, setEmMassa] = useState<{ total: number; feito: number } | null>(null)
+  const [itemModal, setItemModal] = useState<ItemFiscal | null>(null)
 
   const comparar = useCallback(async () => {
     setCarregando(true)
@@ -283,18 +407,6 @@ function SecaoFiscal() {
     } catch (e) {
       return String(e instanceof Error ? e.message : e)
     }
-  }
-
-  const corrigirItem = async (item: ItemFiscal) => {
-    if (!ncmDesejado.trim() || !cestDesejado.trim()) {
-      alert('Preencha o NCM e o CEST desejados antes de corrigir — o CEST muda junto com o NCM, sempre.')
-      return
-    }
-    if (!window.confirm(`Corrigir NCM de "${item.nome}" (SKU ${item.sku}) para ${ncmDesejado} e CEST para ${cestDesejado.trim()} no ML, na Olist e no ML?`)) return
-    setCorrigindoId(item.item_id)
-    const erroItem = await executarCorrecao(item)
-    setCorrigindoId(null)
-    if (erroItem) alert('❌ ' + erroItem)
   }
 
   const toggleSelecionado = (itemId: string) => {
@@ -471,12 +583,11 @@ function SecaoFiscal() {
                           {corrigivel && (
                             <button
                               type="button"
-                              onClick={() => corrigirItem(item)}
-                              disabled={corrigindoId === item.item_id || !!emMassa || !ncmDesejado.trim() || !cestDesejado.trim()}
-                              title={!cestDesejado.trim() ? 'Preencha o CEST desejado acima' : undefined}
+                              onClick={() => setItemModal(item)}
+                              disabled={!!emMassa}
                               style={{ padding: '0.35rem 0.75rem', borderRadius: '8px', border: 'none', background: '#c62828', color: '#fff', fontWeight: 700, fontSize: '0.78rem', cursor: 'pointer' }}
                             >
-                              {corrigindoId === item.item_id ? 'Corrigindo...' : 'Corrigir'}
+                              Corrigir
                             </button>
                           )}
                         </td>
@@ -490,6 +601,17 @@ function SecaoFiscal() {
           </>
         )}
       </div>
+
+      {itemModal && (
+        <ModalCorrigirFiscal
+          item={itemModal}
+          onClose={() => setItemModal(null)}
+          onSalvo={(patch) => {
+            setItens((prev) => prev.map((p) => (p.item_id === itemModal.item_id ? { ...p, ...patch } : p)))
+            setItemModal((prev) => (prev ? { ...prev, ...patch } : prev))
+          }}
+        />
+      )}
     </div>
   )
 }
