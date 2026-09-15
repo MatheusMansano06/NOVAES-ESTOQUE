@@ -21,6 +21,9 @@ export function ConferenciaNcm() {
   const [carregando, setCarregando] = useState(false)
   const [erro, setErro] = useState('')
   const [atualizandoId, setAtualizandoId] = useState<string | number | null>(null)
+  const [selecionados, setSelecionados] = useState<Set<string | number>>(new Set())
+  const [emMassa, setEmMassa] = useState<{ total: number; feito: number } | null>(null)
+  const [filtroStatus, setFiltroStatus] = useState<'todos' | 'divergentes' | 'batem'>('divergentes')
 
   const buscar = useCallback(async () => {
     setCarregando(true)
@@ -37,6 +40,7 @@ export function ConferenciaNcm() {
         const d = await r.json()
         if (d.status === 'pronto') {
           setItens(d.resultado?.itens || [])
+          setSelecionados(new Set())
           break
         }
         if (d.status === 'erro') {
@@ -52,9 +56,8 @@ export function ConferenciaNcm() {
 
   useEffect(() => { buscar() }, [])
 
-  const alterarNcm = async (item: ItemNcm) => {
-    if (!window.confirm(`Alterar o NCM de "${item.nome}" (SKU ${item.sku}) de ${item.ncm_atual || 'vazio'} para ${ncmEsperado}?`)) return
-    setAtualizandoId(item.id)
+  // Faz a chamada em si; devolve null em sucesso ou a mensagem de erro.
+  const executarAlteracao = async (item: ItemNcm): Promise<string | null> => {
     try {
       const r = await fetch(`${API_BASE}/api/olist/atualizar-ncm`, {
         method: 'POST',
@@ -64,14 +67,56 @@ export function ConferenciaNcm() {
       const d = await r.json()
       if (!r.ok || !d.sucesso) throw new Error(d.erro || 'Falha ao atualizar NCM')
       setItens((prev) => prev.map((p) => (p.id === item.id ? { ...p, ncm_atual: ncmEsperado, bate: true } : p)))
+      return null
     } catch (e) {
-      alert('❌ ' + String(e instanceof Error ? e.message : e))
-    } finally {
-      setAtualizandoId(null)
+      return String(e instanceof Error ? e.message : e)
     }
   }
 
-  const divergentes = itens.filter((i) => !i.bate).length
+  const alterarNcm = async (item: ItemNcm) => {
+    if (!window.confirm(`Alterar o NCM de "${item.nome}" (SKU ${item.sku}) de ${item.ncm_atual || 'vazio'} para ${ncmEsperado}?`)) return
+    setAtualizandoId(item.id)
+    const erroItem = await executarAlteracao(item)
+    setAtualizandoId(null)
+    if (erroItem) alert('❌ ' + erroItem)
+  }
+
+  const toggleSelecionado = (id: string | number) => {
+    setSelecionados((prev) => {
+      const novo = new Set(prev)
+      if (novo.has(id)) novo.delete(id)
+      else novo.add(id)
+      return novo
+    })
+  }
+
+  const divergentes = itens.filter((i) => !i.bate)
+  const batem = itens.filter((i) => i.bate)
+  const itensExibidos = filtroStatus === 'divergentes' ? divergentes : filtroStatus === 'batem' ? batem : itens
+  const todosDivergentesSelecionados = divergentes.length > 0 && divergentes.every((i) => selecionados.has(i.id))
+
+  const alternarSelecaoTodos = () => {
+    setSelecionados(todosDivergentesSelecionados ? new Set() : new Set(divergentes.map((i) => i.id)))
+  }
+
+  const alterarSelecionadosEmMassa = async () => {
+    const alvos = itens.filter((i) => selecionados.has(i.id) && !i.bate)
+    if (alvos.length === 0) return
+    if (!window.confirm(`Alterar o NCM de ${alvos.length} produto(s) selecionado(s) para ${ncmEsperado}?`)) return
+
+    setEmMassa({ total: alvos.length, feito: 0 })
+    const erros: string[] = []
+    for (const item of alvos) {
+      const erroItem = await executarAlteracao(item)
+      if (erroItem) erros.push(`${item.sku}: ${erroItem}`)
+      setEmMassa((prev) => (prev ? { ...prev, feito: prev.feito + 1 } : prev))
+    }
+    setEmMassa(null)
+    setSelecionados(new Set())
+    if (erros.length > 0) {
+      alert(`❌ ${erros.length} de ${alvos.length} falharam:\n` + erros.slice(0, 10).join('\n'))
+    }
+  }
 
   return (
     <div className="card">
@@ -94,11 +139,51 @@ export function ConferenciaNcm() {
             {carregando ? 'Buscando...' : 'Buscar'}
           </button>
           {itens.length > 0 && (
-            <span style={{ fontSize: '0.82rem', color: divergentes > 0 ? '#c62828' : '#2e7d32', fontWeight: 700 }}>
-              {itens.length} anúncio(s) · {divergentes} com NCM divergente
+            <span style={{ fontSize: '0.82rem', color: divergentes.length > 0 ? '#c62828' : '#2e7d32', fontWeight: 700 }}>
+              {itens.length} anúncio(s) · {divergentes.length} com NCM divergente
             </span>
           )}
         </div>
+
+        {itens.length > 0 && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.75rem', flexWrap: 'wrap' }}>
+            {([
+              ['todos', `Todos (${itens.length})`],
+              ['divergentes', `Divergentes (${divergentes.length})`],
+              ['batem', `Batem (${batem.length})`],
+            ] as const).map(([valor, label]) => (
+              <button
+                key={valor}
+                type="button"
+                onClick={() => setFiltroStatus(valor)}
+                style={{
+                  padding: '0.4rem 0.9rem', borderRadius: '999px', fontSize: '0.8rem', fontWeight: 700,
+                  border: filtroStatus === valor ? '1px solid #2d3277' : '1px solid #dfe3e8',
+                  background: filtroStatus === valor ? '#2d3277' : '#fff',
+                  color: filtroStatus === valor ? '#fff' : '#444',
+                  cursor: 'pointer',
+                }}
+              >
+                {label}
+              </button>
+            ))}
+
+            {divergentes.length > 0 && (
+              <button
+                type="button"
+                onClick={alterarSelecionadosEmMassa}
+                disabled={selecionados.size === 0 || !!emMassa}
+                style={{
+                  marginLeft: 'auto', padding: '0.5rem 1rem', borderRadius: '8px', border: 'none',
+                  background: selecionados.size === 0 ? '#e0a0a0' : '#c62828', color: '#fff',
+                  fontWeight: 700, fontSize: '0.82rem', cursor: selecionados.size === 0 ? 'default' : 'pointer',
+                }}
+              >
+                {emMassa ? `Alterando ${emMassa.feito}/${emMassa.total}...` : `Alterar NCM dos selecionados (${selecionados.size})`}
+              </button>
+            )}
+          </div>
+        )}
 
         {erro && <div style={{ color: '#c62828', marginBottom: '0.75rem' }}>{erro}</div>}
 
@@ -106,11 +191,20 @@ export function ConferenciaNcm() {
           <div style={{ color: '#999', padding: '1rem 0' }}>Nenhum anúncio encontrado com "{termo}" no título.</div>
         )}
 
-        {itens.length > 0 && (
+        {!carregando && itens.length > 0 && itensExibidos.length === 0 && (
+          <div style={{ color: '#999', padding: '1rem 0' }}>Nenhum item nesse filtro.</div>
+        )}
+
+        {itensExibidos.length > 0 && (
           <div style={{ overflowX: 'auto' }}>
             <table style={{ width: '100%', borderCollapse: 'collapse' }}>
               <thead>
                 <tr>
+                  <th style={th}>
+                    {divergentes.length > 0 && (
+                      <input type="checkbox" checked={todosDivergentesSelecionados} onChange={alternarSelecaoTodos} />
+                    )}
+                  </th>
                   <th style={th}>Nome</th>
                   <th style={th}>SKU</th>
                   <th style={th}>NCM atual</th>
@@ -119,8 +213,18 @@ export function ConferenciaNcm() {
                 </tr>
               </thead>
               <tbody>
-                {itens.map((item) => (
+                {itensExibidos.map((item) => (
                   <tr key={item.id}>
+                    <td style={td}>
+                      {!item.bate && (
+                        <input
+                          type="checkbox"
+                          checked={selecionados.has(item.id)}
+                          onChange={() => toggleSelecionado(item.id)}
+                          disabled={!!emMassa}
+                        />
+                      )}
+                    </td>
                     <td style={td}>{item.nome}</td>
                     <td style={td}>{item.sku}</td>
                     <td style={td}>{item.ncm_atual || <em style={{ color: '#999' }}>vazio</em>}</td>
@@ -136,7 +240,7 @@ export function ConferenciaNcm() {
                         <button
                           type="button"
                           onClick={() => alterarNcm(item)}
-                          disabled={atualizandoId === item.id}
+                          disabled={atualizandoId === item.id || !!emMassa}
                           style={{ padding: '0.35rem 0.75rem', borderRadius: '8px', border: 'none', background: '#c62828', color: '#fff', fontWeight: 700, fontSize: '0.78rem', cursor: 'pointer' }}
                         >
                           {atualizandoId === item.id ? 'Alterando...' : 'Alterar NCM'}
