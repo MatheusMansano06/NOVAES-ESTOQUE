@@ -24,6 +24,7 @@ export function ConferenciaNcm() {
   const [selecionados, setSelecionados] = useState<Set<string | number>>(new Set())
   const [emMassa, setEmMassa] = useState<{ total: number; feito: number } | null>(null)
   const [filtroStatus, setFiltroStatus] = useState<'todos' | 'divergentes' | 'batem'>('divergentes')
+  const [filtroNcmAtual, setFiltroNcmAtual] = useState<string | null>(null)
 
   const buscar = useCallback(async () => {
     setCarregando(true)
@@ -41,6 +42,7 @@ export function ConferenciaNcm() {
         if (d.status === 'pronto') {
           setItens(d.resultado?.itens || [])
           setSelecionados(new Set())
+          setFiltroNcmAtual(null)
           break
         }
         if (d.status === 'erro') {
@@ -92,7 +94,21 @@ export function ConferenciaNcm() {
 
   const divergentes = itens.filter((i) => !i.bate)
   const batem = itens.filter((i) => i.bate)
-  const itensExibidos = filtroStatus === 'divergentes' ? divergentes : filtroStatus === 'batem' ? batem : itens
+  const itensPorStatus = filtroStatus === 'divergentes' ? divergentes : filtroStatus === 'batem' ? batem : itens
+
+  // Agrupa por NCM atual (ex.: "6506.10.10", "8714.10.00", vazio) dentro do
+  // filtro de status já aplicado, pra poder isolar cada grupo.
+  const contagemPorNcm = new Map<string, number>()
+  for (const item of itensPorStatus) {
+    const chave = item.ncm_atual || '(vazio)'
+    contagemPorNcm.set(chave, (contagemPorNcm.get(chave) || 0) + 1)
+  }
+  const gruposNcm = Array.from(contagemPorNcm.entries()).sort((a, b) => b[1] - a[1])
+
+  const itensExibidos = filtroNcmAtual
+    ? itensPorStatus.filter((i) => (i.ncm_atual || '(vazio)') === filtroNcmAtual)
+    : itensPorStatus
+
   const todosDivergentesSelecionados = divergentes.length > 0 && divergentes.every((i) => selecionados.has(i.id))
 
   const alternarSelecaoTodos = () => {
@@ -155,7 +171,7 @@ export function ConferenciaNcm() {
               <button
                 key={valor}
                 type="button"
-                onClick={() => setFiltroStatus(valor)}
+                onClick={() => { setFiltroStatus(valor); setFiltroNcmAtual(null) }}
                 style={{
                   padding: '0.4rem 0.9rem', borderRadius: '999px', fontSize: '0.8rem', fontWeight: 700,
                   border: filtroStatus === valor ? '1px solid #2d3277' : '1px solid #dfe3e8',
@@ -182,6 +198,41 @@ export function ConferenciaNcm() {
                 {emMassa ? `Alterando ${emMassa.feito}/${emMassa.total}...` : `Alterar NCM dos selecionados (${selecionados.size})`}
               </button>
             )}
+          </div>
+        )}
+
+        {gruposNcm.length > 1 && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', marginBottom: '1rem', flexWrap: 'wrap' }}>
+            <span style={{ fontSize: '0.75rem', color: '#667085', marginRight: '0.25rem' }}>NCM atual:</span>
+            <button
+              type="button"
+              onClick={() => setFiltroNcmAtual(null)}
+              style={{
+                padding: '0.3rem 0.7rem', borderRadius: '999px', fontSize: '0.76rem', fontWeight: 700,
+                border: !filtroNcmAtual ? '1px solid #2d3277' : '1px solid #dfe3e8',
+                background: !filtroNcmAtual ? '#2d3277' : '#fff',
+                color: !filtroNcmAtual ? '#fff' : '#444',
+                cursor: 'pointer',
+              }}
+            >
+              Todos ({itensPorStatus.length})
+            </button>
+            {gruposNcm.map(([ncm, qtd]) => (
+              <button
+                key={ncm}
+                type="button"
+                onClick={() => setFiltroNcmAtual(ncm)}
+                style={{
+                  padding: '0.3rem 0.7rem', borderRadius: '999px', fontSize: '0.76rem', fontWeight: 700,
+                  border: filtroNcmAtual === ncm ? '1px solid #2d3277' : '1px solid #dfe3e8',
+                  background: filtroNcmAtual === ncm ? '#2d3277' : '#fff',
+                  color: filtroNcmAtual === ncm ? '#fff' : '#444',
+                  cursor: 'pointer',
+                }}
+              >
+                {ncm} ({qtd})
+              </button>
+            ))}
           </div>
         )}
 
