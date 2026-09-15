@@ -636,6 +636,35 @@ async def atualizar_ncm_olist(request: Request):
     return JSONResponse(resultado, status_code=200 if resultado.get("sucesso") else 502)
 
 
+async def atualizar_fiscal_combinado(request: Request):
+    """POST /api/fiscal/atualizar  Body: {produto_id?, item_id?, ncm, cest?}
+    Corrige o NCM na Olist e o NCM/CEST no Mercado Livre do mesmo produto,
+    numa tacada só. Informe produto_id (Olist) e/ou item_id (ML) — o que
+    faltar simplesmente não é tocado."""
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"sucesso": False, "erro": "JSON inválido"}, status_code=400)
+
+    produto_id = body.get("produto_id")
+    item_id = body.get("item_id")
+    ncm = body.get("ncm")
+    cest = body.get("cest")
+    if not ncm or (not produto_id and not item_id):
+        return JSONResponse({"sucesso": False, "erro": "Informe ncm e ao menos produto_id ou item_id"}, status_code=400)
+
+    resultado_olist = olist.atualizar_ncm_produto(str(produto_id), str(ncm)) if produto_id else None
+    resultado_ml = ml.atualizar_dados_fiscais(str(item_id), novo_ncm=str(ncm), novo_cest=cest) if item_id else None
+
+    ok_olist = resultado_olist is None or resultado_olist.get("sucesso")
+    ok_ml = resultado_ml is None or resultado_ml.get("sucesso")
+    sucesso = bool(ok_olist and ok_ml)
+    return JSONResponse(
+        {"sucesso": sucesso, "olist": resultado_olist, "ml": resultado_ml},
+        status_code=200 if sucesso else 502,
+    )
+
+
 _conferencia_ncm_lock = threading.Lock()
 _conferencia_ncm_estado: Dict = {
     "status": "idle",  # idle | rodando | pronto | erro
@@ -6288,6 +6317,7 @@ routes = [
     Route("/api/olist/vinculos", olist_listar_vinculos, methods=["GET"]),
     Route("/api/olist/vinculos/deletar", olist_deletar_vinculo, methods=["POST"]),
     Route("/api/olist/atualizar-ncm", atualizar_ncm_olist, methods=["POST"]),
+    Route("/api/fiscal/atualizar", atualizar_fiscal_combinado, methods=["POST"]),
     Route("/api/olist/conferencia-ncm", conferencia_ncm_olist_status, methods=["GET"]),
     Route("/api/olist/conferencia-ncm/iniciar", conferencia_ncm_olist_iniciar, methods=["POST"]),
     Route("/api/olist/produtos-tipos", produtos_tipos_status, methods=["GET"]),

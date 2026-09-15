@@ -214,6 +214,11 @@ function SecaoFiscal() {
   const [erro, setErro] = useState('')
   const [filtro, setFiltro] = useState<'todos' | 'correto' | 'divergente' | 'sem_dados_ml'>('divergente')
   const [jaRodou, setJaRodou] = useState(false)
+  const [ncmDesejado, setNcmDesejado] = useState('65070000')
+  const [cestDesejado, setCestDesejado] = useState('')
+  const [selecionados, setSelecionados] = useState<Set<string>>(new Set())
+  const [corrigindoId, setCorrigindoId] = useState<string | null>(null)
+  const [emMassa, setEmMassa] = useState<{ total: number; feito: number } | null>(null)
 
   const comparar = useCallback(async () => {
     setCarregando(true)
@@ -240,6 +245,78 @@ function SecaoFiscal() {
   }, [])
 
   const itensExibidos = filtro === 'todos' ? itens : itens.filter((i) => i.status === filtro)
+
+  // Corrige na Olist e no ML numa chamada só; devolve null em sucesso ou a mensagem de erro.
+  const executarCorrecao = async (item: ItemFiscal): Promise<string | null> => {
+    try {
+      const r = await fetch(`${API_BASE}/api/fiscal/atualizar`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          produto_id: item.produto_id,
+          item_id: item.item_id,
+          ncm: ncmDesejado,
+          cest: cestDesejado.trim() || undefined,
+        }),
+      })
+      const d = await r.json()
+      if (!r.ok || !d.sucesso) {
+        const partes = [d.olist?.erro, d.ml?.erro].filter(Boolean)
+        throw new Error(partes.join(' | ') || 'Falha ao corrigir')
+      }
+      setItens((prev) => prev.map((p) => (
+        p.item_id === item.item_id
+          ? { ...p, olist_ncm: ncmDesejado, ml_ncm: ncmDesejado, divergencias: p.divergencias.filter((x) => x !== 'ncm'), status: p.divergencias.filter((x) => x !== 'ncm').length ? 'divergente' : 'correto' }
+          : p
+      )))
+      return null
+    } catch (e) {
+      return String(e instanceof Error ? e.message : e)
+    }
+  }
+
+  const corrigirItem = async (item: ItemFiscal) => {
+    if (!window.confirm(`Corrigir NCM de "${item.nome}" (SKU ${item.sku}) para ${ncmDesejado}${cestDesejado.trim() ? ` (CEST ${cestDesejado.trim()} no ML)` : ''}, na Olist e no ML?`)) return
+    setCorrigindoId(item.item_id)
+    const erroItem = await executarCorrecao(item)
+    setCorrigindoId(null)
+    if (erroItem) alert('❌ ' + erroItem)
+  }
+
+  const toggleSelecionado = (itemId: string) => {
+    setSelecionados((prev) => {
+      const novo = new Set(prev)
+      if (novo.has(itemId)) novo.delete(itemId)
+      else novo.add(itemId)
+      return novo
+    })
+  }
+
+  const corrigiveis = itensExibidos.filter((i) => i.status === 'divergente' || i.status === 'sem_dados_ml')
+  const todosSelecionados = corrigiveis.length > 0 && corrigiveis.every((i) => selecionados.has(i.item_id))
+
+  const alternarSelecaoTodos = () => {
+    setSelecionados(todosSelecionados ? new Set() : new Set(corrigiveis.map((i) => i.item_id)))
+  }
+
+  const corrigirSelecionadosEmMassa = async () => {
+    const alvos = itens.filter((i) => selecionados.has(i.item_id))
+    if (alvos.length === 0) return
+    if (!window.confirm(`Corrigir NCM de ${alvos.length} produto(s) selecionado(s) para ${ncmDesejado}${cestDesejado.trim() ? ` (CEST ${cestDesejado.trim()} no ML)` : ''}, na Olist e no ML?`)) return
+
+    setEmMassa({ total: alvos.length, feito: 0 })
+    const erros: string[] = []
+    for (const item of alvos) {
+      const erroItem = await executarCorrecao(item)
+      if (erroItem) erros.push(`${item.sku}: ${erroItem}`)
+      setEmMassa((prev) => (prev ? { ...prev, feito: prev.feito + 1 } : prev))
+    }
+    setEmMassa(null)
+    setSelecionados(new Set())
+    if (erros.length > 0) {
+      alert(`❌ ${erros.length} de ${alvos.length} falharam:\n` + erros.slice(0, 10).join('\n'))
+    }
+  }
 
   return (
     <div className="card">
@@ -284,6 +361,31 @@ function SecaoFiscal() {
               ))}
             </div>
 
+            <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'flex-end', flexWrap: 'wrap', marginBottom: '0.75rem', padding: '0.75rem', background: '#f7f8fa', borderRadius: '8px' }}>
+              <div>
+                <label style={{ fontSize: '0.75rem', color: '#667085', display: 'block', marginBottom: '0.2rem' }}>NCM desejado (Olist + ML)</label>
+                <input value={ncmDesejado} onChange={(e) => setNcmDesejado(e.target.value)} style={{ padding: '0.45rem 0.6rem', borderRadius: '8px', border: '1px solid #cfd8dc' }} />
+              </div>
+              <div>
+                <label style={{ fontSize: '0.75rem', color: '#667085', display: 'block', marginBottom: '0.2rem' }}>CEST desejado (só ML, opcional)</label>
+                <input value={cestDesejado} onChange={(e) => setCestDesejado(e.target.value)} placeholder="ex.: 0100700" style={{ padding: '0.45rem 0.6rem', borderRadius: '8px', border: '1px solid #cfd8dc' }} />
+              </div>
+              {corrigiveis.length > 0 && (
+                <button
+                  type="button"
+                  onClick={corrigirSelecionadosEmMassa}
+                  disabled={selecionados.size === 0 || !!emMassa}
+                  style={{
+                    marginLeft: 'auto', padding: '0.5rem 1rem', borderRadius: '8px', border: 'none',
+                    background: selecionados.size === 0 ? '#e0a0a0' : '#c62828', color: '#fff',
+                    fontWeight: 700, fontSize: '0.82rem', cursor: selecionados.size === 0 ? 'default' : 'pointer',
+                  }}
+                >
+                  {emMassa ? `Corrigindo ${emMassa.feito}/${emMassa.total}...` : `Corrigir selecionados (${selecionados.size})`}
+                </button>
+              )}
+            </div>
+
             {itensExibidos.length === 0 ? (
               <div style={{ color: '#999', padding: '1rem 0' }}>Nenhum item nesse filtro.</div>
             ) : (
@@ -291,6 +393,11 @@ function SecaoFiscal() {
                 <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                   <thead>
                     <tr>
+                      <th style={th}>
+                        {corrigiveis.length > 0 && (
+                          <input type="checkbox" checked={todosSelecionados} onChange={alternarSelecaoTodos} />
+                        )}
+                      </th>
                       <th style={th}>Nome</th>
                       <th style={th}>SKU</th>
                       <th style={th}>NCM Olist</th>
@@ -298,11 +405,24 @@ function SecaoFiscal() {
                       <th style={th}>GTIN Olist</th>
                       <th style={th}>EAN ML</th>
                       <th style={th}>Status</th>
+                      <th style={th}></th>
                     </tr>
                   </thead>
                   <tbody>
-                    {itensExibidos.map((item) => (
+                    {itensExibidos.map((item) => {
+                      const corrigivel = item.status === 'divergente' || item.status === 'sem_dados_ml'
+                      return (
                       <tr key={item.item_id}>
+                        <td style={td}>
+                          {corrigivel && (
+                            <input
+                              type="checkbox"
+                              checked={selecionados.has(item.item_id)}
+                              onChange={() => toggleSelecionado(item.item_id)}
+                              disabled={!!emMassa}
+                            />
+                          )}
+                        </td>
                         <td style={td}>{item.nome}</td>
                         <td style={td}>{item.sku}</td>
                         <td style={{ ...td, color: item.divergencias.includes('ncm') ? '#c62828' : undefined, fontWeight: item.divergencias.includes('ncm') ? 700 : 400 }}>
@@ -322,8 +442,21 @@ function SecaoFiscal() {
                           {item.status === 'divergente' && <span style={{ color: '#c62828', fontWeight: 700 }}>⚠️ Divergente</span>}
                           {item.status === 'sem_dados_ml' && <span style={{ color: '#8d6e00', fontWeight: 700 }}>— Sem dados no ML</span>}
                         </td>
+                        <td style={td}>
+                          {corrigivel && (
+                            <button
+                              type="button"
+                              onClick={() => corrigirItem(item)}
+                              disabled={corrigindoId === item.item_id || !!emMassa}
+                              style={{ padding: '0.35rem 0.75rem', borderRadius: '8px', border: 'none', background: '#c62828', color: '#fff', fontWeight: 700, fontSize: '0.78rem', cursor: 'pointer' }}
+                            >
+                              {corrigindoId === item.item_id ? 'Corrigindo...' : 'Corrigir'}
+                            </button>
+                          )}
+                        </td>
                       </tr>
-                    ))}
+                      )
+                    })}
                   </tbody>
                 </table>
               </div>
