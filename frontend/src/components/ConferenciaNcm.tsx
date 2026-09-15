@@ -27,10 +27,22 @@ export function ConferenciaNcm() {
     setErro('')
     try {
       const params = new URLSearchParams({ termo, ncm_esperado: ncmEsperado })
-      const r = await fetch(`${API_BASE}/api/olist/conferencia-ncm?${params}`, { cache: 'no-store' })
-      const d = await r.json()
-      if (d.erro) throw new Error(d.erro)
-      setItens(d.itens || [])
+      await fetch(`${API_BASE}/api/olist/conferencia-ncm/iniciar?${params}`, { method: 'POST' })
+
+      // A varredura roda em background (1 request por produto, throttle da
+      // Olist) — faz polling do status em vez de esperar tudo numa request só.
+      for (;;) {
+        await new Promise((resolve) => setTimeout(resolve, 2000))
+        const r = await fetch(`${API_BASE}/api/olist/conferencia-ncm`, { cache: 'no-store' })
+        const d = await r.json()
+        if (d.status === 'pronto') {
+          setItens(d.resultado?.itens || [])
+          break
+        }
+        if (d.status === 'erro') {
+          throw new Error(d.erro || 'Falha na varredura')
+        }
+      }
     } catch (e) {
       setErro(String(e instanceof Error ? e.message : e))
     } finally {

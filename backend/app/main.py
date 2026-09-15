@@ -636,16 +636,23 @@ async def atualizar_ncm_olist(request: Request):
     return JSONResponse(resultado, status_code=200 if resultado.get("sucesso") else 502)
 
 
-async def conferencia_ncm_olist(request: Request):
-    """GET /api/olist/conferencia-ncm?termo=Viseira&ncm_esperado=65070000
-    Lista produtos cujo NOME contém `termo`, com o NCM atual cadastrado na
-    Olist comparado ao esperado — base para o botão "alterar NCM"."""
-    termo = (request.query_params.get("termo") or "Viseira").strip().lower()
-    ncm_esperado = (request.query_params.get("ncm_esperado") or "65070000").strip()
-    ncm_esperado_digitos = re.sub(r"\D", "", ncm_esperado)
-    incluir_excluidos = (request.query_params.get("incluir_excluidos") or "").lower() in ("1", "true", "sim")
+_conferencia_ncm_lock = threading.Lock()
+_conferencia_ncm_estado: Dict = {
+    "status": "idle",  # idle | rodando | pronto | erro
+    "resultado": None,
+    "erro": None,
+    "iniciado_em": None,
+    "concluido_em": None,
+}
 
+
+def _rodar_conferencia_ncm(termo: str, ncm_esperado: str, incluir_excluidos: bool) -> None:
+    """Roda em thread separada — 1 request por produto (throttle 120/min da
+    Olist) travaria o único worker do app para todo o resto (mesmo problema
+    já corrigido na Lista de Compra: ver _rodar_lista_compra_parados)."""
+    global _conferencia_ncm_estado
     try:
+        ncm_esperado_digitos = re.sub(r"\D", "", ncm_esperado)
         todos = olist.listar_todos_produtos(limite=3000)
         candidatos = [
             p for p in todos
@@ -669,15 +676,38 @@ async def conferencia_ncm_olist(request: Request):
                 "bate": re.sub(r"\D", "", ncm_atual) == ncm_esperado_digitos,
             })
 
-        return JSONResponse({
-            "itens": itens,
-            "total": len(itens),
-            "termo": termo,
-            "ncm_esperado": ncm_esperado,
+        _conferencia_ncm_estado.update({
+            "status": "pronto",
+            "resultado": {"itens": itens, "total": len(itens), "termo": termo, "ncm_esperado": ncm_esperado},
+            "erro": None,
+            "concluido_em": datetime.utcnow().isoformat(),
         })
     except Exception as e:
         print(f"[ERRO] Conferência NCM: {e}")
-        return JSONResponse({"itens": [], "total": 0, "erro": str(e)}, status_code=500)
+        _conferencia_ncm_estado.update({"status": "erro", "erro": str(e), "concluido_em": datetime.utcnow().isoformat()})
+
+
+async def conferencia_ncm_olist_iniciar(request: Request):
+    """POST /api/olist/conferencia-ncm/iniciar?termo=Viseira&ncm_esperado=65070000
+    Dispara a varredura em background e devolve na hora."""
+    termo = (request.query_params.get("termo") or "Viseira").strip().lower()
+    ncm_esperado = (request.query_params.get("ncm_esperado") or "65070000").strip()
+    incluir_excluidos = (request.query_params.get("incluir_excluidos") or "").lower() in ("1", "true", "sim")
+
+    with _conferencia_ncm_lock:
+        if _conferencia_ncm_estado["status"] == "rodando":
+            return JSONResponse({"status": "rodando", "iniciado_em": _conferencia_ncm_estado["iniciado_em"]})
+        _conferencia_ncm_estado.update({
+            "status": "rodando", "resultado": None, "erro": None,
+            "iniciado_em": datetime.utcnow().isoformat(), "concluido_em": None,
+        })
+        threading.Thread(target=_rodar_conferencia_ncm, args=(termo, ncm_esperado, incluir_excluidos), daemon=True).start()
+    return JSONResponse({"status": "rodando", "iniciado_em": _conferencia_ncm_estado["iniciado_em"]})
+
+
+async def conferencia_ncm_olist_status(request: Request):
+    """GET /api/olist/conferencia-ncm — status/resultado da última varredura disparada."""
+    return JSONResponse(_conferencia_ncm_estado)
 
 
 _lista_compra_lock = threading.Lock()
@@ -6056,7 +6086,8 @@ routes = [
     Route("/api/olist/vinculos", olist_listar_vinculos, methods=["GET"]),
     Route("/api/olist/vinculos/deletar", olist_deletar_vinculo, methods=["POST"]),
     Route("/api/olist/atualizar-ncm", atualizar_ncm_olist, methods=["POST"]),
-    Route("/api/olist/conferencia-ncm", conferencia_ncm_olist, methods=["GET"]),
+    Route("/api/olist/conferencia-ncm", conferencia_ncm_olist_status, methods=["GET"]),
+    Route("/api/olist/conferencia-ncm/iniciar", conferencia_ncm_olist_iniciar, methods=["POST"]),
     Route("/api/lista-compra/parados", lista_compra_parados_status, methods=["GET"]),
     Route("/api/lista-compra/parados/iniciar", lista_compra_parados_iniciar, methods=["POST"]),
     # Inbound / Lista de Separação para FU
