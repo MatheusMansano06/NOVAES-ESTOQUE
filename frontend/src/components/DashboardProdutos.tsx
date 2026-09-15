@@ -1,4 +1,5 @@
 import { useState, useCallback, useEffect } from 'react'
+import { createPortal } from 'react-dom'
 
 const API_BASE = import.meta.env.VITE_API_URL ?? 'http://127.0.0.1:8000'
 
@@ -145,7 +146,11 @@ function ModalCorrigirFiscal({ item, onClose, onSalvo }: {
     }
   }
 
-  return (
+  // Portal pro <body>: o modal fica dentro de um .card com backdrop-filter,
+  // que "prende" position:fixed relativo à altura do card inteiro (a tabela
+  // toda) em vez do viewport — por isso aparecia no meio da rolagem, não da
+  // tela visível.
+  return createPortal(
     <div
       style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: '1rem' }}
       onClick={onClose}
@@ -203,7 +208,8 @@ function ModalCorrigirFiscal({ item, onClose, onSalvo }: {
           </button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   )
 }
 
@@ -616,11 +622,12 @@ function SecaoFiscal() {
   )
 }
 
-export function DashboardProdutos() {
-  return (
-    <div>
-      <SecaoTipos />
-      <SecaoFiscal />
-    </div>
-  )
+// Cada seção agora é a própria página (menu separado) — juntas numa só
+// página davam uma rolagem enorme (tabelas grandes uma embaixo da outra).
+export function PaginaClassificacaoTipos() {
+  return <SecaoTipos />
+}
+
+export function PaginaFiscalMlOlist() {
+  return <SecaoFiscal />
 }

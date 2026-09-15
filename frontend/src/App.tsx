@@ -13,7 +13,7 @@ import { ListaCompra } from './components/ListaCompra'
 import { RadarFull } from './components/RadarFull'
 import { EstoqueEmbalagens } from './components/EstoqueEmbalagens'
 import { ConferenciaNcm } from './components/ConferenciaNcm'
-import { DashboardProdutos } from './components/DashboardProdutos'
+import { PaginaClassificacaoTipos, PaginaFiscalMlOlist } from './components/DashboardProdutos'
 import { Devolucoes } from './components/Devolucoes'
 import { PlataformaSelecao, type Platform, LogoMercadoLivre, LogoShopee, LogoOperacao } from './components/PlataformaSelecao'
 import { LoginNVS } from './components/LoginNVS'
@@ -93,7 +93,7 @@ interface ProdutoEstoque {
   }>
 }
 
-type Pagina = 'bemvindo' | 'inicial' | 'conferencia' | 'produtos_nota' | 'relacionamento_produto' | 'fornecedores' | 'full-operacoes' | 'anuncios' | 'notas-fiscais' | 'operadores' | 'garimpador' | 'lista-compra' | 'radar-full' | 'estoque-embalagens' | 'devolucoes' | 'conferencia-ncm' | 'dashboard-produtos'
+type Pagina = 'bemvindo' | 'inicial' | 'conferencia' | 'produtos_nota' | 'relacionamento_produto' | 'fornecedores' | 'full-operacoes' | 'anuncios' | 'notas-fiscais' | 'operadores' | 'garimpador' | 'lista-compra' | 'radar-full' | 'estoque-embalagens' | 'devolucoes' | 'conferencia-ncm' | 'classificacao-tipos' | 'fiscal-ml-olist'
 
 interface Divergencia {
   item_id: number
@@ -1678,7 +1678,8 @@ function App() {
       items: [
         { key: 'garimpador', label: 'Garimpador', icon: 'search', active: pagina === 'garimpador', onClick: () => setPagina('garimpador') },
         { key: 'conferencia-ncm', label: 'Conferência NCM', icon: 'warning', active: pagina === 'conferencia-ncm', onClick: () => setPagina('conferencia-ncm') },
-        { key: 'dashboard-produtos', label: 'Dashboard de Produtos', icon: 'dashboard', active: pagina === 'dashboard-produtos', onClick: () => setPagina('dashboard-produtos') },
+        { key: 'classificacao-tipos', label: 'Classificação Simples x Kit', icon: 'dashboard', active: pagina === 'classificacao-tipos', onClick: () => setPagina('classificacao-tipos') },
+        { key: 'fiscal-ml-olist', label: 'Fiscal ML x Olist', icon: 'sync', active: pagina === 'fiscal-ml-olist', onClick: () => setPagina('fiscal-ml-olist') },
       ],
     },
     // === ARQUIVADOS ===
@@ -3103,12 +3104,21 @@ function App() {
     )
   }
 
-  // ===== DASHBOARD DE PRODUTOS (kit x simples, fiscal ML x Olist) =====
-  if (pagina === 'dashboard-produtos') {
+  // ===== CLASSIFICAÇÃO SIMPLES X KIT =====
+  if (pagina === 'classificacao-tipos') {
     return renderComShell(
-      'Dashboard de Produtos',
-      'Classificação Simples x Kit e comparação de dados fiscais entre Mercado Livre e Olist.',
-      <DashboardProdutos />
+      'Classificação Simples x Kit',
+      'Percentual de anúncios Simples x Kit na Olist, com filtro por palavra no título.',
+      <PaginaClassificacaoTipos />
+    )
+  }
+
+  // ===== FISCAL: MERCADO LIVRE X OLIST =====
+  if (pagina === 'fiscal-ml-olist') {
+    return renderComShell(
+      'Fiscal: Mercado Livre x Olist',
+      'Compara NCM, GTIN/EAN e CEST entre as duas plataformas e corrige o que estiver divergente.',
+      <PaginaFiscalMlOlist />
     )
   }
 
