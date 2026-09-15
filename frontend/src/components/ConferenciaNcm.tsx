@@ -7,8 +7,44 @@ interface ItemNcm {
   sku: string
   nome: string
   situacao: string
+  tipo: string
   ncm_atual: string
   bate: boolean
+}
+
+const LABEL_TIPO: Record<string, string> = { S: 'Simples', K: 'Kit', F: 'Fabricado', M: 'Matéria-prima' }
+const labelTipo = (tipo: string) => LABEL_TIPO[tipo] || tipo || '(desconhecido)'
+
+function chipStyle(ativo: boolean): React.CSSProperties {
+  return {
+    padding: '0.3rem 0.7rem', borderRadius: '999px', fontSize: '0.76rem', fontWeight: 700,
+    border: ativo ? '1px solid #2d3277' : '1px solid #dfe3e8',
+    background: ativo ? '#2d3277' : '#fff',
+    color: ativo ? '#fff' : '#444',
+    cursor: 'pointer',
+  }
+}
+
+function FiltroChips({ label, total, opcoes, selecionado, onSelecionar }: {
+  label: string
+  total: number
+  opcoes: Array<[string, number, string]> // [valor, contagem, rótulo]
+  selecionado: string | null
+  onSelecionar: (valor: string | null) => void
+}) {
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', marginBottom: '1rem', flexWrap: 'wrap' }}>
+      <span style={{ fontSize: '0.75rem', color: '#667085', marginRight: '0.25rem' }}>{label}:</span>
+      <button type="button" onClick={() => onSelecionar(null)} style={chipStyle(!selecionado)}>
+        Todos ({total})
+      </button>
+      {opcoes.map(([valor, qtd, rotulo]) => (
+        <button key={valor} type="button" onClick={() => onSelecionar(valor)} style={chipStyle(selecionado === valor)}>
+          {rotulo} ({qtd})
+        </button>
+      ))}
+    </div>
+  )
 }
 
 const th: React.CSSProperties = { textAlign: 'left', padding: '0.6rem 0.8rem', fontSize: '0.78rem', color: '#667085', borderBottom: '1px solid #eee' }
@@ -25,6 +61,7 @@ export function ConferenciaNcm() {
   const [emMassa, setEmMassa] = useState<{ total: number; feito: number } | null>(null)
   const [filtroStatus, setFiltroStatus] = useState<'todos' | 'divergentes' | 'batem'>('divergentes')
   const [filtroNcmAtual, setFiltroNcmAtual] = useState<string | null>(null)
+  const [filtroTipo, setFiltroTipo] = useState<string | null>(null)
 
   const buscar = useCallback(async () => {
     setCarregando(true)
@@ -43,6 +80,7 @@ export function ConferenciaNcm() {
           setItens(d.resultado?.itens || [])
           setSelecionados(new Set())
           setFiltroNcmAtual(null)
+          setFiltroTipo(null)
           break
         }
         if (d.status === 'erro') {
@@ -96,18 +134,21 @@ export function ConferenciaNcm() {
   const batem = itens.filter((i) => i.bate)
   const itensPorStatus = filtroStatus === 'divergentes' ? divergentes : filtroStatus === 'batem' ? batem : itens
 
-  // Agrupa por NCM atual (ex.: "6506.10.10", "8714.10.00", vazio) dentro do
-  // filtro de status já aplicado, pra poder isolar cada grupo.
+  // Agrupa por NCM atual (ex.: "6506.10.10", "8714.10.00", vazio) e por tipo
+  // (Simples/Kit) dentro do filtro de status já aplicado, pra isolar cada grupo.
   const contagemPorNcm = new Map<string, number>()
+  const contagemPorTipo = new Map<string, number>()
   for (const item of itensPorStatus) {
-    const chave = item.ncm_atual || '(vazio)'
-    contagemPorNcm.set(chave, (contagemPorNcm.get(chave) || 0) + 1)
+    const chaveNcm = item.ncm_atual || '(vazio)'
+    contagemPorNcm.set(chaveNcm, (contagemPorNcm.get(chaveNcm) || 0) + 1)
+    contagemPorTipo.set(item.tipo || '', (contagemPorTipo.get(item.tipo || '') || 0) + 1)
   }
   const gruposNcm = Array.from(contagemPorNcm.entries()).sort((a, b) => b[1] - a[1])
+  const gruposTipo = Array.from(contagemPorTipo.entries()).sort((a, b) => b[1] - a[1])
 
-  const itensExibidos = filtroNcmAtual
-    ? itensPorStatus.filter((i) => (i.ncm_atual || '(vazio)') === filtroNcmAtual)
-    : itensPorStatus
+  const itensExibidos = itensPorStatus
+    .filter((i) => !filtroNcmAtual || (i.ncm_atual || '(vazio)') === filtroNcmAtual)
+    .filter((i) => filtroTipo === null || (i.tipo || '') === filtroTipo)
 
   const todosDivergentesSelecionados = divergentes.length > 0 && divergentes.every((i) => selecionados.has(i.id))
 
@@ -171,7 +212,7 @@ export function ConferenciaNcm() {
               <button
                 key={valor}
                 type="button"
-                onClick={() => { setFiltroStatus(valor); setFiltroNcmAtual(null) }}
+                onClick={() => { setFiltroStatus(valor); setFiltroNcmAtual(null); setFiltroTipo(null) }}
                 style={{
                   padding: '0.4rem 0.9rem', borderRadius: '999px', fontSize: '0.8rem', fontWeight: 700,
                   border: filtroStatus === valor ? '1px solid #2d3277' : '1px solid #dfe3e8',
@@ -202,38 +243,23 @@ export function ConferenciaNcm() {
         )}
 
         {gruposNcm.length > 1 && (
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', marginBottom: '1rem', flexWrap: 'wrap' }}>
-            <span style={{ fontSize: '0.75rem', color: '#667085', marginRight: '0.25rem' }}>NCM atual:</span>
-            <button
-              type="button"
-              onClick={() => setFiltroNcmAtual(null)}
-              style={{
-                padding: '0.3rem 0.7rem', borderRadius: '999px', fontSize: '0.76rem', fontWeight: 700,
-                border: !filtroNcmAtual ? '1px solid #2d3277' : '1px solid #dfe3e8',
-                background: !filtroNcmAtual ? '#2d3277' : '#fff',
-                color: !filtroNcmAtual ? '#fff' : '#444',
-                cursor: 'pointer',
-              }}
-            >
-              Todos ({itensPorStatus.length})
-            </button>
-            {gruposNcm.map(([ncm, qtd]) => (
-              <button
-                key={ncm}
-                type="button"
-                onClick={() => setFiltroNcmAtual(ncm)}
-                style={{
-                  padding: '0.3rem 0.7rem', borderRadius: '999px', fontSize: '0.76rem', fontWeight: 700,
-                  border: filtroNcmAtual === ncm ? '1px solid #2d3277' : '1px solid #dfe3e8',
-                  background: filtroNcmAtual === ncm ? '#2d3277' : '#fff',
-                  color: filtroNcmAtual === ncm ? '#fff' : '#444',
-                  cursor: 'pointer',
-                }}
-              >
-                {ncm} ({qtd})
-              </button>
-            ))}
-          </div>
+          <FiltroChips
+            label="NCM atual"
+            total={itensPorStatus.length}
+            opcoes={gruposNcm.map(([ncm, qtd]) => [ncm, qtd, ncm] as [string, number, string])}
+            selecionado={filtroNcmAtual}
+            onSelecionar={setFiltroNcmAtual}
+          />
+        )}
+
+        {gruposTipo.length > 1 && (
+          <FiltroChips
+            label="Tipo"
+            total={itensPorStatus.length}
+            opcoes={gruposTipo.map(([tipo, qtd]) => [tipo, qtd, labelTipo(tipo)] as [string, number, string])}
+            selecionado={filtroTipo}
+            onSelecionar={setFiltroTipo}
+          />
         )}
 
         {erro && <div style={{ color: '#c62828', marginBottom: '0.75rem' }}>{erro}</div>}
@@ -258,6 +284,7 @@ export function ConferenciaNcm() {
                   </th>
                   <th style={th}>Nome</th>
                   <th style={th}>SKU</th>
+                  <th style={th}>Tipo</th>
                   <th style={th}>NCM atual</th>
                   <th style={th}>Status</th>
                   <th style={th}></th>
@@ -278,6 +305,7 @@ export function ConferenciaNcm() {
                     </td>
                     <td style={td}>{item.nome}</td>
                     <td style={td}>{item.sku}</td>
+                    <td style={td}>{labelTipo(item.tipo)}</td>
                     <td style={td}>{item.ncm_atual || <em style={{ color: '#999' }}>vazio</em>}</td>
                     <td style={td}>
                       {item.bate ? (

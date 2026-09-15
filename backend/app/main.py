@@ -691,6 +691,7 @@ def _rodar_conferencia_ncm(termo: str, ncm_esperado: str, incluir_excluidos: boo
                 "sku": p.get("sku") or p.get("codigo_produto") or "",
                 "nome": p.get("nome") or "",
                 "situacao": p.get("situacao") or "",
+                "tipo": (detalhe or {}).get("tipo") or "",
                 "ncm_atual": ncm_atual,
                 "bate": re.sub(r"\D", "", ncm_atual) == ncm_esperado_digitos,
             })
