@@ -12,6 +12,7 @@ import { OperadoresManager } from './components/OperadoresManager'
 import { ListaCompra } from './components/ListaCompra'
 import { RadarFull } from './components/RadarFull'
 import { EstoqueEmbalagens } from './components/EstoqueEmbalagens'
+import { ConferenciaNcm } from './components/ConferenciaNcm'
 import { Devolucoes } from './components/Devolucoes'
 import { PlataformaSelecao, type Platform, LogoMercadoLivre, LogoShopee, LogoOperacao } from './components/PlataformaSelecao'
 import { LoginNVS } from './components/LoginNVS'
@@ -91,7 +92,7 @@ interface ProdutoEstoque {
   }>
 }
 
-type Pagina = 'bemvindo' | 'inicial' | 'conferencia' | 'produtos_nota' | 'relacionamento_produto' | 'fornecedores' | 'full-operacoes' | 'anuncios' | 'notas-fiscais' | 'operadores' | 'garimpador' | 'lista-compra' | 'radar-full' | 'estoque-embalagens' | 'devolucoes'
+type Pagina = 'bemvindo' | 'inicial' | 'conferencia' | 'produtos_nota' | 'relacionamento_produto' | 'fornecedores' | 'full-operacoes' | 'anuncios' | 'notas-fiscais' | 'operadores' | 'garimpador' | 'lista-compra' | 'radar-full' | 'estoque-embalagens' | 'devolucoes' | 'conferencia-ncm'
 
 interface Divergencia {
   item_id: number
@@ -1675,6 +1676,7 @@ function App() {
       label: 'Ferramentas',
       items: [
         { key: 'garimpador', label: 'Garimpador', icon: 'search', active: pagina === 'garimpador', onClick: () => setPagina('garimpador') },
+        { key: 'conferencia-ncm', label: 'Conferência NCM', icon: 'warning', active: pagina === 'conferencia-ncm', onClick: () => setPagina('conferencia-ncm') },
       ],
     },
     // === ARQUIVADOS ===
@@ -3087,6 +3089,15 @@ function App() {
       'Estoque de Embalagens',
       'Controle de caixas e inserts com baixa automática por venda.',
       <EstoqueEmbalagens />
+    )
+  }
+
+  // ===== PÁGINA DE CONFERÊNCIA DE NCM =====
+  if (pagina === 'conferencia-ncm') {
+    return renderComShell(
+      'Conferência de NCM',
+      'Compara o NCM cadastrado na Olist com o esperado e permite corrigir.',
+      <ConferenciaNcm />
     )
   }
 
