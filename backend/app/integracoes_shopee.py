@@ -13,6 +13,7 @@ Por isso get_access_token() renova sob lock, com dupla checagem.
 """
 
 import hashlib
+import re
 import hmac
 import json
 import os
@@ -317,13 +318,131 @@ class ShopeeAPI:
             "sign": self._sign_loja(path, ts, token, shop_id),
             **(params or {}),
         }
-        url = f"{self.host}{path}?{urllib.parse.urlencode(query)}"
+        # doseq=True: parâmetro tipo lista (ex.: item_status) vira chave repetida
+        # (item_status=UNLIST&item_status=NORMAL), do jeito que a doc da Shopee pede.
+        url = f"{self.host}{path}?{urllib.parse.urlencode(query, doseq=True)}"
         try:
             req = urllib.request.Request(url, headers={"Accept": "application/json"})
             with urllib.request.urlopen(req, timeout=20) as resp:
                 return json.loads(resp.read().decode("utf-8"))
         except Exception as e:
             return {"error": "falha_requisicao", "message": str(e)}
+
+    def chamar_post(self, path: str, corpo: Dict[str, Any]) -> Dict[str, Any]:
+        """POST assinado em endpoint de loja (ex.: update_item). Devolve o corpo já em dict."""
+        token = self.get_access_token()
+        dados = self._ler_token()
+        shop_id = str(dados.get("shop_id") or "")
+        if not token or not shop_id:
+            return {"error": "nao_autorizado", "message": "Loja Shopee não autorizada"}
+
+        ts = int(time.time())
+        query = {
+            "partner_id": self.partner_id,
+            "timestamp": ts,
+            "access_token": token,
+            "shop_id": shop_id,
+            "sign": self._sign_loja(path, ts, token, shop_id),
+        }
+        url = f"{self.host}{path}?{urllib.parse.urlencode(query)}"
+        try:
+            req = urllib.request.Request(
+                url,
+                data=json.dumps(corpo).encode("utf-8"),
+                headers={"Content-Type": "application/json", "User-Agent": "NVS-Estoque/1.0"},
+                method="POST",
+            )
+            with urllib.request.urlopen(req, timeout=20) as resp:
+                return json.loads(resp.read().decode("utf-8"))
+        except urllib.error.HTTPError as e:
+            bruto = ""
+            try:
+                bruto = e.read().decode("utf-8", errors="replace")[:500]
+            except Exception:
+                pass
+            try:
+                return json.loads(bruto)
+            except (json.JSONDecodeError, ValueError):
+                return {"error": f"http_{e.code}", "message": bruto or str(e)}
+        except Exception as e:
+            return {"error": "falha_requisicao", "message": str(e)}
+
+    def listar_todos_itens_fiscais(self) -> list:
+        """item_id/sku/nome/tax_info (NCM/CEST) de todo item ativo ou pausado —
+        mesma paginação de listar_todos_skus, só que devolve o tax_info também
+        em vez de só o SKU normalizado."""
+        itens = []
+        for status in ("NORMAL", "UNLIST"):
+            offset = 0
+            while True:
+                resp = self.chamar("/api/v2/product/get_item_list", {
+                    "offset": offset,
+                    "page_size": 100,
+                    "item_status": [status],
+                })
+                if resp.get("error"):
+                    print(f"[SHOPEE] Erro ao listar itens {status}: {resp.get('error')} {resp.get('message')}")
+                    break
+                corpo = resp.get("response") or {}
+                item_ids = [it.get("item_id") for it in (corpo.get("item") or []) if it.get("item_id")]
+
+                for i in range(0, len(item_ids), 50):
+                    lote = item_ids[i:i + 50]
+                    r2 = self.chamar("/api/v2/product/get_item_base_info", {
+                        "item_id_list": ",".join(str(x) for x in lote),
+                        "need_tax_info": True,
+                    })
+                    if r2.get("error"):
+                        print(f"[SHOPEE] Erro ao buscar tax_info do lote {lote}: {r2.get('error')} {r2.get('message')}")
+                        continue
+                    for item in (r2.get("response") or {}).get("item_list") or []:
+                        tax = item.get("tax_info") or {}
+                        itens.append({
+                            "item_id": str(item.get("item_id")),
+                            "sku": item.get("item_sku") or "",
+                            "nome": item.get("item_name") or "",
+                            "ncm": tax.get("ncm") or "",
+                            "cest": tax.get("cest") or "",
+                        })
+
+                if not corpo.get("has_next_page") or not item_ids:
+                    break
+                offset = corpo.get("next_offset", offset + len(item_ids))
+        return itens
+
+    def atualizar_ncm(self, item_id: str, ncm: str, cest: Optional[str] = None) -> Dict[str, Any]:
+        """Atualiza NCM (e opcionalmente CEST) de um anúncio via update_item.
+        tax_info aceita atualização parcial — não precisa reenviar o produto inteiro.
+
+        A Shopee pode devolver sucesso (sem "error") e mesmo assim não gravar
+        o CEST — ela valida o CEST contra o NCM e, se não bater, ignora o
+        campo em silêncio (sem avisar). Por isso reconferimos com um GET
+        logo depois em vez de confiar no corpo do POST."""
+        tax_info: Dict[str, Any] = {"ncm": ncm}
+        if cest:
+            tax_info["cest"] = cest
+        resp = self.chamar_post("/api/v2/product/update_item", {
+            "item_id": int(item_id),
+            "tax_info": tax_info,
+        })
+        if resp.get("error"):
+            return {"sucesso": False, "erro": f"{resp.get('error')}: {resp.get('message')}"}
+
+        r2 = self.chamar("/api/v2/product/get_item_base_info", {
+            "item_id_list": str(item_id),
+            "need_tax_info": True,
+        })
+        item_atual = ((r2.get("response") or {}).get("item_list") or [{}])[0]
+        tax_atual = item_atual.get("tax_info") or {}
+        ncm_gravado = tax_atual.get("ncm") or ""
+        cest_gravado = tax_atual.get("cest") or ""
+
+        if re.sub(r"\D", "", ncm_gravado) != re.sub(r"\D", "", ncm):
+            return {"sucesso": False, "erro": f"Shopee reportou sucesso mas o NCM não foi gravado (continua {ncm_gravado or 'vazio'})"}
+        if cest and re.sub(r"\D", "", cest_gravado) != re.sub(r"\D", "", cest):
+            return {"sucesso": False, "erro": f"Shopee gravou o NCM mas rejeitou o CEST em silêncio (continua {cest_gravado or 'vazio'} — provavelmente não bate com esse NCM)"}
+
+        return {"sucesso": True, "ncm_novo": ncm_gravado, "cest_novo": cest_gravado}
 
     def info_loja(self) -> Dict[str, Any]:
         """Dados da loja autorizada. Primeira chamada assinada com token."""
@@ -450,6 +569,90 @@ class ShopeeAPI:
                 "amostra": None if erro else resposta.get("response"),
             }
         return saida
+
+    def listar_pausados_sem_estoque(self) -> list:
+        """
+        Itens pausados (UNLIST) e sem estoque disponível — para a lista de compra.
+
+        1) get_item_list pagina os item_id com status UNLIST.
+        2) get_item_base_info traz sku/nome/estoque em lotes de até 50 ids.
+        Filtra por total_available_stock == 0 (pausado por outro motivo, com
+        estoque ainda disponível, não entra na lista).
+        """
+        item_ids = []
+        offset = 0
+        while True:
+            resp = self.chamar("/api/v2/product/get_item_list", {
+                "offset": offset,
+                "page_size": 100,
+                "item_status": ["UNLIST"],
+            })
+            if resp.get("error"):
+                print(f"[SHOPEE] Erro ao listar itens UNLIST: {resp.get('error')} {resp.get('message')}")
+                break
+            corpo = resp.get("response") or {}
+            pagina = [it.get("item_id") for it in (corpo.get("item") or []) if it.get("item_id")]
+            item_ids.extend(pagina)
+            if not corpo.get("has_next_page") or not pagina:
+                break
+            offset = corpo.get("next_offset", offset + len(pagina))
+
+        parados = []
+        for i in range(0, len(item_ids), 50):
+            lote = item_ids[i:i + 50]
+            resp = self.chamar("/api/v2/product/get_item_base_info", {
+                "item_id_list": ",".join(str(x) for x in lote),
+            })
+            if resp.get("error"):
+                print(f"[SHOPEE] Erro ao buscar base_info do lote {lote}: {resp.get('error')} {resp.get('message')}")
+                continue
+            for item in (resp.get("response") or {}).get("item_list") or []:
+                estoque = ((item.get("stock_info_v2") or {}).get("summary_info") or {}).get("total_available_stock")
+                if estoque == 0:
+                    parados.append({
+                        "item_id": str(item.get("item_id")),
+                        "sku": item.get("item_sku") or "",
+                        "nome": item.get("item_name") or "",
+                        "estoque": 0,
+                    })
+        return parados
+
+    def listar_todos_skus(self) -> set:
+        """SKUs (normalizados) de todo item ativo ou pausado na Shopee — usado
+        para saber se um produto da Olist tem anúncio na Shopee, já que a
+        Shopee não expõe isso no cadastro do produto (é por item_id próprio).
+        """
+        skus = set()
+        for status in ("NORMAL", "UNLIST"):
+            offset = 0
+            while True:
+                resp = self.chamar("/api/v2/product/get_item_list", {
+                    "offset": offset,
+                    "page_size": 100,
+                    "item_status": [status],
+                })
+                if resp.get("error"):
+                    print(f"[SHOPEE] Erro ao listar itens {status}: {resp.get('error')} {resp.get('message')}")
+                    break
+                corpo = resp.get("response") or {}
+                item_ids = [it.get("item_id") for it in (corpo.get("item") or []) if it.get("item_id")]
+
+                for i in range(0, len(item_ids), 50):
+                    lote = item_ids[i:i + 50]
+                    r2 = self.chamar("/api/v2/product/get_item_base_info", {
+                        "item_id_list": ",".join(str(x) for x in lote),
+                    })
+                    if r2.get("error"):
+                        continue
+                    for item in (r2.get("response") or {}).get("item_list") or []:
+                        sku = re.sub(r"[^a-z0-9]", "", (item.get("item_sku") or "").lower())
+                        if sku:
+                            skus.add(sku)
+
+                if not corpo.get("has_next_page") or not item_ids:
+                    break
+                offset = corpo.get("next_offset", offset + len(item_ids))
+        return skus
 
     def status(self) -> Dict[str, Any]:
         """Campos em português, no mesmo formato de /api/ml|olist/status."""

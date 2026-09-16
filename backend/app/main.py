@@ -620,6 +620,542 @@ async def get_nf(request: Request):
     finally:
         db.close()
 
+async def atualizar_ncm_olist(request: Request):
+    """POST /api/olist/atualizar-ncm  Body: {produto_id, ncm, shopee_item_id?}
+    Corrige o NCM na Olist e, se shopee_item_id vier preenchido, na Shopee também."""
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"sucesso": False, "erro": "JSON inválido"}, status_code=400)
+
+    produto_id = body.get("produto_id")
+    ncm = body.get("ncm")
+    shopee_item_id = body.get("shopee_item_id")
+    if not produto_id or not ncm:
+        return JSONResponse({"sucesso": False, "erro": "Informe produto_id e ncm"}, status_code=400)
+
+    resultado = olist.atualizar_ncm_produto(str(produto_id), str(ncm))
+    resultado_shopee = shopee.atualizar_ncm(str(shopee_item_id), str(ncm)) if shopee_item_id else None
+    sucesso = bool(resultado.get("sucesso") and (resultado_shopee is None or resultado_shopee.get("sucesso")))
+    return JSONResponse(
+        {"sucesso": sucesso, "erro": resultado.get("erro") or (resultado_shopee or {}).get("erro"), "shopee": resultado_shopee},
+        status_code=200 if sucesso else 502,
+    )
+
+
+
+async def atualizar_fiscal_combinado(request: Request):
+    """POST /api/fiscal/atualizar  Body: {produto_id?, item_id?, shopee_item_id?, ncm, cest?}
+    Corrige o NCM na Olist, o NCM/CEST no Mercado Livre e o NCM na Shopee do
+    mesmo produto, numa tacada só. Informe só o(s) id(s) do(s) canal(is) que
+    o produto tem — o que faltar simplesmente não é tocado."""
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"sucesso": False, "erro": "JSON inválido"}, status_code=400)
+
+    produto_id = body.get("produto_id")
+    item_id = body.get("item_id")
+    shopee_item_id = body.get("shopee_item_id")
+    ncm = body.get("ncm")
+    cest = body.get("cest")
+    if not ncm or (not produto_id and not item_id and not shopee_item_id):
+        return JSONResponse({"sucesso": False, "erro": "Informe ncm e ao menos produto_id, item_id ou shopee_item_id"}, status_code=400)
+
+    resultado_olist = olist.atualizar_ncm_produto(str(produto_id), str(ncm)) if produto_id else None
+    resultado_ml = ml.atualizar_dados_fiscais(str(item_id), novo_ncm=str(ncm), novo_cest=cest) if item_id else None
+    resultado_shopee = shopee.atualizar_ncm(str(shopee_item_id), str(ncm), cest=cest) if shopee_item_id else None
+
+    ok_olist = resultado_olist is None or resultado_olist.get("sucesso")
+    ok_ml = resultado_ml is None or resultado_ml.get("sucesso")
+    ok_shopee = resultado_shopee is None or resultado_shopee.get("sucesso")
+    sucesso = bool(ok_olist and ok_ml and ok_shopee)
+    return JSONResponse(
+        {"sucesso": sucesso, "olist": resultado_olist, "ml": resultado_ml, "shopee": resultado_shopee},
+        status_code=200 if sucesso else 502,
+    )
+
+
+_conferencia_ncm_lock = threading.Lock()
+_conferencia_ncm_estado: Dict = {
+    "status": "idle",  # idle | rodando | pronto | erro
+    "resultado": None,
+    "erro": None,
+    "iniciado_em": None,
+    "concluido_em": None,
+}
+
+
+def _rodar_conferencia_ncm(termo: str, ncm_esperado: str, incluir_excluidos: bool) -> None:
+    """Roda em thread separada — 1 request por produto (throttle 120/min da
+    Olist) travaria o único worker do app para todo o resto (mesmo problema
+    já corrigido na Lista de Compra: ver _rodar_lista_compra_parados)."""
+    global _conferencia_ncm_estado
+    try:
+        ncm_esperado_digitos = re.sub(r"\D", "", ncm_esperado)
+        todos = olist.listar_todos_produtos(limite=3000)
+        candidatos = [
+            p for p in todos
+            if termo in (p.get("nome") or "").lower()
+            and (incluir_excluidos or p.get("situacao") != "E")
+        ]
+
+        # Só entra na lista quem tem anúncio em pelo menos um canal (ML ou
+        # Shopee) — a Olist não expõe isso no cadastro do produto (é um dado
+        # do Hub de Integração dela, não do endpoint /produtos que já usamos).
+        db = SessionLocal()
+        try:
+            ml_skus = {
+                re.sub(r"[^a-z0-9]", "", (s or "").lower())
+                for (s,) in db.query(MercadoLivreItemCache.sku).filter(MercadoLivreItemCache.sku.isnot(None)).all()
+            }
+        finally:
+            db.close()
+        shopee_itens_fiscais = shopee.listar_todos_itens_fiscais() if shopee.configurado else []
+        shopee_por_sku = {}
+        for si in shopee_itens_fiscais:
+            chave = re.sub(r"[^a-z0-9]", "", (si.get("sku") or "").lower())
+            if chave:
+                shopee_por_sku[chave] = si
+        shopee_skus = set(shopee_por_sku)
+
+        def _tem_integracao(p: Dict) -> bool:
+            sku_norm = re.sub(r"[^a-z0-9]", "", (p.get("sku") or p.get("codigo_produto") or "").lower())
+            return bool(sku_norm) and (sku_norm in ml_skus or sku_norm in shopee_skus)
+
+        candidatos = [p for p in candidatos if _tem_integracao(p)]
+
+        itens = []
+        for p in candidatos:
+            produto_id = p.get("id")
+            detalhe = olist.obter_detalhes_completo(str(produto_id)) if produto_id else None
+            ncm_atual = str((detalhe or {}).get("ncm") or "")
+            sku_norm = re.sub(r"[^a-z0-9]", "", (p.get("sku") or p.get("codigo_produto") or "").lower())
+            item_shopee = shopee_por_sku.get(sku_norm)
+            # A Olist devolve o NCM formatado com pontos (ex.: "6506.10.10") —
+            # comparar só os dígitos, senão nunca bate mesmo quando é o mesmo NCM.
+            olist_bate = re.sub(r"\D", "", ncm_atual) == ncm_esperado_digitos
+            shopee_ncm = str((item_shopee or {}).get("ncm") or "")
+            shopee_bate = (re.sub(r"\D", "", shopee_ncm) == ncm_esperado_digitos) if item_shopee else True
+            itens.append({
+                "id": produto_id,
+                "sku": p.get("sku") or p.get("codigo_produto") or "",
+                "nome": p.get("nome") or "",
+                "situacao": p.get("situacao") or "",
+                "tipo": (detalhe or {}).get("tipo") or "",
+                "ncm_atual": ncm_atual,
+                "shopee_item_id": (item_shopee or {}).get("item_id") or "",
+                "shopee_ncm": shopee_ncm,
+                "bate": olist_bate and shopee_bate,
+            })
+
+        _conferencia_ncm_estado.update({
+            "status": "pronto",
+            "resultado": {"itens": itens, "total": len(itens), "termo": termo, "ncm_esperado": ncm_esperado},
+            "erro": None,
+            "concluido_em": datetime.utcnow().isoformat(),
+        })
+    except Exception as e:
+        print(f"[ERRO] Conferência NCM: {e}")
+        _conferencia_ncm_estado.update({"status": "erro", "erro": str(e), "concluido_em": datetime.utcnow().isoformat()})
+
+
+async def conferencia_ncm_olist_iniciar(request: Request):
+    """POST /api/olist/conferencia-ncm/iniciar?termo=Viseira&ncm_esperado=65070000
+    Dispara a varredura em background e devolve na hora."""
+    termo = (request.query_params.get("termo") or "Viseira").strip().lower()
+    ncm_esperado = (request.query_params.get("ncm_esperado") or "65070000").strip()
+    incluir_excluidos = (request.query_params.get("incluir_excluidos") or "").lower() in ("1", "true", "sim")
+
+    with _conferencia_ncm_lock:
+        if _conferencia_ncm_estado["status"] == "rodando":
+            return JSONResponse({"status": "rodando", "iniciado_em": _conferencia_ncm_estado["iniciado_em"]})
+        _conferencia_ncm_estado.update({
+            "status": "rodando", "resultado": None, "erro": None,
+            "iniciado_em": datetime.utcnow().isoformat(), "concluido_em": None,
+        })
+        threading.Thread(target=_rodar_conferencia_ncm, args=(termo, ncm_esperado, incluir_excluidos), daemon=True).start()
+    return JSONResponse({"status": "rodando", "iniciado_em": _conferencia_ncm_estado["iniciado_em"]})
+
+
+async def conferencia_ncm_olist_status(request: Request):
+    """GET /api/olist/conferencia-ncm — status/resultado da última varredura disparada."""
+    return JSONResponse(_conferencia_ncm_estado)
+
+
+_produtos_tipos_lock = threading.Lock()
+_produtos_tipos_estado: Dict = {
+    "status": "idle",  # idle | rodando | pronto | erro
+    "resultado": None,
+    "erro": None,
+    "iniciado_em": None,
+    "concluido_em": None,
+}
+
+
+def _rodar_produtos_tipos() -> None:
+    """Traz TODOS os produtos com o campo 'tipo' (S=Simples, K=Kit, ...) —
+    esse campo já vem de graça na listagem paginada (GET /produtos), sem
+    precisar de 1 chamada por produto. Roda em thread só porque forçamos
+    refresh do cache (a listagem antiga, de antes desse campo ser lido,
+    não teria 'tipo'); a filtragem por palavra é feita no frontend, sem
+    nova consulta à Olist a cada busca."""
+    global _produtos_tipos_estado
+    try:
+        todos = olist.listar_todos_produtos(limite=3000, forcar_refresh=True)
+        itens = [
+            {
+                "id": p.get("id"),
+                "sku": p.get("sku") or p.get("codigo_produto") or "",
+                "nome": p.get("nome") or "",
+                "situacao": p.get("situacao") or "",
+                "tipo": p.get("tipo") or "",
+            }
+            for p in todos
+            if p.get("situacao") != "E"
+        ]
+        _produtos_tipos_estado.update({
+            "status": "pronto",
+            "resultado": {"itens": itens, "total": len(itens)},
+            "erro": None,
+            "concluido_em": datetime.utcnow().isoformat(),
+        })
+    except Exception as e:
+        print(f"[ERRO] Produtos por tipo: {e}")
+        _produtos_tipos_estado.update({"status": "erro", "erro": str(e), "concluido_em": datetime.utcnow().isoformat()})
+
+
+async def produtos_tipos_iniciar(request: Request):
+    """POST /api/olist/produtos-tipos/iniciar — dispara a varredura em background e devolve na hora."""
+    with _produtos_tipos_lock:
+        if _produtos_tipos_estado["status"] == "rodando":
+            return JSONResponse({"status": "rodando", "iniciado_em": _produtos_tipos_estado["iniciado_em"]})
+        _produtos_tipos_estado.update({
+            "status": "rodando", "resultado": None, "erro": None,
+            "iniciado_em": datetime.utcnow().isoformat(), "concluido_em": None,
+        })
+        threading.Thread(target=_rodar_produtos_tipos, daemon=True).start()
+    return JSONResponse({"status": "rodando", "iniciado_em": _produtos_tipos_estado["iniciado_em"]})
+
+
+async def produtos_tipos_status(request: Request):
+    """GET /api/olist/produtos-tipos — status/resultado da última varredura disparada."""
+    return JSONResponse(_produtos_tipos_estado)
+
+
+_fiscal_ml_olist_lock = threading.Lock()
+_fiscal_ml_olist_estado: Dict = {
+    "status": "idle",  # idle | rodando | pronto | erro
+    "resultado": None,
+    "erro": None,
+    "iniciado_em": None,
+    "concluido_em": None,
+}
+
+
+def _norm_digitos(valor) -> str:
+    return re.sub(r"\D", "", str(valor or ""))
+
+
+def _rodar_comparacao_fiscal_ml_olist() -> None:
+    """Casa produto Olist x anúncio ML pelo SKU e compara os dados fiscais
+    (NCM e GTIN/EAN) de cada lado. 1 chamada por produto em cada API (throttle
+    de ambas) — por isso roda em thread, nunca no event loop (mesmo motivo de
+    _rodar_conferencia_ncm)."""
+    global _fiscal_ml_olist_estado
+    try:
+        db = SessionLocal()
+        try:
+            # Antes só pegava status=="active" e deixava de fora os pausados
+            # (ex.: sem estoque) — esses continuam precisando do NCM/CEST
+            # corretos. Só exclui "closed" (anúncio finalizado de verdade).
+            ml_itens = (
+                db.query(MercadoLivreItemCache)
+                .filter(MercadoLivreItemCache.sku.isnot(None), MercadoLivreItemCache.sku != "", MercadoLivreItemCache.status != "closed")
+                .all()
+            )
+            ml_por_sku = {}
+            for row in ml_itens:
+                chave = re.sub(r"[^a-z0-9]", "", (row.sku or "").lower())
+                if chave:
+                    ml_por_sku[chave] = row
+        finally:
+            db.close()
+
+        olist_produtos = olist.listar_todos_produtos(limite=3000)
+        olist_por_sku = {}
+        for p in olist_produtos:
+            if p.get("situacao") == "E":
+                continue
+            chave = re.sub(r"[^a-z0-9]", "", (p.get("sku") or p.get("codigo_produto") or "").lower())
+            if chave:
+                olist_por_sku.setdefault(chave, p)
+
+        shopee_itens_fiscais = shopee.listar_todos_itens_fiscais() if shopee.configurado else []
+        shopee_por_sku = {}
+        for si in shopee_itens_fiscais:
+            chave = re.sub(r"[^a-z0-9]", "", (si.get("sku") or "").lower())
+            if chave:
+                shopee_por_sku[chave] = si
+
+        chaves_comuns = sorted(set(ml_por_sku) & set(olist_por_sku))
+
+        itens = []
+        for chave in chaves_comuns:
+            p_olist = olist_por_sku[chave]
+            item_ml = ml_por_sku[chave]
+            item_shopee = shopee_por_sku.get(chave)
+
+            detalhe = olist.obter_detalhes_completo(str(p_olist.get("id"))) or {}
+            olist_ncm = detalhe.get("ncm") or ""
+            olist_gtin = detalhe.get("gtin") or ""
+
+            fiscal_ml = ml.obter_dados_fiscais(item_ml.item_id)
+            sem_dados_ml = fiscal_ml is None
+            ml_ncm = (fiscal_ml or {}).get("ncm") or ""
+            ml_ean = (fiscal_ml or {}).get("ean") or ""
+            ml_cest = (fiscal_ml or {}).get("cest") or ""
+
+            shopee_ncm = (item_shopee or {}).get("ncm") or ""
+            shopee_cest = (item_shopee or {}).get("cest") or ""
+            sem_shopee = item_shopee is None
+
+            diffs = []
+            if not sem_dados_ml:
+                if _norm_digitos(olist_ncm) != _norm_digitos(ml_ncm):
+                    diffs.append("ncm")
+                if olist_gtin and ml_ean and _norm_digitos(olist_gtin) != _norm_digitos(ml_ean):
+                    diffs.append("gtin")
+            if not sem_shopee and _norm_digitos(olist_ncm) != _norm_digitos(shopee_ncm):
+                diffs.append("ncm_shopee")
+            # CEST não tem "origem" na Olist (ela não tem esse campo) — só dá
+            # pra conferir cruzando ML x Shopee entre si, quando os dois têm
+            # anúncio. Sem isso, CEST divergente entre as duas ficava invisível
+            # e a linha aparecia "Correto" mesmo com um cadastro incompleto.
+            if not sem_dados_ml and not sem_shopee and _norm_digitos(ml_cest) != _norm_digitos(shopee_cest):
+                diffs.append("cest")
+
+            sem_dados = sem_dados_ml and sem_shopee
+            itens.append({
+                "sku": p_olist.get("sku") or p_olist.get("codigo_produto") or "",
+                "nome": item_ml.titulo or p_olist.get("nome") or "",
+                "produto_id": p_olist.get("id"),
+                "item_id": item_ml.item_id,
+                "shopee_item_id": (item_shopee or {}).get("item_id") or "",
+                "olist_ncm": olist_ncm,
+                "ml_ncm": ml_ncm,
+                "shopee_ncm": shopee_ncm,
+                "olist_gtin": olist_gtin,
+                "ml_ean": ml_ean,
+                "ml_cest": ml_cest,
+                "shopee_cest": shopee_cest,
+                "sem_dados_ml": sem_dados_ml,
+                "sem_dados_shopee": sem_shopee,
+                "divergencias": diffs,
+                "status": "sem_dados_ml" if sem_dados else ("divergente" if diffs else "correto"),
+            })
+
+        total = len(itens)
+        corretos = sum(1 for i in itens if i["status"] == "correto")
+        divergentes = sum(1 for i in itens if i["status"] == "divergente")
+        sem_dados = sum(1 for i in itens if i["status"] == "sem_dados_ml")
+
+        _fiscal_ml_olist_estado.update({
+            "status": "pronto",
+            "resultado": {
+                "itens": itens,
+                "total": total,
+                "corretos": corretos,
+                "divergentes": divergentes,
+                "sem_dados_ml": sem_dados,
+            },
+            "erro": None,
+            "concluido_em": datetime.utcnow().isoformat(),
+        })
+    except Exception as e:
+        print(f"[ERRO] Comparação fiscal ML x Olist: {e}")
+        _fiscal_ml_olist_estado.update({"status": "erro", "erro": str(e), "concluido_em": datetime.utcnow().isoformat()})
+
+
+async def fiscal_ml_olist_iniciar(request: Request):
+    """POST /api/fiscal/ml-olist/iniciar — dispara a comparação em background e devolve na hora."""
+    with _fiscal_ml_olist_lock:
+        if _fiscal_ml_olist_estado["status"] == "rodando":
+            return JSONResponse({"status": "rodando", "iniciado_em": _fiscal_ml_olist_estado["iniciado_em"]})
+        _fiscal_ml_olist_estado.update({
+            "status": "rodando", "resultado": None, "erro": None,
+            "iniciado_em": datetime.utcnow().isoformat(), "concluido_em": None,
+        })
+        threading.Thread(target=_rodar_comparacao_fiscal_ml_olist, daemon=True).start()
+    return JSONResponse({"status": "rodando", "iniciado_em": _fiscal_ml_olist_estado["iniciado_em"]})
+
+
+async def fiscal_ml_olist_status(request: Request):
+    """GET /api/fiscal/ml-olist — status/resultado da última comparação disparada."""
+    return JSONResponse(_fiscal_ml_olist_estado)
+
+
+_lista_compra_lock = threading.Lock()
+_lista_compra_estado: Dict = {
+    "status": "idle",  # idle | rodando | pronto | erro
+    "resultado": None,
+    "erro": None,
+    "iniciado_em": None,
+    "concluido_em": None,
+}
+
+
+def _rodar_lista_compra_parados() -> None:
+    """
+    Roda em thread separada (nunca no event loop) — a varredura da Olist é
+    lenta (throttle de 120/min em ~665 produtos ativos) e uma request síncrona
+    desse tamanho trava TODO o resto do app, que roda num único worker.
+    """
+    global _lista_compra_estado
+    try:
+        db = SessionLocal()
+        try:
+            ml_parados = [
+                {"item_id": i.item_id, "sku": i.sku, "titulo": i.titulo, "estoque": i.estoque_disponivel or 0}
+                for i in db.query(MercadoLivreItemCache).filter(
+                    MercadoLivreItemCache.status == "paused",
+                    MercadoLivreItemCache.estoque_disponivel == 0,
+                ).all()
+            ]
+        finally:
+            db.close()
+
+        shopee_parados = shopee.listar_pausados_sem_estoque() if shopee.configurado else []
+        olist_parados = olist.listar_ativos_com_estoque_zero()
+
+        por_sku: Dict[str, Dict] = {}
+
+        def _chave(sku: str) -> str:
+            return (sku or "").strip().upper()
+
+        for item in ml_parados:
+            chave = _chave(item["sku"])
+            if not chave:
+                continue
+            registro = por_sku.setdefault(chave, {"sku": item["sku"], "nome": item["titulo"], "canais": {}})
+            registro["canais"]["mercado_livre"] = {"item_id": item["item_id"], "estoque": item["estoque"]}
+            registro["nome"] = registro["nome"] or item["titulo"]
+
+        for item in shopee_parados:
+            chave = _chave(item["sku"])
+            if not chave:
+                continue
+            registro = por_sku.setdefault(chave, {"sku": item["sku"], "nome": item["nome"], "canais": {}})
+            registro["canais"]["shopee"] = {"item_id": item["item_id"], "estoque": item["estoque"]}
+            registro["nome"] = registro["nome"] or item["nome"]
+
+        for item in olist_parados:
+            chave = _chave(item["sku"])
+            if not chave:
+                continue
+            registro = por_sku.setdefault(chave, {"sku": item["sku"], "nome": item["nome"], "canais": {}})
+            registro["canais"]["olist"] = {"produto_id": item["produto_id"], "estoque": item["estoque"]}
+            registro["nome"] = registro["nome"] or item["nome"]
+
+        lista = sorted(por_sku.values(), key=lambda r: (-len(r["canais"]), r["sku"]))
+        _lista_compra_estado.update({
+            "status": "pronto",
+            "resultado": {
+                "total": len(lista),
+                "por_canal": {
+                    "mercado_livre": len(ml_parados),
+                    "shopee": len(shopee_parados),
+                    "olist": len(olist_parados),
+                },
+                "itens": lista,
+            },
+            "erro": None,
+            "concluido_em": datetime.utcnow().isoformat(),
+        })
+    except Exception as e:
+        print(f"[LISTA-COMPRA] Erro na varredura: {e}")
+        _lista_compra_estado.update({"status": "erro", "erro": str(e), "concluido_em": datetime.utcnow().isoformat()})
+
+
+async def lista_compra_parados_iniciar(request: Request):
+    """POST /api/lista-compra/parados/iniciar — dispara a varredura em background e devolve na hora."""
+    with _lista_compra_lock:
+        if _lista_compra_estado["status"] == "rodando":
+            return JSONResponse({"status": "rodando", "iniciado_em": _lista_compra_estado["iniciado_em"]})
+        _lista_compra_estado.update({
+            "status": "rodando", "resultado": None, "erro": None,
+            "iniciado_em": datetime.utcnow().isoformat(), "concluido_em": None,
+        })
+        threading.Thread(target=_rodar_lista_compra_parados, daemon=True).start()
+    return JSONResponse({"status": "rodando", "iniciado_em": _lista_compra_estado["iniciado_em"]})
+
+
+async def lista_compra_parados_status(request: Request):
+    """GET /api/lista-compra/parados — status/resultado da última varredura disparada."""
+    return JSONResponse(_lista_compra_estado)
+
+
+def _so_digitos(ncm: str) -> str:
+    return "".join(c for c in (ncm or "") if c.isdigit())
+
+
+async def conferencia_ncm(request: Request):
+    """
+    GET /api/notas-fiscais/conferencia-ncm
+    Somente leitura. Para cada item de cada NF (com XML salvo), extrai o NCM
+    declarado na nota e compara com o NCM cadastrado no produto vinculado na Olist.
+    A Olist devolve o NCM formatado com pontos (8714.10.00); a NF vem só com
+    dígitos (87141000) — comparamos por dígito, ignorando a formatação.
+    """
+    db = SessionLocal()
+    try:
+        notas = db.query(NotaFiscal).order_by(NotaFiscal.data_upload.desc()).all()
+        cache_olist_ncm = {}
+        resultado = []
+
+        for nf in notas:
+            ncm_por_codigo = {}
+            sem_xml = not nf.xml_processado
+            if not sem_xml:
+                parsed = NFeParsing.parse_xml(nf.xml_processado.encode('utf-8', errors='ignore'))
+                if parsed.get("sucesso") is not False:
+                    for it in parsed.get("itens", []):
+                        ncm_por_codigo[it.get("codigo")] = it.get("ncm") or ""
+
+            for item in nf.itens:
+                ncm_nf = ncm_por_codigo.get(item.codigo_produto, "") if not sem_xml else ""
+
+                ncm_olist = ""
+                if item.olist_produto_id:
+                    if item.olist_produto_id in cache_olist_ncm:
+                        ncm_olist = cache_olist_ncm[item.olist_produto_id]
+                    else:
+                        detalhe = olist.obter_detalhes_completo(str(item.olist_produto_id)) or {}
+                        ncm_olist = detalhe.get("ncm") or ""
+                        cache_olist_ncm[item.olist_produto_id] = ncm_olist
+
+                resultado.append({
+                    "nf_id": nf.id,
+                    "numero_nf": nf.numero_nf,
+                    "fornecedor": nf.fornecedor,
+                    "data_upload": nf.data_upload.isoformat() if nf.data_upload else None,
+                    "item_id": item.id,
+                    "codigo_produto": item.codigo_produto,
+                    "descricao": item.descricao,
+                    "olist_produto_id": item.olist_produto_id,
+                    "olist_sku": item.olist_sku,
+                    "olist_nome": item.olist_nome,
+                    "sem_xml": sem_xml,
+                    "ncm_nf": ncm_nf,
+                    "ncm_olist": ncm_olist,
+                    "bate": (bool(ncm_nf) and bool(ncm_olist) and _so_digitos(ncm_nf) == _so_digitos(ncm_olist)),
+                })
+
+        return JSONResponse({"total": len(resultado), "itens": resultado})
+    finally:
+        db.close()
+
+
 async def get_estoque_virtual(request: Request):
     """Get consolidated virtual inventory - sum of all products"""
     from sqlalchemy.orm import joinedload
@@ -5799,6 +6335,7 @@ routes = [
     Route("/api/ml/notificacoes", ml_notificacoes_recentes, methods=["GET"]),
     Route("/api/upload-nfe", upload_nfe, methods=["POST"]),
     Route("/api/notas-fiscais", get_nfs, methods=["GET"]),
+    Route("/api/notas-fiscais/conferencia-ncm", conferencia_ncm, methods=["GET"]),
     Route("/api/notas-fiscais/{nf_id}", get_nf, methods=["GET"]),
     Route("/api/notas-fiscais/{nf_id}/baixar", baixar_nota_fiscal, methods=["GET"]),
     Route("/api/notas-fiscais/{nf_id}/pdf", gerar_pdf_nota_fiscal, methods=["GET"]),
@@ -5833,6 +6370,16 @@ routes = [
     Route("/api/olist/sugestao-vinculo", olist_sugestao_vinculo, methods=["GET"]),
     Route("/api/olist/vinculos", olist_listar_vinculos, methods=["GET"]),
     Route("/api/olist/vinculos/deletar", olist_deletar_vinculo, methods=["POST"]),
+    Route("/api/olist/atualizar-ncm", atualizar_ncm_olist, methods=["POST"]),
+    Route("/api/fiscal/atualizar", atualizar_fiscal_combinado, methods=["POST"]),
+    Route("/api/olist/conferencia-ncm", conferencia_ncm_olist_status, methods=["GET"]),
+    Route("/api/olist/conferencia-ncm/iniciar", conferencia_ncm_olist_iniciar, methods=["POST"]),
+    Route("/api/olist/produtos-tipos", produtos_tipos_status, methods=["GET"]),
+    Route("/api/olist/produtos-tipos/iniciar", produtos_tipos_iniciar, methods=["POST"]),
+    Route("/api/fiscal/ml-olist", fiscal_ml_olist_status, methods=["GET"]),
+    Route("/api/fiscal/ml-olist/iniciar", fiscal_ml_olist_iniciar, methods=["POST"]),
+    Route("/api/lista-compra/parados", lista_compra_parados_status, methods=["GET"]),
+    Route("/api/lista-compra/parados/iniciar", lista_compra_parados_iniciar, methods=["POST"]),
     # Inbound / Lista de Separação para FU
     Route("/api/embaldes/upload", upload_embale, methods=["POST"]),
     Route("/api/embaldes", listar_embaldes, methods=["GET"]),

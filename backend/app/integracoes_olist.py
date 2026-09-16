@@ -50,6 +50,25 @@ if _token_seed and not os.path.exists(TOKEN_FILE):
         print(f"[OLIST] Falha ao gravar token inicial: {_e}")
 
 
+def _fornecedores_validos(fornecedores: list) -> list:
+    """Filtra fornecedores sem id válido e conserta 'padrao' nulo — a Olist
+    rejeita o PUT inteiro se algum fornecedor.id não for > 0 ou padrao vier
+    nulo (mesma classe de bug do marca/categoria.id nulo)."""
+    validos = []
+    for forn in fornecedores:
+        try:
+            fid = int(forn.get("id") or 0)
+        except (TypeError, ValueError):
+            fid = 0
+        if fid <= 0:
+            continue
+        forn = dict(forn)
+        if forn.get("padrao") is None:
+            forn["padrao"] = False
+        validos.append(forn)
+    return validos
+
+
 class OlistIntegration:
     """Integracao com Olist/Tiny ERP - API v3 OAuth2 Authorization Code"""
 
@@ -433,6 +452,7 @@ class OlistIntegration:
                                     "nome": prod.get("descricao") or prod.get("nome", ""),
                                     "preco": float(prod.get("precos", {}).get("preco", 0) if isinstance(prod.get("precos"), dict) else prod.get("preco", 0) or 0),
                                     "codigo_produto": prod.get("sku", ""),
+                                    "tipo": prod.get("tipo") or "",
                                     "situacao": prod.get("situacao") or "",
                                 })
                                 total_recuperado += 1
@@ -479,6 +499,7 @@ class OlistIntegration:
                                 "nome": prod.get("nome", ""),
                                 "preco": float(prod.get("preco", 0) or 0),
                                 "codigo_produto": prod.get("codigo", ""),
+                                "tipo": prod.get("tipo") or "",
                                 "situacao": prod.get("situacao") or "",
                             })
 
@@ -710,24 +731,43 @@ class OlistIntegration:
         print(f"[OLIST] Busca '{termo}': {len(resultado)} resultados (cache={len(todos)})")
         return resultado
 
-    def obter_detalhes_completo(self, produto_id: str) -> Optional[Dict]:
-        """Obtém os detalhes COMPLETOS de um produto incluindo composição de kit"""
+    def obter_detalhes_completo(self, produto_id: str, max_retries: int = 3) -> Optional[Dict]:
+        """Obtém os detalhes COMPLETOS de um produto incluindo composição de kit.
+        Aplica throttle e retentativa em 429, igual obter_estoque — sem isso, uma
+        varredura em lote (ex.: conferencia de NCM) apanha rate limit e devolve
+        None (interpretado como "produto sem dado") para uma fração dos itens.
+        """
         token = self.get_access_token()
         if not token:
             token = self.token_v2
             if not token:
                 return None
 
-        try:
-            url = f"{self.API_BASE}/produtos/{produto_id}"
-            headers = {"Accept": "application/json", "Authorization": f"Bearer {token}"}
-            req = urllib.request.Request(url, headers=headers, method="GET")
+        url = f"{self.API_BASE}/produtos/{produto_id}"
+        headers = {"Accept": "application/json", "Authorization": f"Bearer {token}"}
 
-            with urllib.request.urlopen(req, timeout=15) as response:
-                return json.loads(response.read().decode("utf-8"))
-        except Exception as e:
-            print(f"[OLIST] Erro ao obter detalhes de {produto_id}: {e}")
-            return None
+        for tentativa in range(max_retries):
+            self._throttle()
+            try:
+                req = urllib.request.Request(url, headers=headers, method="GET")
+                with urllib.request.urlopen(req, timeout=15) as response:
+                    return json.loads(response.read().decode("utf-8"))
+            except urllib.error.HTTPError as e:
+                if e.code == 429 and tentativa < max_retries - 1:
+                    reset = e.headers.get("x-ratelimit-reset") or e.headers.get("Retry-After")
+                    try:
+                        espera = float(reset)
+                    except (TypeError, ValueError):
+                        espera = 2.0 * (tentativa + 1)
+                    espera = min(espera, 15.0)
+                    print(f"[OLIST] 429 em detalhes de {produto_id}, aguardando {espera:.1f}s (tentativa {tentativa+1})")
+                    time.sleep(espera)
+                    continue
+                print(f"[OLIST] Erro HTTP {e.code} ao obter detalhes de {produto_id}")
+                return None
+            except Exception as e:
+                print(f"[OLIST] Erro ao obter detalhes de {produto_id}: {e}")
+                return None
 
     def detectar_e_buscar_kit(self, termo: str) -> Optional[Dict]:
         """
@@ -1001,6 +1041,172 @@ class OlistIntegration:
 
         self._ultimo_erro_estoque = "Olist recusou após retentativas (rate limit 429)."
         return False
+
+    def listar_ativos_com_estoque_zero(self) -> List[Dict]:
+        """
+        Produtos ativos (situacao=A) com estoque zerado — para a lista de compra.
+
+        A listagem em lote (/produtos?situacao=A) não traz a quantidade (só
+        localização), então após listar precisamos consultar /estoque/{id} um a
+        um — daí a varredura ser mais lenta que uma listagem simples (throttle
+        de 120/min da Olist).
+        """
+        token = self.get_access_token() or self.token_v2
+        if not token:
+            return []
+
+        produtos = []
+        offset = 0
+        page_size = 100
+        while True:
+            self._throttle()
+            url = f"{self.API_BASE}/produtos?situacao=A&limit={page_size}&offset={offset}"
+            headers = {"Accept": "application/json", "Authorization": f"Bearer {token}"}
+            try:
+                req = urllib.request.Request(url, headers=headers, method="GET")
+                with urllib.request.urlopen(req, timeout=15) as response:
+                    resposta = json.loads(response.read().decode("utf-8"))
+            except Exception as e:
+                print(f"[OLIST] Erro ao listar produtos ativos (offset {offset}): {e}")
+                break
+
+            itens = resposta.get("itens") or []
+            if not itens:
+                break
+            produtos.extend(itens)
+            offset += len(itens)
+            total = (resposta.get("paginacao") or {}).get("total")
+            if total is not None and offset >= total:
+                break
+
+        zerados = []
+        for prod in produtos:
+            produto_id = prod.get("id")
+            if not produto_id:
+                continue
+            est = self.obter_estoque(str(produto_id))
+            saldo = (est or {}).get("disponivel", (est or {}).get("saldo"))
+            if saldo == 0:
+                zerados.append({
+                    "produto_id": str(produto_id),
+                    "sku": prod.get("sku") or "",
+                    "nome": prod.get("descricao") or "",
+                    "estoque": 0,
+                })
+        return zerados
+
+    def atualizar_ncm_produto(self, produto_id: str, novo_ncm: str, max_retries: int = 3) -> Dict:
+        """
+        Atualiza SOMENTE o NCM de um produto no cadastro da Olist.
+
+        A API v3 (PUT /produtos/{id}) exige o objeto completo do produto — não
+        existe PATCH parcial. Por isso lemos o cadastro atual (obter_detalhes_completo)
+        e reenviamos os mesmos dados, trocando apenas o campo ncm, para não apagar
+        preço, categoria, dimensões etc. Os sub-objetos abaixo seguem exatamente o
+        schema de escrita da Olist (AtualizarProdutoRequestModel no swagger oficial),
+        que aceita menos campos que o de leitura.
+        """
+        detalhe = self.obter_detalhes_completo(str(produto_id))
+        if not detalhe:
+            return {"sucesso": False, "erro": "Não foi possível ler o cadastro atual do produto na Olist."}
+
+        ncm_anterior = detalhe.get("ncm") or ""
+
+        dim = detalhe.get("dimensoes") or {}
+        emb = dim.get("embalagem") or {}
+        precos = detalhe.get("precos") or {}
+        estoque = detalhe.get("estoque") or {}
+        tributacao = detalhe.get("tributacao") or {}
+        marca = detalhe.get("marca") or {}
+        categoria = detalhe.get("categoria") or {}
+
+        try:
+            origem = int(detalhe.get("origem")) if detalhe.get("origem") not in (None, "") else None
+        except (TypeError, ValueError):
+            origem = None
+
+        body = {
+            "sku": detalhe.get("sku"),
+            "descricao": detalhe.get("descricao"),
+            "descricaoComplementar": detalhe.get("descricaoComplementar"),
+            "unidade": detalhe.get("unidade"),
+            "unidadePorCaixa": detalhe.get("unidadePorCaixa"),
+            "ncm": novo_ncm,
+            "gtin": detalhe.get("gtin"),
+            "origem": origem,
+            "garantia": detalhe.get("garantia"),
+            "observacoes": detalhe.get("observacoes"),
+            "precos": {
+                "preco": precos.get("preco"),
+                "precoPromocional": precos.get("precoPromocional"),
+                "precoCusto": precos.get("precoCusto"),
+            },
+            "dimensoes": {
+                "largura": dim.get("largura"),
+                "altura": dim.get("altura"),
+                "comprimento": dim.get("comprimento"),
+                "diametro": dim.get("diametro"),
+                "pesoLiquido": dim.get("pesoLiquido"),
+                "pesoBruto": dim.get("pesoBruto"),
+            },
+            "tributacao": {
+                "gtinEmbalagem": tributacao.get("gtinEmbalagem"),
+                "valorIPIFixo": tributacao.get("valorIPIFixo"),
+                "classeIPI": tributacao.get("classeIPI"),
+            },
+            "estoque": {
+                "controlar": estoque.get("controlar", True),
+                "sobEncomenda": estoque.get("sobEncomenda", False),
+                "minimo": estoque.get("minimo"),
+                "maximo": estoque.get("maximo"),
+                "diasPreparacao": estoque.get("diasPreparacao"),
+                "localizacao": estoque.get("localizacao"),
+            },
+            "fornecedores": _fornecedores_validos(detalhe.get("fornecedores") or []),
+        }
+        # A Olist rejeita esses sub-objetos com id nulo ("Este valor não deve
+        # ser nulo") — só reenvia quando o cadastro atual já tem um id.
+        if marca.get("id"):
+            body["marca"] = {"id": marca.get("id")}
+        if categoria.get("id"):
+            body["categoria"] = {"id": categoria.get("id")}
+        if emb.get("id"):
+            body["dimensoes"]["embalagem"] = {"id": emb.get("id"), "tipo": emb.get("tipo")}
+
+        token = self.get_access_token()
+        if not token:
+            token = self.token_v2
+            if not token:
+                return {"sucesso": False, "erro": "Sem token válido da Olist (reconecte a integração)."}
+
+        url = f"{self.API_BASE}/produtos/{produto_id}"
+        post_data = json.dumps(body).encode("utf-8")
+        headers = {"Content-Type": "application/json", "Authorization": f"Bearer {token}"}
+
+        for tentativa in range(max_retries):
+            self._throttle()
+            try:
+                req = urllib.request.Request(url, data=post_data, headers=headers, method="PUT")
+                with urllib.request.urlopen(req, timeout=15) as response:
+                    response.read()
+                    return {"sucesso": True, "erro": None, "ncm_anterior": ncm_anterior, "ncm_novo": novo_ncm}
+            except urllib.error.HTTPError as e:
+                if e.code == 429 and tentativa < max_retries - 1:
+                    reset = e.headers.get("x-ratelimit-reset") or e.headers.get("Retry-After")
+                    try:
+                        espera = min(float(reset), 15.0)
+                    except (TypeError, ValueError):
+                        espera = 2.0 * (tentativa + 1)
+                    time.sleep(espera)
+                    continue
+                error_body = e.read().decode("utf-8", errors="ignore")
+                print(f"[OLIST] Erro HTTP {e.code} ao atualizar NCM do produto {produto_id}: {error_body[:500]}")
+                return {"sucesso": False, "erro": f"Olist recusou (HTTP {e.code}): {error_body[:300]}"}
+            except Exception as e:
+                print(f"[OLIST] Erro ao atualizar NCM do produto {produto_id}: {e}")
+                return {"sucesso": False, "erro": str(e)}
+
+        return {"sucesso": False, "erro": "Olist recusou após retentativas (rate limit 429)."}
 
     def sincronizar_historico_vendas(self, db, dias: int = 30) -> int:
         """

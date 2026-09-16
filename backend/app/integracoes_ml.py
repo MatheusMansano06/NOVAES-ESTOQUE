@@ -416,6 +416,64 @@ class MLIntegration:
                 db.rollback()
         return ids
 
+    def obter_dados_fiscais(self, item_id: str) -> Optional[Dict]:
+        """GET /items/{id}/fiscal_information/detail — traz tax_information
+        (ncm, ean, origin_type, net_weight, gross_weight, ...) usado na
+        comparação com a Olist. O path SEM o sufixo /detail não existe (dá
+        404 sempre) — a consulta por item_id exige esse sufixo; só a consulta
+        por SKU usa o path sem sufixo (GET /items/fiscal_information/{sku}).
+        Retorna None se o item não tiver dados fiscais configurados no ML ou
+        se a conta não tiver essa permissão (404/403)."""
+        body = self._get(f"/items/{item_id}/fiscal_information/detail")
+        if not body:
+            return None
+        # A resposta vem aninhada em body["sku"]["tax_information"], não em
+        # body["tax_information"] direto (confirmado testando contra a API real).
+        return (body.get("sku") or {}).get("tax_information") or {}
+
+    def atualizar_dados_fiscais(self, item_id: str, novo_ncm: Optional[str] = None, novo_cest: Optional[str] = None) -> Dict:
+        """PUT /items/fiscal_information/{sku_id} — atualiza NCM e/ou CEST.
+
+        O PATCH do ML só aceita um conjunto pequeno de campos (cost,
+        measurement_unit, fci, ex_tipi, tax_rule_id, med_anvisa_code,
+        med_exemption_reason) — ncm e cest NÃO estão nessa lista, então é
+        preciso reenviar o objeto inteiro via PUT, igual ao padrão já usado
+        pra Olist em atualizar_ncm_produto. O identificador do PUT é o "sku"
+        que o ML devolve no GET (é igual ao item_id quando o vendedor nunca
+        configurou um SKU fiscal próprio)."""
+        detalhe = self._get(f"/items/{item_id}/fiscal_information/detail")
+        if not detalhe or not detalhe.get("sku"):
+            return {"sucesso": False, "erro": "Não foi possível ler o cadastro fiscal atual no Mercado Livre."}
+
+        sku_obj = detalhe["sku"]
+        sku_id = sku_obj.get("sku") or item_id
+        tax_info = dict(sku_obj.get("tax_information") or {})
+        tax_info.pop("empty", None)  # campo so-leitura, nao faz parte do schema de escrita
+        ncm_anterior = tax_info.get("ncm")
+        cest_anterior = tax_info.get("cest")
+        if novo_ncm:
+            tax_info["ncm"] = str(novo_ncm)
+        if novo_cest is not None and str(novo_cest).strip():
+            tax_info["cest"] = str(novo_cest).strip()
+
+        body = {
+            "title": sku_obj.get("title"),
+            "type": sku_obj.get("type"),
+            "measurement_unit": sku_obj.get("measurement_unit"),
+            "cost": sku_obj.get("cost"),
+            "register_type": sku_obj.get("register_type"),
+            "tax_information": tax_info,
+        }
+        resp = self._request_json("PUT", f"/items/fiscal_information/{sku_id}", body)
+        if not resp or resp.get("erro"):
+            erro = resp.get("erro") if isinstance(resp, dict) else "Falha ao atualizar dados fiscais no Mercado Livre"
+            return {"sucesso": False, "erro": erro}
+        return {
+            "sucesso": True, "erro": None,
+            "ncm_anterior": ncm_anterior, "ncm_novo": tax_info.get("ncm"),
+            "cest_anterior": cest_anterior, "cest_novo": tax_info.get("cest"),
+        }
+
     def stock_fulfillment(self, inventory_id: str) -> Optional[Dict[str, int]]:
         """Estoque de um inventory no Full: {available, chegando, total}.
         available = liberado p/ venda; chegando = em trânsito/processo (não liberado)."""
