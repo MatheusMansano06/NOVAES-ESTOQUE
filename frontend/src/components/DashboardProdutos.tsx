@@ -492,20 +492,12 @@ function SecaoFiscal() {
     })
   }
 
-  // Um item "Correto" (as 3 plataformas concordam entre si) pode ainda assim
-  // não bater com o NCM que o operador está digitando agora pra esse lote —
-  // sem isso essas linhas nunca aparecem pra seleção e a correção em massa
-  // pula elas sem avisar (foi o que aconteceu: 3 plataformas já concordavam
-  // num NCM antigo, então a linha nunca entrava no lote a corrigir).
-  const precisaAjustarAoAlvo = (i: ItemFiscal): boolean => {
-    if (!ncmDesejado.trim()) return false
-    const alvo = norm(ncmDesejado)
-    if (norm(i.olist_ncm) !== alvo) return true
-    if (!i.sem_dados_ml && norm(i.ml_ncm) !== alvo) return true
-    if (i.shopee_item_id && norm(i.shopee_ncm) !== alvo) return true
-    return false
-  }
-  const corrigiveis = itensExibidos.filter((i) => i.status === 'divergente' || i.status === 'sem_dados_ml' || precisaAjustarAoAlvo(i))
+  // Qualquer linha é selecionável, mesmo "Correto" — um item pode estar
+  // "correto" (as 3 plataformas concordam entre si) só porque todas têm o
+  // MESMO NCM errado, e o operador precisa forçar a recorreção pra um NCM
+  // específico mesmo assim. Restringir a seleção só a "Divergente" foi o que
+  // fez linhas assim ficarem sempre de fora da correção em massa.
+  const corrigiveis = itensExibidos
   const todosSelecionados = corrigiveis.length > 0 && corrigiveis.every((i) => selecionados.has(i.item_id))
 
   const alternarSelecaoTodos = () => {
@@ -640,7 +632,7 @@ function SecaoFiscal() {
                   </thead>
                   <tbody>
                     {itensExibidos.map((item) => {
-                      const corrigivel = item.status === 'divergente' || item.status === 'sem_dados_ml' || precisaAjustarAoAlvo(item)
+                      const corrigivel = true // qualquer linha pode ser recorrigida, mesmo "Correto"
                       return (
                       <tr key={item.item_id}>
                         <td style={td}>
