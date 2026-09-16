@@ -412,7 +412,12 @@ class ShopeeAPI:
 
     def atualizar_ncm(self, item_id: str, ncm: str, cest: Optional[str] = None) -> Dict[str, Any]:
         """Atualiza NCM (e opcionalmente CEST) de um anúncio via update_item.
-        tax_info aceita atualização parcial — não precisa reenviar o produto inteiro."""
+        tax_info aceita atualização parcial — não precisa reenviar o produto inteiro.
+
+        A Shopee pode devolver sucesso (sem "error") e mesmo assim não gravar
+        o CEST — ela valida o CEST contra o NCM e, se não bater, ignora o
+        campo em silêncio (sem avisar). Por isso reconferimos com um GET
+        logo depois em vez de confiar no corpo do POST."""
         tax_info: Dict[str, Any] = {"ncm": ncm}
         if cest:
             tax_info["cest"] = cest
@@ -422,7 +427,22 @@ class ShopeeAPI:
         })
         if resp.get("error"):
             return {"sucesso": False, "erro": f"{resp.get('error')}: {resp.get('message')}"}
-        return {"sucesso": True}
+
+        r2 = self.chamar("/api/v2/product/get_item_base_info", {
+            "item_id_list": str(item_id),
+            "need_tax_info": True,
+        })
+        item_atual = ((r2.get("response") or {}).get("item_list") or [{}])[0]
+        tax_atual = item_atual.get("tax_info") or {}
+        ncm_gravado = tax_atual.get("ncm") or ""
+        cest_gravado = tax_atual.get("cest") or ""
+
+        if re.sub(r"\D", "", ncm_gravado) != re.sub(r"\D", "", ncm):
+            return {"sucesso": False, "erro": f"Shopee reportou sucesso mas o NCM não foi gravado (continua {ncm_gravado or 'vazio'})"}
+        if cest and re.sub(r"\D", "", cest_gravado) != re.sub(r"\D", "", cest):
+            return {"sucesso": False, "erro": f"Shopee gravou o NCM mas rejeitou o CEST em silêncio (continua {cest_gravado or 'vazio'} — provavelmente não bate com esse NCM)"}
+
+        return {"sucesso": True, "ncm_novo": ncm_gravado, "cest_novo": cest_gravado}
 
     def info_loja(self) -> Dict[str, Any]:
         """Dados da loja autorizada. Primeira chamada assinada com token."""

@@ -143,7 +143,11 @@ function ModalCorrigirFiscal({ item, onClose, onSalvo }: {
       }
       const novoOlistNcm = precisaOlist ? ncm.trim() : item.olist_ncm
       const novoMlNcm = precisaMl ? ncm.trim() : item.ml_ncm
-      const novoShopeeNcm = precisaShopee ? ncm.trim() : item.shopee_ncm
+      const novoMlCest = precisaMl ? (d.ml?.cest_novo ?? cest.trim()) : item.ml_cest
+      // ncm_novo/cest_novo da Shopee vêm confirmados por leitura de volta
+      // (ver shopee.atualizar_ncm) — não é o que mandamos, é o que gravou de fato.
+      const novoShopeeNcm = precisaShopee ? (d.shopee?.ncm_novo || ncm.trim()) : item.shopee_ncm
+      const novoShopeeCest = precisaShopee ? (d.shopee?.cest_novo || '') : item.shopee_cest
       const novoSemDadosMl = precisaMl ? false : item.sem_dados_ml
       const novoSemDadosShopee = precisaShopee ? false : item.sem_dados_shopee
 
@@ -156,15 +160,16 @@ function ModalCorrigirFiscal({ item, onClose, onSalvo }: {
         if (item.olist_gtin && item.ml_ean && norm(item.olist_gtin) !== norm(item.ml_ean)) novasDivergencias.push('gtin')
       }
       if (!novoSemDadosShopee && norm(novoOlistNcm) !== norm(novoShopeeNcm)) novasDivergencias.push('ncm_shopee')
+      if (!novoSemDadosMl && !novoSemDadosShopee && norm(novoMlCest) !== norm(novoShopeeCest)) novasDivergencias.push('cest')
       const novoStatus: ItemFiscal['status'] =
         novoSemDadosMl && novoSemDadosShopee ? 'sem_dados_ml' : (novasDivergencias.length ? 'divergente' : 'correto')
 
       onSalvo({
         olist_ncm: novoOlistNcm,
         ml_ncm: novoMlNcm,
-        ml_cest: precisaMl ? cest.trim() : item.ml_cest,
+        ml_cest: novoMlCest,
         shopee_ncm: novoShopeeNcm,
-        shopee_cest: precisaShopee ? cest.trim() : item.shopee_cest,
+        shopee_cest: novoShopeeCest,
         sem_dados_ml: novoSemDadosMl,
         sem_dados_shopee: novoSemDadosShopee,
         divergencias: novasDivergencias,
@@ -441,23 +446,37 @@ function SecaoFiscal() {
         const partes = [d.olist?.erro, d.ml?.erro, d.shopee?.erro].filter(Boolean)
         throw new Error(partes.join(' | ') || 'Falha ao corrigir')
       }
-      const cestNovo = d.ml?.cest_novo
-      setItens((prev) => prev.map((p) => (
-        p.item_id === item.item_id
-          ? {
-              ...p,
-              olist_ncm: ncmDesejado,
-              ml_ncm: ncmDesejado,
-              ml_cest: cestNovo != null ? cestNovo : p.ml_cest,
-              shopee_ncm: p.shopee_item_id ? ncmDesejado : p.shopee_ncm,
-              shopee_cest: p.shopee_item_id ? cestDesejado.trim() : p.shopee_cest,
-              sem_dados_ml: false,
-              sem_dados_shopee: p.shopee_item_id ? false : p.sem_dados_shopee,
-              divergencias: p.divergencias.filter((x) => x !== 'ncm' && x !== 'ncm_shopee'),
-              status: p.divergencias.filter((x) => x !== 'ncm' && x !== 'ncm_shopee').length ? 'divergente' : 'correto',
-            }
-          : p
-      )))
+      // ml_cest_novo/shopee_cest_novo vêm confirmados por leitura de volta em
+      // cada plataforma (não é o valor que mandamos — é o que de fato gravou).
+      const mlCestNovo = d.ml?.cest_novo
+      const shopeeNcmNovo = d.shopee?.ncm_novo
+      const shopeeCestNovo = d.shopee?.cest_novo
+      setItens((prev) => prev.map((p) => {
+        if (p.item_id !== item.item_id) return p
+        const olistNcm = ncmDesejado
+        const mlNcm = ncmDesejado
+        const mlCest = mlCestNovo != null ? mlCestNovo : p.ml_cest
+        const shopeeNcm = p.shopee_item_id ? (shopeeNcmNovo || ncmDesejado) : p.shopee_ncm
+        const shopeeCest = p.shopee_item_id ? (shopeeCestNovo || '') : p.shopee_cest
+        const semDadosShopee = p.shopee_item_id ? false : p.sem_dados_shopee
+        const diffs: string[] = []
+        if (norm(olistNcm) !== norm(mlNcm)) diffs.push('ncm')
+        if (p.olist_gtin && p.ml_ean && norm(p.olist_gtin) !== norm(p.ml_ean)) diffs.push('gtin')
+        if (!semDadosShopee && norm(olistNcm) !== norm(shopeeNcm)) diffs.push('ncm_shopee')
+        if (!semDadosShopee && norm(mlCest) !== norm(shopeeCest)) diffs.push('cest')
+        return {
+          ...p,
+          olist_ncm: olistNcm,
+          ml_ncm: mlNcm,
+          ml_cest: mlCest,
+          shopee_ncm: shopeeNcm,
+          shopee_cest: shopeeCest,
+          sem_dados_ml: false,
+          sem_dados_shopee: semDadosShopee,
+          divergencias: diffs,
+          status: diffs.length ? 'divergente' : 'correto',
+        }
+      }))
       return null
     } catch (e) {
       return String(e instanceof Error ? e.message : e)
@@ -473,7 +492,20 @@ function SecaoFiscal() {
     })
   }
 
-  const corrigiveis = itensExibidos.filter((i) => i.status === 'divergente' || i.status === 'sem_dados_ml')
+  // Um item "Correto" (as 3 plataformas concordam entre si) pode ainda assim
+  // não bater com o NCM que o operador está digitando agora pra esse lote —
+  // sem isso essas linhas nunca aparecem pra seleção e a correção em massa
+  // pula elas sem avisar (foi o que aconteceu: 3 plataformas já concordavam
+  // num NCM antigo, então a linha nunca entrava no lote a corrigir).
+  const precisaAjustarAoAlvo = (i: ItemFiscal): boolean => {
+    if (!ncmDesejado.trim()) return false
+    const alvo = norm(ncmDesejado)
+    if (norm(i.olist_ncm) !== alvo) return true
+    if (!i.sem_dados_ml && norm(i.ml_ncm) !== alvo) return true
+    if (i.shopee_item_id && norm(i.shopee_ncm) !== alvo) return true
+    return false
+  }
+  const corrigiveis = itensExibidos.filter((i) => i.status === 'divergente' || i.status === 'sem_dados_ml' || precisaAjustarAoAlvo(i))
   const todosSelecionados = corrigiveis.length > 0 && corrigiveis.every((i) => selecionados.has(i.item_id))
 
   const alternarSelecaoTodos = () => {
@@ -608,7 +640,7 @@ function SecaoFiscal() {
                   </thead>
                   <tbody>
                     {itensExibidos.map((item) => {
-                      const corrigivel = item.status === 'divergente' || item.status === 'sem_dados_ml'
+                      const corrigivel = item.status === 'divergente' || item.status === 'sem_dados_ml' || precisaAjustarAoAlvo(item)
                       return (
                       <tr key={item.item_id}>
                         <td style={td}>
@@ -638,12 +670,12 @@ function SecaoFiscal() {
                         <td style={{ ...td, color: item.divergencias.includes('gtin') ? '#c62828' : undefined, fontWeight: item.divergencias.includes('gtin') ? 700 : 400 }}>
                           {item.sem_dados_ml ? <em style={{ color: '#999' }}>sem dados</em> : (item.ml_ean || <em style={{ color: '#999' }}>vazio</em>)}
                         </td>
-                        <td style={td}>
+                        <td style={{ ...td, color: item.divergencias.includes('cest') ? '#c62828' : undefined, fontWeight: item.divergencias.includes('cest') ? 700 : 400 }}>
                           {item.sem_dados_ml
                             ? <em style={{ color: '#999' }}>sem dados</em>
                             : (item.ml_cest || <em style={{ color: '#c62828', fontWeight: 700 }}>faltando</em>)}
                         </td>
-                        <td style={td}>
+                        <td style={{ ...td, color: item.divergencias.includes('cest') ? '#c62828' : undefined, fontWeight: item.divergencias.includes('cest') ? 700 : 400 }}>
                           {!item.shopee_item_id
                             ? <em style={{ color: '#bbb' }}>sem anúncio</em>
                             : (item.shopee_cest || <em style={{ color: '#c62828', fontWeight: 700 }}>faltando</em>)}

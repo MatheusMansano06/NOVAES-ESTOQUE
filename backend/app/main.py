@@ -928,6 +928,12 @@ def _rodar_comparacao_fiscal_ml_olist() -> None:
                     diffs.append("gtin")
             if not sem_shopee and _norm_digitos(olist_ncm) != _norm_digitos(shopee_ncm):
                 diffs.append("ncm_shopee")
+            # CEST não tem "origem" na Olist (ela não tem esse campo) — só dá
+            # pra conferir cruzando ML x Shopee entre si, quando os dois têm
+            # anúncio. Sem isso, CEST divergente entre as duas ficava invisível
+            # e a linha aparecia "Correto" mesmo com um cadastro incompleto.
+            if not sem_dados_ml and not sem_shopee and _norm_digitos(ml_cest) != _norm_digitos(shopee_cest):
+                diffs.append("cest")
 
             sem_dados = sem_dados_ml and sem_shopee
             itens.append({
