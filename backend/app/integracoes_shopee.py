@@ -328,6 +328,102 @@ class ShopeeAPI:
         except Exception as e:
             return {"error": "falha_requisicao", "message": str(e)}
 
+    def chamar_post(self, path: str, corpo: Dict[str, Any]) -> Dict[str, Any]:
+        """POST assinado em endpoint de loja (ex.: update_item). Devolve o corpo já em dict."""
+        token = self.get_access_token()
+        dados = self._ler_token()
+        shop_id = str(dados.get("shop_id") or "")
+        if not token or not shop_id:
+            return {"error": "nao_autorizado", "message": "Loja Shopee não autorizada"}
+
+        ts = int(time.time())
+        query = {
+            "partner_id": self.partner_id,
+            "timestamp": ts,
+            "access_token": token,
+            "shop_id": shop_id,
+            "sign": self._sign_loja(path, ts, token, shop_id),
+        }
+        url = f"{self.host}{path}?{urllib.parse.urlencode(query)}"
+        try:
+            req = urllib.request.Request(
+                url,
+                data=json.dumps(corpo).encode("utf-8"),
+                headers={"Content-Type": "application/json", "User-Agent": "NVS-Estoque/1.0"},
+                method="POST",
+            )
+            with urllib.request.urlopen(req, timeout=20) as resp:
+                return json.loads(resp.read().decode("utf-8"))
+        except urllib.error.HTTPError as e:
+            bruto = ""
+            try:
+                bruto = e.read().decode("utf-8", errors="replace")[:500]
+            except Exception:
+                pass
+            try:
+                return json.loads(bruto)
+            except (json.JSONDecodeError, ValueError):
+                return {"error": f"http_{e.code}", "message": bruto or str(e)}
+        except Exception as e:
+            return {"error": "falha_requisicao", "message": str(e)}
+
+    def listar_todos_itens_fiscais(self) -> list:
+        """item_id/sku/nome/tax_info (NCM/CEST) de todo item ativo ou pausado —
+        mesma paginação de listar_todos_skus, só que devolve o tax_info também
+        em vez de só o SKU normalizado."""
+        itens = []
+        for status in ("NORMAL", "UNLIST"):
+            offset = 0
+            while True:
+                resp = self.chamar("/api/v2/product/get_item_list", {
+                    "offset": offset,
+                    "page_size": 100,
+                    "item_status": [status],
+                })
+                if resp.get("error"):
+                    print(f"[SHOPEE] Erro ao listar itens {status}: {resp.get('error')} {resp.get('message')}")
+                    break
+                corpo = resp.get("response") or {}
+                item_ids = [it.get("item_id") for it in (corpo.get("item") or []) if it.get("item_id")]
+
+                for i in range(0, len(item_ids), 50):
+                    lote = item_ids[i:i + 50]
+                    r2 = self.chamar("/api/v2/product/get_item_base_info", {
+                        "item_id_list": ",".join(str(x) for x in lote),
+                        "need_tax_info": True,
+                    })
+                    if r2.get("error"):
+                        print(f"[SHOPEE] Erro ao buscar tax_info do lote {lote}: {r2.get('error')} {r2.get('message')}")
+                        continue
+                    for item in (r2.get("response") or {}).get("item_list") or []:
+                        tax = item.get("tax_info") or {}
+                        itens.append({
+                            "item_id": str(item.get("item_id")),
+                            "sku": item.get("item_sku") or "",
+                            "nome": item.get("item_name") or "",
+                            "ncm": tax.get("ncm") or "",
+                            "cest": tax.get("cest") or "",
+                        })
+
+                if not corpo.get("has_next_page") or not item_ids:
+                    break
+                offset = corpo.get("next_offset", offset + len(item_ids))
+        return itens
+
+    def atualizar_ncm(self, item_id: str, ncm: str, cest: Optional[str] = None) -> Dict[str, Any]:
+        """Atualiza NCM (e opcionalmente CEST) de um anúncio via update_item.
+        tax_info aceita atualização parcial — não precisa reenviar o produto inteiro."""
+        tax_info: Dict[str, Any] = {"ncm": ncm}
+        if cest:
+            tax_info["cest"] = cest
+        resp = self.chamar_post("/api/v2/product/update_item", {
+            "item_id": int(item_id),
+            "tax_info": tax_info,
+        })
+        if resp.get("error"):
+            return {"sucesso": False, "erro": f"{resp.get('error')}: {resp.get('message')}"}
+        return {"sucesso": True}
+
     def info_loja(self) -> Dict[str, Any]:
         """Dados da loja autorizada. Primeira chamada assinada com token."""
         dados = self.chamar("/api/v2/shop/get_shop_info")

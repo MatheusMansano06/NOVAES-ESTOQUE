@@ -16,12 +16,15 @@ interface ItemFiscal {
   nome: string
   produto_id: string | number
   item_id: string
+  shopee_item_id: string
   olist_ncm: string
   ml_ncm: string
+  shopee_ncm: string
   olist_gtin: string
   ml_ean: string
   ml_cest: string
   sem_dados_ml: boolean
+  sem_dados_shopee: boolean
   divergencias: string[]
   status: 'correto' | 'divergente' | 'sem_dados_ml'
 }
@@ -95,23 +98,26 @@ function ModalCorrigirFiscal({ item, onClose, onSalvo }: {
 }) {
   const [corrigirOlist, setCorrigirOlist] = useState(true)
   const [corrigirMl, setCorrigirMl] = useState(true)
-  const [ncm, setNcm] = useState(item.olist_ncm || item.ml_ncm || '')
+  const [corrigirShopee, setCorrigirShopee] = useState(!!item.shopee_item_id)
+  const [ncm, setNcm] = useState(item.olist_ncm || item.ml_ncm || item.shopee_ncm || '')
   const [cest, setCest] = useState(item.ml_cest || '')
   const [salvando, setSalvando] = useState(false)
   const [msg, setMsg] = useState<{ tipo: 'ok' | 'erro'; texto: string } | null>(null)
 
   const olistBate = !!ncm.trim() && norm(item.olist_ncm) === norm(ncm)
   const mlBate = !!ncm.trim() && norm(item.ml_ncm) === norm(ncm) && !!cest.trim() && (item.ml_cest || '').trim() === cest.trim()
+  const shopeeBate = !!ncm.trim() && norm(item.shopee_ncm) === norm(ncm)
 
   const salvar = async () => {
     setMsg(null)
-    if (!corrigirOlist && !corrigirMl) { setMsg({ tipo: 'erro', texto: 'Escolha pelo menos uma plataforma.' }); return }
+    if (!corrigirOlist && !corrigirMl && !corrigirShopee) { setMsg({ tipo: 'erro', texto: 'Escolha pelo menos uma plataforma.' }); return }
     if (!ncm.trim()) { setMsg({ tipo: 'erro', texto: 'Informe o NCM.' }); return }
     if (corrigirMl && !cest.trim()) { setMsg({ tipo: 'erro', texto: 'Informe o CEST para corrigir no Mercado Livre.' }); return }
 
     const precisaOlist = corrigirOlist && !olistBate
     const precisaMl = corrigirMl && !mlBate
-    if (!precisaOlist && !precisaMl) {
+    const precisaShopee = corrigirShopee && !!item.shopee_item_id && !shopeeBate
+    if (!precisaOlist && !precisaMl && !precisaShopee) {
       setMsg({ tipo: 'ok', texto: '✅ Já está 100% concluído — nada para corrigir.' })
       return
     }
@@ -121,6 +127,7 @@ function ModalCorrigirFiscal({ item, onClose, onSalvo }: {
       const body: Record<string, unknown> = { ncm: ncm.trim() }
       if (precisaOlist) body.produto_id = item.produto_id
       if (precisaMl) { body.item_id = item.item_id; body.cest = cest.trim() }
+      if (precisaShopee) body.shopee_item_id = item.shopee_item_id
 
       const r = await fetch(`${API_BASE}/api/fiscal/atualizar`, {
         method: 'POST',
@@ -129,14 +136,16 @@ function ModalCorrigirFiscal({ item, onClose, onSalvo }: {
       })
       const d = await r.json()
       if (!r.ok || !d.sucesso) {
-        const partes = [d.olist?.erro, d.ml?.erro].filter(Boolean)
+        const partes = [d.olist?.erro, d.ml?.erro, d.shopee?.erro].filter(Boolean)
         throw new Error(partes.join(' | ') || 'Falha ao corrigir')
       }
       onSalvo({
         olist_ncm: precisaOlist ? ncm.trim() : item.olist_ncm,
         ml_ncm: precisaMl ? ncm.trim() : item.ml_ncm,
         ml_cest: precisaMl ? cest.trim() : item.ml_cest,
+        shopee_ncm: precisaShopee ? ncm.trim() : item.shopee_ncm,
         sem_dados_ml: precisaMl ? false : item.sem_dados_ml,
+        sem_dados_shopee: precisaShopee ? false : item.sem_dados_shopee,
       })
       setMsg({ tipo: 'ok', texto: '✅ Corrigido com sucesso.' })
     } catch (e) {
@@ -169,10 +178,19 @@ function ModalCorrigirFiscal({ item, onClose, onSalvo }: {
           </span>
         </label>
 
-        <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', padding: '0.6rem', borderRadius: '8px', background: '#f7f8fa', marginBottom: '1rem', cursor: 'pointer' }}>
+        <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', padding: '0.6rem', borderRadius: '8px', background: '#f7f8fa', marginBottom: '0.5rem', cursor: 'pointer' }}>
           <input type="checkbox" checked={corrigirMl} onChange={(e) => setCorrigirMl(e.target.checked)} />
           <span style={{ fontSize: '0.85rem' }}>
             <strong>Mercado Livre</strong> — NCM atual: {item.ml_ncm || 'vazio'}, CEST atual: {item.ml_cest || 'faltando'} {mlBate && <span style={{ color: '#2e7d32' }}>✅ bate</span>}
+          </span>
+        </label>
+
+        <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', padding: '0.6rem', borderRadius: '8px', background: item.shopee_item_id ? '#f7f8fa' : '#fafafa', marginBottom: '1rem', cursor: item.shopee_item_id ? 'pointer' : 'default', opacity: item.shopee_item_id ? 1 : 0.6 }}>
+          <input type="checkbox" checked={corrigirShopee} disabled={!item.shopee_item_id} onChange={(e) => setCorrigirShopee(e.target.checked)} />
+          <span style={{ fontSize: '0.85rem' }}>
+            <strong>Shopee</strong> — {item.shopee_item_id
+              ? <>NCM atual: {item.shopee_ncm || 'vazio'} {shopeeBate && <span style={{ color: '#2e7d32' }}>✅ bate</span>}</>
+              : 'sem anúncio nesse SKU'}
           </span>
         </label>
 
@@ -386,13 +404,14 @@ function SecaoFiscal() {
         body: JSON.stringify({
           produto_id: item.produto_id,
           item_id: item.item_id,
+          shopee_item_id: item.shopee_item_id || undefined,
           ncm: ncmDesejado,
           cest: cestDesejado.trim() || undefined,
         }),
       })
       const d = await r.json()
       if (!r.ok || !d.sucesso) {
-        const partes = [d.olist?.erro, d.ml?.erro].filter(Boolean)
+        const partes = [d.olist?.erro, d.ml?.erro, d.shopee?.erro].filter(Boolean)
         throw new Error(partes.join(' | ') || 'Falha ao corrigir')
       }
       const cestNovo = d.ml?.cest_novo
@@ -403,9 +422,11 @@ function SecaoFiscal() {
               olist_ncm: ncmDesejado,
               ml_ncm: ncmDesejado,
               ml_cest: cestNovo != null ? cestNovo : p.ml_cest,
+              shopee_ncm: p.shopee_item_id ? ncmDesejado : p.shopee_ncm,
               sem_dados_ml: false,
-              divergencias: p.divergencias.filter((x) => x !== 'ncm'),
-              status: p.divergencias.filter((x) => x !== 'ncm').length ? 'divergente' : 'correto',
+              sem_dados_shopee: p.shopee_item_id ? false : p.sem_dados_shopee,
+              divergencias: p.divergencias.filter((x) => x !== 'ncm' && x !== 'ncm_shopee'),
+              status: p.divergencias.filter((x) => x !== 'ncm' && x !== 'ncm_shopee').length ? 'divergente' : 'correto',
             }
           : p
       )))
@@ -459,7 +480,7 @@ function SecaoFiscal() {
       <div className="card-body" style={{ padding: '1.25rem' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem', flexWrap: 'wrap', gap: '0.75rem' }}>
           <div>
-            <h3 style={{ margin: 0, fontSize: '1.05rem' }}>Dados fiscais: Mercado Livre x Olist</h3>
+            <h3 style={{ margin: 0, fontSize: '1.05rem' }}>Dados fiscais: Mercado Livre x Olist x Shopee</h3>
             <p style={{ margin: '0.25rem 0 0', fontSize: '0.8rem', color: '#667085' }}>
               Casa por SKU e compara NCM e GTIN/EAN cadastrados em cada plataforma.
             </p>
@@ -539,6 +560,7 @@ function SecaoFiscal() {
                       <th style={th}>SKU</th>
                       <th style={th}>NCM Olist</th>
                       <th style={th}>NCM ML</th>
+                      <th style={th}>NCM Shopee</th>
                       <th style={th}>GTIN Olist</th>
                       <th style={th}>EAN ML</th>
                       <th style={th}>CEST ML</th>
@@ -568,6 +590,9 @@ function SecaoFiscal() {
                         </td>
                         <td style={{ ...td, color: item.divergencias.includes('ncm') ? '#c62828' : undefined, fontWeight: item.divergencias.includes('ncm') ? 700 : 400 }}>
                           {item.sem_dados_ml ? <em style={{ color: '#999' }}>sem dados</em> : (item.ml_ncm || <em style={{ color: '#999' }}>vazio</em>)}
+                        </td>
+                        <td style={{ ...td, color: item.divergencias.includes('ncm_shopee') ? '#c62828' : undefined, fontWeight: item.divergencias.includes('ncm_shopee') ? 700 : 400 }}>
+                          {!item.shopee_item_id ? <em style={{ color: '#bbb' }}>sem anúncio</em> : (item.shopee_ncm || <em style={{ color: '#999' }}>vazio</em>)}
                         </td>
                         <td style={{ ...td, color: item.divergencias.includes('gtin') ? '#c62828' : undefined, fontWeight: item.divergencias.includes('gtin') ? 700 : 400 }}>
                           {item.olist_gtin || <em style={{ color: '#999' }}>vazio</em>}

@@ -9,6 +9,8 @@ interface ItemNcm {
   situacao: string
   tipo: string
   ncm_atual: string
+  shopee_item_id: string
+  shopee_ncm: string
   bate: boolean
 }
 
@@ -102,11 +104,11 @@ export function ConferenciaNcm() {
       const r = await fetch(`${API_BASE}/api/olist/atualizar-ncm`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ produto_id: item.id, ncm: ncmEsperado }),
+        body: JSON.stringify({ produto_id: item.id, ncm: ncmEsperado, shopee_item_id: item.shopee_item_id || undefined }),
       })
       const d = await r.json()
       if (!r.ok || !d.sucesso) throw new Error(d.erro || 'Falha ao atualizar NCM')
-      setItens((prev) => prev.map((p) => (p.id === item.id ? { ...p, ncm_atual: ncmEsperado, bate: true } : p)))
+      setItens((prev) => prev.map((p) => (p.id === item.id ? { ...p, ncm_atual: ncmEsperado, shopee_ncm: p.shopee_item_id ? ncmEsperado : p.shopee_ncm, bate: true } : p)))
       return null
     } catch (e) {
       return String(e instanceof Error ? e.message : e)
@@ -285,7 +287,8 @@ export function ConferenciaNcm() {
                   <th style={th}>Nome</th>
                   <th style={th}>SKU</th>
                   <th style={th}>Tipo</th>
-                  <th style={th}>NCM atual</th>
+                  <th style={th}>NCM Olist</th>
+                  <th style={th}>NCM Shopee</th>
                   <th style={th}>Status</th>
                   <th style={th}></th>
                 </tr>
@@ -307,6 +310,11 @@ export function ConferenciaNcm() {
                     <td style={td}>{item.sku}</td>
                     <td style={td}>{labelTipo(item.tipo)}</td>
                     <td style={td}>{item.ncm_atual || <em style={{ color: '#999' }}>vazio</em>}</td>
+                    <td style={td}>
+                      {item.shopee_item_id
+                        ? (item.shopee_ncm || <em style={{ color: '#999' }}>vazio</em>)
+                        : <em style={{ color: '#bbb' }}>sem anúncio</em>}
+                    </td>
                     <td style={td}>
                       {item.bate ? (
                         <span style={{ color: '#2e7d32', fontWeight: 700 }}>✅ Bate</span>

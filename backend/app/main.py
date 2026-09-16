@@ -621,7 +621,8 @@ async def get_nf(request: Request):
         db.close()
 
 async def atualizar_ncm_olist(request: Request):
-    """POST /api/olist/atualizar-ncm  Body: {produto_id, ncm} — corrige o NCM cadastrado."""
+    """POST /api/olist/atualizar-ncm  Body: {produto_id, ncm, shopee_item_id?}
+    Corrige o NCM na Olist e, se shopee_item_id vier preenchido, na Shopee também."""
     try:
         body = await request.json()
     except Exception:
@@ -629,19 +630,25 @@ async def atualizar_ncm_olist(request: Request):
 
     produto_id = body.get("produto_id")
     ncm = body.get("ncm")
+    shopee_item_id = body.get("shopee_item_id")
     if not produto_id or not ncm:
         return JSONResponse({"sucesso": False, "erro": "Informe produto_id e ncm"}, status_code=400)
 
     resultado = olist.atualizar_ncm_produto(str(produto_id), str(ncm))
-    return JSONResponse(resultado, status_code=200 if resultado.get("sucesso") else 502)
+    resultado_shopee = shopee.atualizar_ncm(str(shopee_item_id), str(ncm)) if shopee_item_id else None
+    sucesso = bool(resultado.get("sucesso") and (resultado_shopee is None or resultado_shopee.get("sucesso")))
+    return JSONResponse(
+        {"sucesso": sucesso, "erro": resultado.get("erro") or (resultado_shopee or {}).get("erro"), "shopee": resultado_shopee},
+        status_code=200 if sucesso else 502,
+    )
 
 
 
 async def atualizar_fiscal_combinado(request: Request):
-    """POST /api/fiscal/atualizar  Body: {produto_id?, item_id?, ncm, cest?}
-    Corrige o NCM na Olist e o NCM/CEST no Mercado Livre do mesmo produto,
-    numa tacada só. Informe produto_id (Olist) e/ou item_id (ML) — o que
-    faltar simplesmente não é tocado."""
+    """POST /api/fiscal/atualizar  Body: {produto_id?, item_id?, shopee_item_id?, ncm, cest?}
+    Corrige o NCM na Olist, o NCM/CEST no Mercado Livre e o NCM na Shopee do
+    mesmo produto, numa tacada só. Informe só o(s) id(s) do(s) canal(is) que
+    o produto tem — o que faltar simplesmente não é tocado."""
     try:
         body = await request.json()
     except Exception:
@@ -649,19 +656,22 @@ async def atualizar_fiscal_combinado(request: Request):
 
     produto_id = body.get("produto_id")
     item_id = body.get("item_id")
+    shopee_item_id = body.get("shopee_item_id")
     ncm = body.get("ncm")
     cest = body.get("cest")
-    if not ncm or (not produto_id and not item_id):
-        return JSONResponse({"sucesso": False, "erro": "Informe ncm e ao menos produto_id ou item_id"}, status_code=400)
+    if not ncm or (not produto_id and not item_id and not shopee_item_id):
+        return JSONResponse({"sucesso": False, "erro": "Informe ncm e ao menos produto_id, item_id ou shopee_item_id"}, status_code=400)
 
     resultado_olist = olist.atualizar_ncm_produto(str(produto_id), str(ncm)) if produto_id else None
     resultado_ml = ml.atualizar_dados_fiscais(str(item_id), novo_ncm=str(ncm), novo_cest=cest) if item_id else None
+    resultado_shopee = shopee.atualizar_ncm(str(shopee_item_id), str(ncm)) if shopee_item_id else None
 
     ok_olist = resultado_olist is None or resultado_olist.get("sucesso")
     ok_ml = resultado_ml is None or resultado_ml.get("sucesso")
-    sucesso = bool(ok_olist and ok_ml)
+    ok_shopee = resultado_shopee is None or resultado_shopee.get("sucesso")
+    sucesso = bool(ok_olist and ok_ml and ok_shopee)
     return JSONResponse(
-        {"sucesso": sucesso, "olist": resultado_olist, "ml": resultado_ml},
+        {"sucesso": sucesso, "olist": resultado_olist, "ml": resultado_ml, "shopee": resultado_shopee},
         status_code=200 if sucesso else 502,
     )
 
@@ -701,7 +711,13 @@ def _rodar_conferencia_ncm(termo: str, ncm_esperado: str, incluir_excluidos: boo
             }
         finally:
             db.close()
-        shopee_skus = shopee.listar_todos_skus() if shopee.configurado else set()
+        shopee_itens_fiscais = shopee.listar_todos_itens_fiscais() if shopee.configurado else []
+        shopee_por_sku = {}
+        for si in shopee_itens_fiscais:
+            chave = re.sub(r"[^a-z0-9]", "", (si.get("sku") or "").lower())
+            if chave:
+                shopee_por_sku[chave] = si
+        shopee_skus = set(shopee_por_sku)
 
         def _tem_integracao(p: Dict) -> bool:
             sku_norm = re.sub(r"[^a-z0-9]", "", (p.get("sku") or p.get("codigo_produto") or "").lower())
@@ -714,8 +730,13 @@ def _rodar_conferencia_ncm(termo: str, ncm_esperado: str, incluir_excluidos: boo
             produto_id = p.get("id")
             detalhe = olist.obter_detalhes_completo(str(produto_id)) if produto_id else None
             ncm_atual = str((detalhe or {}).get("ncm") or "")
+            sku_norm = re.sub(r"[^a-z0-9]", "", (p.get("sku") or p.get("codigo_produto") or "").lower())
+            item_shopee = shopee_por_sku.get(sku_norm)
             # A Olist devolve o NCM formatado com pontos (ex.: "6506.10.10") —
             # comparar só os dígitos, senão nunca bate mesmo quando é o mesmo NCM.
+            olist_bate = re.sub(r"\D", "", ncm_atual) == ncm_esperado_digitos
+            shopee_ncm = str((item_shopee or {}).get("ncm") or "")
+            shopee_bate = (re.sub(r"\D", "", shopee_ncm) == ncm_esperado_digitos) if item_shopee else True
             itens.append({
                 "id": produto_id,
                 "sku": p.get("sku") or p.get("codigo_produto") or "",
@@ -723,7 +744,9 @@ def _rodar_conferencia_ncm(termo: str, ncm_esperado: str, incluir_excluidos: boo
                 "situacao": p.get("situacao") or "",
                 "tipo": (detalhe or {}).get("tipo") or "",
                 "ncm_atual": ncm_atual,
-                "bate": re.sub(r"\D", "", ncm_atual) == ncm_esperado_digitos,
+                "shopee_item_id": (item_shopee or {}).get("item_id") or "",
+                "shopee_ncm": shopee_ncm,
+                "bate": olist_bate and shopee_bate,
             })
 
         _conferencia_ncm_estado.update({
@@ -868,12 +891,20 @@ def _rodar_comparacao_fiscal_ml_olist() -> None:
             if chave:
                 olist_por_sku.setdefault(chave, p)
 
+        shopee_itens_fiscais = shopee.listar_todos_itens_fiscais() if shopee.configurado else []
+        shopee_por_sku = {}
+        for si in shopee_itens_fiscais:
+            chave = re.sub(r"[^a-z0-9]", "", (si.get("sku") or "").lower())
+            if chave:
+                shopee_por_sku[chave] = si
+
         chaves_comuns = sorted(set(ml_por_sku) & set(olist_por_sku))
 
         itens = []
         for chave in chaves_comuns:
             p_olist = olist_por_sku[chave]
             item_ml = ml_por_sku[chave]
+            item_shopee = shopee_por_sku.get(chave)
 
             detalhe = olist.obter_detalhes_completo(str(p_olist.get("id"))) or {}
             olist_ncm = detalhe.get("ncm") or ""
@@ -885,26 +916,35 @@ def _rodar_comparacao_fiscal_ml_olist() -> None:
             ml_ean = (fiscal_ml or {}).get("ean") or ""
             ml_cest = (fiscal_ml or {}).get("cest") or ""
 
+            shopee_ncm = (item_shopee or {}).get("ncm") or ""
+            sem_shopee = item_shopee is None
+
             diffs = []
             if not sem_dados_ml:
                 if _norm_digitos(olist_ncm) != _norm_digitos(ml_ncm):
                     diffs.append("ncm")
                 if olist_gtin and ml_ean and _norm_digitos(olist_gtin) != _norm_digitos(ml_ean):
                     diffs.append("gtin")
+            if not sem_shopee and _norm_digitos(olist_ncm) != _norm_digitos(shopee_ncm):
+                diffs.append("ncm_shopee")
 
+            sem_dados = sem_dados_ml and sem_shopee
             itens.append({
                 "sku": p_olist.get("sku") or p_olist.get("codigo_produto") or "",
                 "nome": item_ml.titulo or p_olist.get("nome") or "",
                 "produto_id": p_olist.get("id"),
                 "item_id": item_ml.item_id,
+                "shopee_item_id": (item_shopee or {}).get("item_id") or "",
                 "olist_ncm": olist_ncm,
                 "ml_ncm": ml_ncm,
+                "shopee_ncm": shopee_ncm,
                 "olist_gtin": olist_gtin,
                 "ml_ean": ml_ean,
                 "ml_cest": ml_cest,
                 "sem_dados_ml": sem_dados_ml,
+                "sem_dados_shopee": sem_shopee,
                 "divergencias": diffs,
-                "status": "sem_dados_ml" if sem_dados_ml else ("divergente" if diffs else "correto"),
+                "status": "sem_dados_ml" if sem_dados else ("divergente" if diffs else "correto"),
             })
 
         total = len(itens)
