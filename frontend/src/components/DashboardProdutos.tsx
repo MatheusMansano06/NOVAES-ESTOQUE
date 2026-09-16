@@ -141,14 +141,34 @@ function ModalCorrigirFiscal({ item, onClose, onSalvo }: {
         const partes = [d.olist?.erro, d.ml?.erro, d.shopee?.erro].filter(Boolean)
         throw new Error(partes.join(' | ') || 'Falha ao corrigir')
       }
+      const novoOlistNcm = precisaOlist ? ncm.trim() : item.olist_ncm
+      const novoMlNcm = precisaMl ? ncm.trim() : item.ml_ncm
+      const novoShopeeNcm = precisaShopee ? ncm.trim() : item.shopee_ncm
+      const novoSemDadosMl = precisaMl ? false : item.sem_dados_ml
+      const novoSemDadosShopee = precisaShopee ? false : item.sem_dados_shopee
+
+      // Recalcula divergências/status com os valores pós-correção — mesma
+      // regra do backend (_rodar_comparacao_fiscal_ml_olist) — senão a linha
+      // fica presa como "Divergente" mesmo depois de tudo bater.
+      const novasDivergencias: string[] = []
+      if (!novoSemDadosMl) {
+        if (norm(novoOlistNcm) !== norm(novoMlNcm)) novasDivergencias.push('ncm')
+        if (item.olist_gtin && item.ml_ean && norm(item.olist_gtin) !== norm(item.ml_ean)) novasDivergencias.push('gtin')
+      }
+      if (!novoSemDadosShopee && norm(novoOlistNcm) !== norm(novoShopeeNcm)) novasDivergencias.push('ncm_shopee')
+      const novoStatus: ItemFiscal['status'] =
+        novoSemDadosMl && novoSemDadosShopee ? 'sem_dados_ml' : (novasDivergencias.length ? 'divergente' : 'correto')
+
       onSalvo({
-        olist_ncm: precisaOlist ? ncm.trim() : item.olist_ncm,
-        ml_ncm: precisaMl ? ncm.trim() : item.ml_ncm,
+        olist_ncm: novoOlistNcm,
+        ml_ncm: novoMlNcm,
         ml_cest: precisaMl ? cest.trim() : item.ml_cest,
-        shopee_ncm: precisaShopee ? ncm.trim() : item.shopee_ncm,
+        shopee_ncm: novoShopeeNcm,
         shopee_cest: precisaShopee ? cest.trim() : item.shopee_cest,
-        sem_dados_ml: precisaMl ? false : item.sem_dados_ml,
-        sem_dados_shopee: precisaShopee ? false : item.sem_dados_shopee,
+        sem_dados_ml: novoSemDadosMl,
+        sem_dados_shopee: novoSemDadosShopee,
+        divergencias: novasDivergencias,
+        status: novoStatus,
       })
       setMsg({ tipo: 'ok', texto: '✅ Corrigido com sucesso.' })
     } catch (e) {
