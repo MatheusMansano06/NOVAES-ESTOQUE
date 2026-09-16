@@ -664,7 +664,7 @@ async def atualizar_fiscal_combinado(request: Request):
 
     resultado_olist = olist.atualizar_ncm_produto(str(produto_id), str(ncm)) if produto_id else None
     resultado_ml = ml.atualizar_dados_fiscais(str(item_id), novo_ncm=str(ncm), novo_cest=cest) if item_id else None
-    resultado_shopee = shopee.atualizar_ncm(str(shopee_item_id), str(ncm)) if shopee_item_id else None
+    resultado_shopee = shopee.atualizar_ncm(str(shopee_item_id), str(ncm), cest=cest) if shopee_item_id else None
 
     ok_olist = resultado_olist is None or resultado_olist.get("sucesso")
     ok_ml = resultado_ml is None or resultado_ml.get("sucesso")
@@ -917,6 +917,7 @@ def _rodar_comparacao_fiscal_ml_olist() -> None:
             ml_cest = (fiscal_ml or {}).get("cest") or ""
 
             shopee_ncm = (item_shopee or {}).get("ncm") or ""
+            shopee_cest = (item_shopee or {}).get("cest") or ""
             sem_shopee = item_shopee is None
 
             diffs = []
@@ -941,6 +942,7 @@ def _rodar_comparacao_fiscal_ml_olist() -> None:
                 "olist_gtin": olist_gtin,
                 "ml_ean": ml_ean,
                 "ml_cest": ml_cest,
+                "shopee_cest": shopee_cest,
                 "sem_dados_ml": sem_dados_ml,
                 "sem_dados_shopee": sem_shopee,
                 "divergencias": diffs,

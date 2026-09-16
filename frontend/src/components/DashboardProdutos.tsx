@@ -23,6 +23,7 @@ interface ItemFiscal {
   olist_gtin: string
   ml_ean: string
   ml_cest: string
+  shopee_cest: string
   sem_dados_ml: boolean
   sem_dados_shopee: boolean
   divergencias: string[]
@@ -106,13 +107,13 @@ function ModalCorrigirFiscal({ item, onClose, onSalvo }: {
 
   const olistBate = !!ncm.trim() && norm(item.olist_ncm) === norm(ncm)
   const mlBate = !!ncm.trim() && norm(item.ml_ncm) === norm(ncm) && !!cest.trim() && (item.ml_cest || '').trim() === cest.trim()
-  const shopeeBate = !!ncm.trim() && norm(item.shopee_ncm) === norm(ncm)
+  const shopeeBate = !!ncm.trim() && norm(item.shopee_ncm) === norm(ncm) && !!cest.trim() && (item.shopee_cest || '').trim() === cest.trim()
 
   const salvar = async () => {
     setMsg(null)
     if (!corrigirOlist && !corrigirMl && !corrigirShopee) { setMsg({ tipo: 'erro', texto: 'Escolha pelo menos uma plataforma.' }); return }
     if (!ncm.trim()) { setMsg({ tipo: 'erro', texto: 'Informe o NCM.' }); return }
-    if (corrigirMl && !cest.trim()) { setMsg({ tipo: 'erro', texto: 'Informe o CEST para corrigir no Mercado Livre.' }); return }
+    if ((corrigirMl || corrigirShopee) && !cest.trim()) { setMsg({ tipo: 'erro', texto: 'Informe o CEST — ele muda junto com o NCM no ML e na Shopee.' }); return }
 
     const precisaOlist = corrigirOlist && !olistBate
     const precisaMl = corrigirMl && !mlBate
@@ -126,8 +127,9 @@ function ModalCorrigirFiscal({ item, onClose, onSalvo }: {
     try {
       const body: Record<string, unknown> = { ncm: ncm.trim() }
       if (precisaOlist) body.produto_id = item.produto_id
-      if (precisaMl) { body.item_id = item.item_id; body.cest = cest.trim() }
+      if (precisaMl) body.item_id = item.item_id
       if (precisaShopee) body.shopee_item_id = item.shopee_item_id
+      if (precisaMl || precisaShopee) body.cest = cest.trim()
 
       const r = await fetch(`${API_BASE}/api/fiscal/atualizar`, {
         method: 'POST',
@@ -144,6 +146,7 @@ function ModalCorrigirFiscal({ item, onClose, onSalvo }: {
         ml_ncm: precisaMl ? ncm.trim() : item.ml_ncm,
         ml_cest: precisaMl ? cest.trim() : item.ml_cest,
         shopee_ncm: precisaShopee ? ncm.trim() : item.shopee_ncm,
+        shopee_cest: precisaShopee ? cest.trim() : item.shopee_cest,
         sem_dados_ml: precisaMl ? false : item.sem_dados_ml,
         sem_dados_shopee: precisaShopee ? false : item.sem_dados_shopee,
       })
@@ -189,7 +192,7 @@ function ModalCorrigirFiscal({ item, onClose, onSalvo }: {
           <input type="checkbox" checked={corrigirShopee} disabled={!item.shopee_item_id} onChange={(e) => setCorrigirShopee(e.target.checked)} />
           <span style={{ fontSize: '0.85rem' }}>
             <strong>Shopee</strong> — {item.shopee_item_id
-              ? <>NCM atual: {item.shopee_ncm || 'vazio'} {shopeeBate && <span style={{ color: '#2e7d32' }}>✅ bate</span>}</>
+              ? <>NCM atual: {item.shopee_ncm || 'vazio'}, CEST atual: {item.shopee_cest || 'faltando'} {shopeeBate && <span style={{ color: '#2e7d32' }}>✅ bate</span>}</>
               : 'sem anúncio nesse SKU'}
           </span>
         </label>
@@ -199,9 +202,9 @@ function ModalCorrigirFiscal({ item, onClose, onSalvo }: {
           <input value={ncm} onChange={(e) => setNcm(e.target.value)} style={{ width: '100%', boxSizing: 'border-box', padding: '0.5rem 0.6rem', borderRadius: '8px', border: '1px solid #cfd8dc' }} />
         </div>
 
-        {corrigirMl && (
+        {(corrigirMl || corrigirShopee) && (
           <div style={{ marginBottom: '1rem' }}>
-            <label style={{ fontSize: '0.75rem', color: '#667085', display: 'block', marginBottom: '0.25rem' }}>CEST desejado (Mercado Livre)</label>
+            <label style={{ fontSize: '0.75rem', color: '#667085', display: 'block', marginBottom: '0.25rem' }}>CEST desejado (Mercado Livre + Shopee) — muda sempre junto com o NCM</label>
             <input value={cest} onChange={(e) => setCest(e.target.value)} placeholder="ex.: 0100700" style={{ width: '100%', boxSizing: 'border-box', padding: '0.5rem 0.6rem', borderRadius: '8px', border: '1px solid #cfd8dc' }} />
           </div>
         )}
@@ -362,6 +365,7 @@ function SecaoFiscal() {
   const [carregando, setCarregando] = useState(false)
   const [erro, setErro] = useState('')
   const [filtro, setFiltro] = useState<'todos' | 'correto' | 'divergente' | 'sem_dados_ml'>('divergente')
+  const [termo, setTermo] = useState('')
   const [jaRodou, setJaRodou] = useState(false)
   const [ncmDesejado, setNcmDesejado] = useState('65070000')
   const [cestDesejado, setCestDesejado] = useState('')
@@ -393,7 +397,10 @@ function SecaoFiscal() {
     }
   }, [])
 
-  const itensExibidos = filtro === 'todos' ? itens : itens.filter((i) => i.status === filtro)
+  const itensPorStatus = filtro === 'todos' ? itens : itens.filter((i) => i.status === filtro)
+  const itensExibidos = termo.trim()
+    ? itensPorStatus.filter((i) => i.nome.toLowerCase().includes(termo.trim().toLowerCase()))
+    : itensPorStatus
 
   // Corrige na Olist e no ML numa chamada só; devolve null em sucesso ou a mensagem de erro.
   const executarCorrecao = async (item: ItemFiscal): Promise<string | null> => {
@@ -423,6 +430,7 @@ function SecaoFiscal() {
               ml_ncm: ncmDesejado,
               ml_cest: cestNovo != null ? cestNovo : p.ml_cest,
               shopee_ncm: p.shopee_item_id ? ncmDesejado : p.shopee_ncm,
+              shopee_cest: p.shopee_item_id ? cestDesejado.trim() : p.shopee_cest,
               sem_dados_ml: false,
               sem_dados_shopee: p.shopee_item_id ? false : p.sem_dados_shopee,
               divergencias: p.divergencias.filter((x) => x !== 'ncm' && x !== 'ncm_shopee'),
@@ -505,6 +513,15 @@ function SecaoFiscal() {
 
         {resumo && (
           <>
+            <div style={{ marginBottom: '0.75rem' }}>
+              <input
+                value={termo}
+                onChange={(e) => setTermo(e.target.value)}
+                placeholder="Filtrar por nome (ex.: Retrovisor)"
+                style={{ padding: '0.5rem 0.7rem', borderRadius: '8px', border: '1px solid #cfd8dc', minWidth: 260 }}
+              />
+            </div>
+
             <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '0.75rem', flexWrap: 'wrap' }}>
               {([
                 ['todos', `Todos (${resumo.total})`, '#444'],
@@ -564,6 +581,7 @@ function SecaoFiscal() {
                       <th style={th}>GTIN Olist</th>
                       <th style={th}>EAN ML</th>
                       <th style={th}>CEST ML</th>
+                      <th style={th}>CEST Shopee</th>
                       <th style={th}>Status</th>
                       <th style={th}></th>
                     </tr>
@@ -604,6 +622,11 @@ function SecaoFiscal() {
                           {item.sem_dados_ml
                             ? <em style={{ color: '#999' }}>sem dados</em>
                             : (item.ml_cest || <em style={{ color: '#c62828', fontWeight: 700 }}>faltando</em>)}
+                        </td>
+                        <td style={td}>
+                          {!item.shopee_item_id
+                            ? <em style={{ color: '#bbb' }}>sem anúncio</em>
+                            : (item.shopee_cest || <em style={{ color: '#c62828', fontWeight: 700 }}>faltando</em>)}
                         </td>
                         <td style={td}>
                           {item.status === 'correto' && <span style={{ color: '#2e7d32', fontWeight: 700 }}>✅ Correto</span>}
