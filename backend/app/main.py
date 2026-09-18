@@ -42,6 +42,12 @@ from app.integracoes_olist import olist
 from app.integracoes_ml import ml
 from app.integracoes_shopee import shopee
 from app.jobs import iniciar_scheduler
+from app.devolucoes.routes import (
+    listar_devolucoes as devol_listar,
+    detalhe_devolucao as devol_detalhe,
+    sincronizar_devolucoes as devol_sincronizar,
+)
+from app.devolucoes import models as _devolucoes_models  # registra as tabelas no Base antes do create_all
 
 # Carregar variáveis de ambiente do arquivo .env
 load_dotenv()
@@ -6267,6 +6273,11 @@ routes = [
     Route("/api/embaldes/{embale_id}/itens/{item_id}/em-espera", marcar_em_espera_embale, methods=["POST"]),
     Route("/api/embaldes/{embale_id}/itens/{item_id}/nao-enviar", marcar_nao_enviar_embale, methods=["POST"]),
     Route("/api/embaldes/{embale_id}/encerrar", encerrar_embale, methods=["POST"]),
+
+    # --- Central de Devoluções (Fase 1 — leitura e vínculo) ---
+    Route("/api/devolucoes", devol_listar, methods=["GET"]),
+    Route("/api/devolucoes/sincronizar", devol_sincronizar, methods=["POST"]),
+    Route("/api/devolucoes/{id:int}", devol_detalhe, methods=["GET"]),
 
     # Shopee (OAuth + push notification)
     Route("/api/shopee/status", shopee_status, methods=["GET"]),
