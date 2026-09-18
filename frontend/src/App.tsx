@@ -14,6 +14,7 @@ import { RadarFull } from './components/RadarFull'
 import { EstoqueEmbalagens } from './components/EstoqueEmbalagens'
 import { ConferenciaNcm } from './components/ConferenciaNcm'
 import { PaginaClassificacaoTipos, PaginaFiscalMlOlist } from './components/DashboardProdutos'
+import { CentralDevolucoes } from './components/CentralDevolucoes'
 import { PlataformaSelecao, type Platform, LogoMercadoLivre, LogoShopee, LogoOperacao } from './components/PlataformaSelecao'
 import { LoginNVS } from './components/LoginNVS'
 import { DashboardShopee } from './components/DashboardShopee'
@@ -92,7 +93,7 @@ interface ProdutoEstoque {
   }>
 }
 
-type Pagina = 'bemvindo' | 'inicial' | 'conferencia' | 'produtos_nota' | 'relacionamento_produto' | 'fornecedores' | 'full-operacoes' | 'anuncios' | 'notas-fiscais' | 'operadores' | 'garimpador' | 'lista-compra' | 'radar-full' | 'estoque-embalagens' | 'conferencia-ncm' | 'classificacao-tipos' | 'fiscal-ml-olist'
+type Pagina = 'bemvindo' | 'inicial' | 'conferencia' | 'produtos_nota' | 'relacionamento_produto' | 'fornecedores' | 'full-operacoes' | 'anuncios' | 'notas-fiscais' | 'operadores' | 'garimpador' | 'lista-compra' | 'radar-full' | 'estoque-embalagens' | 'central-devolucoes' | 'conferencia-ncm' | 'classificacao-tipos' | 'fiscal-ml-olist'
 
 interface Divergencia {
   item_id: number
@@ -1668,6 +1669,7 @@ function App() {
       label: 'Marketplace',
       items: [
         { key: 'anuncios', label: 'Anuncios ML', icon: 'megaphone', active: pagina === 'anuncios', onClick: () => setPagina('anuncios') },
+        { key: 'central-devolucoes', label: 'Devoluções', icon: 'box', active: pagina === 'central-devolucoes', onClick: () => setPagina('central-devolucoes') },
       ],
     },
     // === FERRAMENTAS ===
@@ -3058,6 +3060,11 @@ function App() {
       'Acompanhe anuncios, estoque, imagens, precificacao e dimensoes.',
       <AnunciosML onVoltar={voltarParaInicial} />
     )
+  }
+
+  // ===== PÁGINA CENTRAL DE DEVOLUÇÕES =====
+  if (pagina === 'central-devolucoes') {
+    return renderComShell('', '', <CentralDevolucoes />)
   }
 
   // ===== PÁGINA DE LISTA DE COMPRA =====
