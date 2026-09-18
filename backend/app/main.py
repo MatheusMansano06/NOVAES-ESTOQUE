@@ -42,47 +42,6 @@ from app.integracoes_olist import olist
 from app.integracoes_ml import ml
 from app.integracoes_shopee import shopee
 from app.jobs import iniciar_scheduler
-from app.handlers_devolucoes import (
-    buscar_devolucao as dev_buscar_devolucao,
-    bipar_chegada as dev_bipar_chegada,
-    cards_por_bucket as dev_cards_por_bucket,
-    chegando_hoje as dev_chegando_hoje,
-    chegando_resumo as dev_chegando_resumo,
-    confirmar_chegada as dev_confirmar_chegada,
-    recebidos as dev_recebidos,
-    debug_shipment as dev_debug_shipment,
-    diff_seller_center as dev_diff_seller_center,
-    criar_contestacao as dev_criar_contestacao,
-    criar_devolucao as dev_criar_devolucao,
-    fila_ml_live as dev_fila_ml_live,
-    filtros_ml as dev_filtros_ml,
-    get_checklist as dev_get_checklist,
-    historico_devolucao as dev_historico_devolucao,
-    historico_incompletos as dev_historico_incompletos,
-    listar_contestacoes as dev_listar_contestacoes,
-    listar_devolucoes as dev_listar_devolucoes,
-    listar_evidencias as dev_listar_evidencias,
-    listar_mediacoes as dev_listar_mediacoes,
-    painel_pos_venda as dev_painel_pos_venda,
-    resumo_financeiro as dev_resumo_financeiro,
-    resumo_ml as dev_resumo_ml,
-    salvar_checklist as dev_salvar_checklist,
-    salvar_progresso_checklist as dev_salvar_progresso_checklist,
-    sincronizar_ml as dev_sincronizar_ml,
-    sincronizar_ml_completo as dev_sincronizar_ml_completo,
-    sync_diagnostico as dev_sync_diagnostico,
-    sync_status as dev_sync_status,
-    sync_trace as dev_sync_trace,
-    sync_trace_ultimo as dev_sync_trace_ultimo,
-    config_custos as dev_config_custos,
-    custos_dashboard as dev_custos_dashboard,
-    divergencia as dev_divergencia,
-    finalizar_avaliacao as dev_finalizar_avaliacao,
-    upload_evidencia as dev_upload_evidencia,
-    servir_evidencia as dev_servir_evidencia,
-    ml_review as dev_ml_review,
-    ml_resolucao as dev_ml_resolucao,
-)
 
 # Carregar variáveis de ambiente do arquivo .env
 load_dotenv()
@@ -142,64 +101,11 @@ def _garantir_colunas_sqlite():
                     conn.exec_driver_sql(f"ALTER TABLE ml_item_cache ADD COLUMN {nome} {tipo}")
                     print(f"[DB] Coluna ml_item_cache.{nome} criada")
 
-            # --- Devoluções ML (portado de DEVOLUCOES-ML-main) ---
-            # Previsão de chegada no cache de classificação (esteira "Chegando hoje").
-            # Sem esta migração a tabela em prod fica sem a coluna e o sync dá 500.
-            colunas_clf = {row[1] for row in conn.exec_driver_sql(
-                "PRAGMA table_info(ml_claim_classifications)").fetchall()}
-            for nome_col in ("previsao_chegada", "recebido_em", "shipment_id", "tracking_number"):
-                if colunas_clf and nome_col not in colunas_clf:
-                    conn.exec_driver_sql(
-                        f"ALTER TABLE ml_claim_classifications ADD COLUMN {nome_col} VARCHAR(60) DEFAULT ''")
-                    print(f"[DB] Coluna ml_claim_classifications.{nome_col} criada")
-
-            # SKU do produto na devolução (custo de dano). Coluna nova em tabela
-            # já existente → precisa de ALTER, senão o sync/finalizar dá 500 em prod.
-            colunas_dev = {row[1] for row in conn.exec_driver_sql(
-                "PRAGMA table_info(devolucoes)").fetchall()}
-            if colunas_dev and "ml_sku" not in colunas_dev:
-                conn.exec_driver_sql("ALTER TABLE devolucoes ADD COLUMN ml_sku VARCHAR(120) DEFAULT ''")
-                print("[DB] Coluna devolucoes.ml_sku criada")
-
-            # As 10 tabelas nascem do create_all(). O que não dá para expressar no
-            # model é o índice ÚNICO PARCIAL de ml_claim_id: ele é o que torna o
-            # sync idempotente (sem ele, re-sincronizar duplica a devolução do
-            # mesmo claim). O filtro WHERE é obrigatório porque devoluções criadas
-            # à mão têm ml_claim_id NULL/'' e colidiriam entre si num índice único
-            # comum. Mantido igual ao original.
-            for nome_idx, ddl in [
-                ("idx_devolucoes_ml_claim_id",
-                 "CREATE UNIQUE INDEX IF NOT EXISTS idx_devolucoes_ml_claim_id "
-                 "ON devolucoes(ml_claim_id) WHERE ml_claim_id IS NOT NULL AND ml_claim_id != ''"),
-                ("idx_ml_raw_payloads_claim",
-                 "CREATE INDEX IF NOT EXISTS idx_ml_raw_payloads_claim "
-                 "ON ml_raw_payloads(claim_id, resource_type)"),
-                ("idx_ml_sync_runs_tipo_status",
-                 "CREATE INDEX IF NOT EXISTS idx_ml_sync_runs_tipo_status "
-                 "ON ml_sync_runs(tipo, status, iniciado_em)"),
-                ("idx_ml_trace_events_trace",
-                 "CREATE INDEX IF NOT EXISTS idx_ml_trace_events_trace "
-                 "ON ml_trace_events(trace_id, id)"),
-                ("idx_ml_claim_classifications_bucket",
-                 "CREATE INDEX IF NOT EXISTS idx_ml_claim_classifications_bucket "
-                 "ON ml_claim_classifications(active, bucket)"),
-            ]:
-                conn.exec_driver_sql(ddl)
     except Exception as e:
         print(f"[DB] Aviso ao garantir colunas SQLite: {e}")
 
 
 _garantir_colunas_sqlite()
-
-# Preenche shipment_id/tracking das classificações já existentes a partir dos
-# payloads salvos, para a bipagem funcionar em qualquer situação já capturada.
-try:
-    from app.devolucoes_sync import backfill_shipment_ids_from_payloads
-    _n_backfill = backfill_shipment_ids_from_payloads()
-    if _n_backfill:
-        print(f"[DB] shipment_id backfillado em {_n_backfill} classificacao(oes)")
-except Exception as _exc:  # nunca derruba o boot por causa do backfill
-    print(f"[DB] backfill de shipment_id falhou (segue sem): {_exc}")
 
 OPERADORES_PADRAO = ["Rafael", "Wellington", "Cris", "Cristofer", "Nathan", "Luisa"]
 MASTER_PIN_PADRAO = os.getenv("MASTER_PIN", "1234")
@@ -5879,46 +5785,15 @@ def _extrair_claim_id(resource: str) -> str:
     return m.group(1) if m else ""
 
 
-def _processar_notificacao_ml(notif_id: int, topic: str, resource: str) -> None:
-    """Roda fora do event loop: busca o claim no ML e atualiza a devolução."""
-    from app.devolucoes_sync import processar_notificacao_claim
-    quando = datetime.utcnow().isoformat() + "Z"
-    status, detalhe = "processado", ""
-    try:
-        claim_id = _extrair_claim_id(resource)
-        if not claim_id:
-            status, detalhe = "ignorado", "sem claim_id no resource"
-        else:
-            r = processar_notificacao_claim(claim_id)
-            status = "processado" if r.get("ok") else "erro"
-            detalhe = json.dumps(r, ensure_ascii=False)[:1000]
-    except Exception as exc:
-        status, detalhe = "erro", str(exc)[:1000]
-    db = SessionLocal()
-    try:
-        n = db.query(MLNotificacao).filter(MLNotificacao.id == notif_id).first()
-        if n:
-            n.status = status
-            n.detalhe = detalhe
-            n.processado_em = quando
-            db.commit()
-    finally:
-        db.close()
-
-
-# Tópicos que disparam atualização de devolução. 'orders'/'shipments' entram como
-# rede extra (o mesmo pack pode ter um claim); os demais são registrados e ignorados.
-_TOPICOS_DEVOLUCAO = {"claims", "post_purchase", "post_purchase_claims", "marketplace_claims"}
-
-
 async def ml_notificacoes(request: Request):
     """
-    POST /api/ml/notificacoes — webhook do Mercado Livre (tópico Marketplace
-    claims). Responde 200 SEMPRE e rápido (o ML desativa o tópico se demorar/errar).
+    POST /api/ml/notificacoes — webhook do Mercado Livre. Responde 200 SEMPRE e
+    rápido (o ML desativa o tópico se demorar/errar).
 
-    Segurança: não confia no corpo. Registra a notificação, confere que o
-    user_id é o desta conta e, para tópicos de claim, busca o recurso na API do
-    ML em background para atualizar a devolução — nunca age a partir do payload.
+    Segurança: não confia no corpo. Só registra a notificação (auditoria/dedup)
+    e confere que o user_id é o desta conta. Nenhum processamento de negócio
+    roda a partir daqui hoje — o módulo de devoluções foi removido e será
+    refeito; quando o novo assinar um tópico, o processamento entra aqui.
     """
     try:
         body = await request.json()
@@ -5939,20 +5814,10 @@ async def ml_notificacoes(request: Request):
             status="recebido", payload=json.dumps(body, ensure_ascii=False)[:8000])
         db.add(notif)
         db.commit()
-        notif_id = notif.id
     except Exception:
-        notif_id = 0
+        pass
     finally:
         db.close()
-
-    # Confere a conta: notificação de outra conta (ou config incompleta) é ignorada.
-    conta_ok = bool(ml.user_id) and (not user_id or str(user_id) == str(ml.user_id))
-    if notif_id and conta_ok and topic in _TOPICOS_DEVOLUCAO and _extrair_claim_id(resource):
-        try:
-            asyncio.get_running_loop().run_in_executor(
-                None, _processar_notificacao_ml, notif_id, topic, resource)
-        except Exception:
-            pass
 
     # 200 sempre, para o ML não desativar o tópico.
     return JSONResponse({"ok": True}, status_code=200)
@@ -6402,52 +6267,6 @@ routes = [
     Route("/api/embaldes/{embale_id}/itens/{item_id}/em-espera", marcar_em_espera_embale, methods=["POST"]),
     Route("/api/embaldes/{embale_id}/itens/{item_id}/nao-enviar", marcar_nao_enviar_embale, methods=["POST"]),
     Route("/api/embaldes/{embale_id}/encerrar", encerrar_embale, methods=["POST"]),
-
-    # --- Devoluções ML (portado de DEVOLUCOES-ML-main) ---
-    # ATENÇÃO à ordem: as rotas literais (/cards, /mediacoes, /sincronizar-ml...)
-    # precisam vir ANTES de /api/devolucoes/{item_id}, senão o Starlette casa
-    # "cards" como item_id e devolve 404/erro de int().
-    Route("/api/devolucoes", dev_listar_devolucoes, methods=["GET"]),
-    Route("/api/devolucoes", dev_criar_devolucao, methods=["POST"]),
-    Route("/api/devolucoes/mediacoes", dev_listar_mediacoes, methods=["GET"]),
-    Route("/api/devolucoes/cards", dev_cards_por_bucket, methods=["GET"]),
-    Route("/api/devolucoes/painel", dev_painel_pos_venda, methods=["GET"]),
-    Route("/api/devolucoes/filtros-ml", dev_filtros_ml, methods=["GET"]),
-    Route("/api/devolucoes/fila-ml-live", dev_fila_ml_live, methods=["GET"]),
-    Route("/api/devolucoes/resumo-financeiro", dev_resumo_financeiro, methods=["GET"]),
-    Route("/api/devolucoes/chegando-hoje", dev_chegando_hoje, methods=["GET"]),
-    Route("/api/devolucoes/chegando-resumo", dev_chegando_resumo, methods=["GET"]),
-    Route("/api/devolucoes/recebidos", dev_recebidos, methods=["GET"]),
-    Route("/api/devolucoes/bipar-chegada", dev_bipar_chegada, methods=["POST"]),
-    Route("/api/devolucoes/diff-seller-center", dev_diff_seller_center, methods=["POST"]),
-    Route("/api/devolucoes/debug-shipment", dev_debug_shipment, methods=["GET"]),
-    Route("/api/devolucoes/sincronizar-ml", dev_sincronizar_ml, methods=["POST"]),
-    Route("/api/devolucoes/sincronizar-ml-completo", dev_sincronizar_ml_completo, methods=["POST"]),
-    Route("/api/devolucoes/sync-diagnostico", dev_sync_diagnostico, methods=["GET"]),
-    Route("/api/devolucoes/sync-status/{sync_run_id:int}", dev_sync_status, methods=["GET"]),
-    Route("/api/devolucoes/sync-trace/ultimo", dev_sync_trace_ultimo, methods=["GET"]),
-    Route("/api/devolucoes/sync-trace/{trace_id}", dev_sync_trace, methods=["GET"]),
-    Route("/api/devolucoes/historico/incompletos", dev_historico_incompletos, methods=["GET"]),
-    # Fase 3/4 — custos e divergência
-    Route("/api/devolucoes/config-custos", dev_config_custos, methods=["GET", "PUT", "POST"]),
-    Route("/api/devolucoes/custos", dev_custos_dashboard, methods=["GET"]),
-    Route("/api/devolucoes/divergencia", dev_divergencia, methods=["GET"]),
-    Route("/api/devolucoes/evidencias/arquivo/{nome}", dev_servir_evidencia, methods=["GET"]),
-    Route("/api/resumo-ml", dev_resumo_ml, methods=["GET"]),
-    Route("/api/devolucoes/{item_id:int}", dev_buscar_devolucao, methods=["GET"]),
-    Route("/api/devolucoes/{item_id:int}/historico", dev_historico_devolucao, methods=["GET"]),
-    Route("/api/devolucoes/{item_id:int}/chegada", dev_confirmar_chegada, methods=["POST"]),
-    Route("/api/devolucoes/{item_id:int}/checklist", dev_get_checklist, methods=["GET"]),
-    Route("/api/devolucoes/{item_id:int}/checklist", dev_salvar_checklist, methods=["POST"]),
-    Route("/api/devolucoes/{item_id:int}/checklist/progresso", dev_salvar_progresso_checklist, methods=["POST"]),
-    Route("/api/devolucoes/{item_id:int}/evidencias", dev_listar_evidencias, methods=["GET"]),
-    Route("/api/devolucoes/{item_id:int}/evidencias", dev_upload_evidencia, methods=["POST"]),
-    Route("/api/devolucoes/{item_id:int}/contestacoes", dev_listar_contestacoes, methods=["GET"]),
-    Route("/api/devolucoes/{item_id:int}/contestacoes", dev_criar_contestacao, methods=["POST"]),
-    # Fase 5/6 — finalizar avaliação e ações no ML
-    Route("/api/devolucoes/{item_id:int}/finalizar", dev_finalizar_avaliacao, methods=["POST"]),
-    Route("/api/devolucoes/{item_id:int}/ml-review", dev_ml_review, methods=["POST"]),
-    Route("/api/devolucoes/{item_id:int}/ml-resolucao", dev_ml_resolucao, methods=["POST"]),
 
     # Shopee (OAuth + push notification)
     Route("/api/shopee/status", shopee_status, methods=["GET"]),
