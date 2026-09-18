@@ -9,7 +9,6 @@ de verdade sobre a API do ML mesmo com o módulo antigo removido):
 Regra 5 da BIBLIA: busca de claims precisa de filtro de negócio, não só
 `status=opened` — `player_id` do vendedor é o filtro mínimo aqui.
 """
-from datetime import datetime, timezone
 from typing import Optional
 from app.integracoes_ml import ml
 from app.devolucoes.dto import ReturnCaseDTO, ReturnItemDTO, TrackingEventDTO
@@ -45,7 +44,7 @@ def normalizar_eventos(payload: dict) -> list[TrackingEventDTO]:
     return [TrackingEventDTO(
         status=str(status),
         descricao=str(shipping.get("substatus", "")),
-        data_hora=str(payload.get("last_updated") or datetime.now(timezone.utc).isoformat()),
+        data_hora=str(payload.get("last_updated") or ""),
         origem="marketplace",
     )]
 

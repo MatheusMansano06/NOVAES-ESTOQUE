@@ -52,7 +52,8 @@ class ShopeeReturnsAdapter:
         })
         if not resposta or resposta.get("error"):
             return []
-        return [normalizar_return(item) for item in resposta.get("return_list", [])]
+        corpo = resposta.get("response") or {}
+        return [normalizar_return(item) for item in corpo.get("return_list", [])]
 
     def buscar(self, id_externo: str) -> Optional[ReturnCaseDTO]:
         for dto in self.listar_pendentes():

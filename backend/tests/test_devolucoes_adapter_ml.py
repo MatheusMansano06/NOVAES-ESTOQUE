@@ -46,3 +46,17 @@ def test_adapter_satisfaz_returns_port():
     from app.devolucoes.adapters.mercado_livre import MercadoLivreReturnsAdapter
 
     assert isinstance(MercadoLivreReturnsAdapter(), ReturnsPort)
+
+
+def test_normalizar_eventos_sem_last_updated_e_deterministico():
+    """Regressão: sem `last_updated` real, o fallback não pode gerar um
+    timestamp novo a cada chamada — isso quebra o dedup por (status, data_hora)
+    em service.sincronizar() e duplica o TrackingEvent a cada sync."""
+    from app.devolucoes.adapters.mercado_livre import normalizar_eventos
+
+    payload_sem_timestamp = {"shipping": {"status": "shipped", "substatus": "in_transit"}}
+
+    eventos_1 = normalizar_eventos(payload_sem_timestamp)
+    eventos_2 = normalizar_eventos(payload_sem_timestamp)
+
+    assert eventos_1 == eventos_2

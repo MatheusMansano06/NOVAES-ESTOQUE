@@ -32,3 +32,27 @@ def test_adapter_satisfaz_returns_port():
     from app.devolucoes.adapters.shopee import ShopeeReturnsAdapter
 
     assert isinstance(ShopeeReturnsAdapter(), ReturnsPort)
+
+
+def test_listar_pendentes_desembrulha_envelope_response(monkeypatch):
+    """Regressão: resposta real da Shopee vem envelopada em `response`;
+    ler `return_list` direto da raiz sempre devolve lista vazia em produção."""
+    from app.devolucoes.adapters import shopee as shopee_adapter
+
+    resposta_envelopada = {
+        "response": {
+            "return_list": [
+                {"return_id": 998877, "order_sn": "SHOP-ORD-1", "return_status": "REQUESTED",
+                 "reason": "ARRIVED_DAMAGED", "shop_id": "555",
+                 "item_list": [{"item_sku": "SKU-2", "item_name": "Produto Y", "amount": 1}]}
+            ]
+        },
+        "error": None,
+    }
+    monkeypatch.setattr(shopee_adapter.shopee, "chamar", lambda *a, **k: resposta_envelopada)
+
+    dtos = shopee_adapter.ShopeeReturnsAdapter().listar_pendentes()
+
+    assert len(dtos) == 1
+    assert dtos[0].claim_id == "998877"
+    assert dtos[0].itens[0].sku_esperado == "SKU-2"

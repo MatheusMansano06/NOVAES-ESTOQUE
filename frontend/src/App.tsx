@@ -1729,7 +1729,9 @@ function App() {
     if (group.label === 'Marketplace') {
       return {
         ...group,
-        items: platform === 'ml' ? group.items : []
+        items: group.items.filter(item =>
+          item.key === 'central-devolucoes' ? (platform === 'ml' || platform === 'shopee') : platform === 'ml'
+        )
       }
     }
     if (group.label === 'Arquivados') {
