@@ -11,6 +11,7 @@ import { Garimpador } from './components/Garimpador'
 import { OperadoresManager } from './components/OperadoresManager'
 import { ListaCompra } from './components/ListaCompra'
 import { RadarFull } from './components/RadarFull'
+import { DivergenciaDimensoes } from './components/DivergenciaDimensoes'
 import { EstoqueEmbalagens } from './components/EstoqueEmbalagens'
 import { ConferenciaNcm } from './components/ConferenciaNcm'
 import { PaginaClassificacaoTipos, PaginaFiscalMlOlist } from './components/DashboardProdutos'
@@ -93,7 +94,7 @@ interface ProdutoEstoque {
   }>
 }
 
-type Pagina = 'bemvindo' | 'inicial' | 'conferencia' | 'produtos_nota' | 'relacionamento_produto' | 'fornecedores' | 'full-operacoes' | 'anuncios' | 'notas-fiscais' | 'operadores' | 'garimpador' | 'lista-compra' | 'radar-full' | 'estoque-embalagens' | 'devolucoes' | 'conferencia-ncm' | 'classificacao-tipos' | 'fiscal-ml-olist'
+type Pagina = 'bemvindo' | 'inicial' | 'conferencia' | 'produtos_nota' | 'relacionamento_produto' | 'fornecedores' | 'full-operacoes' | 'anuncios' | 'notas-fiscais' | 'operadores' | 'garimpador' | 'lista-compra' | 'radar-full' | 'estoque-embalagens' | 'devolucoes' | 'conferencia-ncm' | 'classificacao-tipos' | 'fiscal-ml-olist' | 'divergencia-dimensoes'
 
 interface Divergencia {
   item_id: number
@@ -1670,6 +1671,7 @@ function App() {
       items: [
         { key: 'anuncios', label: 'Anuncios ML', icon: 'megaphone', active: pagina === 'anuncios', onClick: () => setPagina('anuncios') },
         { key: 'devolucoes', label: 'Devolucoes', icon: 'box', active: pagina === 'devolucoes', onClick: () => setPagina('devolucoes') },
+        { key: 'divergencia-dimensoes', label: 'Medidas ML', icon: 'warning', active: pagina === 'divergencia-dimensoes', onClick: () => setPagina('divergencia-dimensoes') },
       ],
     },
     // === FERRAMENTAS ===
@@ -3074,6 +3076,14 @@ function App() {
       'Lista de Compra',
       'Prioridade de compra pela curva ABC do ML cruzada com estoque e velocidade de venda.',
       <ListaCompra />
+    )
+  }
+
+  if (pagina === 'divergencia-dimensoes') {
+    return renderComShell(
+      'Medidas ML: declarado x medido',
+      'Anúncios cuja embalagem declarada difere da medida pelo Mercado Livre.',
+      <DivergenciaDimensoes />
     )
   }
 

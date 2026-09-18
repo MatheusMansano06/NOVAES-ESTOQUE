@@ -5711,6 +5711,33 @@ def _ensure_date_created(db):
         db.rollback()
 
 
+async def ml_divergencia_dimensoes(request: Request):
+    """GET /api/ml/divergencia-dimensoes
+    Anúncios ativos cuja embalagem declarada (SELLER_PACKAGE_*) difere da medida
+    pelo ML (PACKAGE_*). Lê do cache local — sem chamada à API do ML."""
+    from app.utils.divergencia_dimensoes import comparar
+    db = SessionLocal()
+    try:
+        linhas = db.query(MercadoLivreItemCache).filter(MercadoLivreItemCache.status == "active").all()
+        itens = []
+        for r in linhas:
+            d = comparar(r.attributes_json)
+            if d:
+                itens.append({
+                    "item_id": r.item_id, "titulo": r.titulo, "sku": r.sku,
+                    "logistic_type": r.logistic_type, "estoque": r.estoque_disponivel,
+                    "vendidos": r.vendidos, "permalink": r.permalink, "thumbnail": r.thumbnail, **d,
+                })
+        itens.sort(key=lambda i: -i["maior_dif_pct"])
+        sync = max((r.synced_at for r in linhas if r.synced_at), default=None)
+        return JSONResponse({
+            "total_ativos": len(linhas), "total": len(itens), "itens": itens,
+            "sincronizado_em": sync.isoformat() if sync else None,
+        })
+    finally:
+        db.close()
+
+
 async def radar_full(request: Request):
     """GET /api/ml/radar-full?meta_dias=30&lead_time=5&horizonte=21[&refresh=1]
     Radar de Envio Full: por SKU, quando rompe e até que dia enviar reposição.
@@ -6314,6 +6341,7 @@ routes = [
     Route("/api/ml/conta", ml_conta, methods=["GET"]),
     Route("/api/ml/garimpo", ml_garimpo, methods=["GET"]),
     Route("/api/ml/radar-full", radar_full, methods=["GET"]),
+    Route("/api/ml/divergencia-dimensoes", ml_divergencia_dimensoes, methods=["GET"]),
     Route("/api/embalagens", embalagens, methods=["GET", "POST"]),
     Route("/api/embalagens/compra", embalagem_compra, methods=["POST"]),
     Route("/api/embalagens/ajuste", embalagem_ajuste, methods=["POST"]),
