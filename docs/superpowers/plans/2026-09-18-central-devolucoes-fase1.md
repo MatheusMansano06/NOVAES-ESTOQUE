@@ -353,6 +353,7 @@ RETURN_FAKE = {
 
 def test_normalizar_claim_produz_dto_com_itens():
     from app.devolucoes.adapters.mercado_livre import normalizar_claim
+    from app.devolucoes.dto import ReturnItemDTO
 
     dto = normalizar_claim(CLAIM_FAKE)
 
@@ -361,8 +362,7 @@ def test_normalizar_claim_produz_dto_com_itens():
     assert dto.claim_id == "5000012345"
     assert dto.status_marketplace == "opened"
     assert dto.motivo == "PDD7059"
-    assert dto.itens == [__import__("app.devolucoes.dto", fromlist=["ReturnItemDTO"]).ReturnItemDTO(
-        sku_esperado="SKU-1", produto_nome="Produto X", quantidade=2)]
+    assert dto.itens == [ReturnItemDTO(sku_esperado="SKU-1", produto_nome="Produto X", quantidade=2)]
 
 
 def test_normalizar_eventos_le_shipping():
