@@ -5900,6 +5900,33 @@ async def shopee_diagnostico(request: Request):
     return JSONResponse(shopee.diagnostico())
 
 
+async def shopee_promocoes(request: Request):
+    """GET /api/shopee/promocoes — campanhas de desconto da loja."""
+    status = request.query_params.get("status") or "ongoing"
+    dados = shopee.listar_promocoes(status)
+    return JSONResponse(dados, status_code=502 if dados.get("erro") else 200)
+
+
+async def shopee_negociacao(request: Request):
+    """POST /api/shopee/negociacao — preço da campanha + estoque do vendedor,
+    por model_id. Alimenta a planilha de negociação do gerente de contas."""
+    corpo = await request.json()
+    discount_id = corpo.get("discount_id")
+    item_ids = corpo.get("item_ids") or []
+    if not discount_id or not item_ids:
+        return JSONResponse({"erro": "discount_id e item_ids são obrigatórios"}, status_code=400)
+
+    precos = shopee.precos_da_promocao(int(discount_id))
+    if precos.get("erro"):
+        return JSONResponse(precos, status_code=502)
+    estoques = shopee.estoque_vendedor(item_ids)
+    return JSONResponse({
+        "precos": precos["precos"],
+        "estoques": estoques["estoques"],
+        "falhas": estoques["falhas"],
+    })
+
+
 async def shopee_conectar(request: Request):
     """GET /api/shopee/conectar — manda o lojista autorizar a loja."""
     if not shopee.configurado:
@@ -6314,6 +6341,8 @@ routes = [
     Route("/api/shopee/token-forma", shopee_token_forma, methods=["GET"]),
     Route("/api/shopee/renovar", shopee_renovar, methods=["POST"]),
     Route("/api/shopee/diagnostico", shopee_diagnostico, methods=["GET"]),
+    Route("/api/shopee/promocoes", shopee_promocoes, methods=["GET"]),
+    Route("/api/shopee/negociacao", shopee_negociacao, methods=["POST"]),
     Route("/api/shopee/conectar", shopee_conectar, methods=["GET"]),
     Route("/api/shopee/callback", shopee_callback, methods=["GET"]),
     Route("/api/shopee/webhook", shopee_webhook, methods=["GET", "POST"]),
