@@ -615,3 +615,61 @@ class MLNotificacao(Base):
     status = Column(String(30), default="recebido")   # recebido | processado | ignorado | erro
     detalhe = Column(Text, default="")
     payload = Column(Text, default="{}")
+
+
+class NegociacaoShopee(Base):
+    """
+    Uma rodada de negociação com o gerente de contas da Shopee: as planilhas
+    "Pontual - Nível Model" que chegam todo mês e cujas colunas AD (preço) e AE
+    (estoque) o sistema preenche pela API. Pode ter mais de um arquivo — às vezes
+    o gerente manda o mesmo conteúdo em recortes diferentes.
+    """
+    __tablename__ = "negociacoes_shopee"
+
+    id = Column(Integer, primary_key=True)
+    nome = Column(String(150), default="")
+    competencia = Column(String(7), default="", index=True)   # AAAA-MM
+    status = Column(String(20), default="preenchida")         # preenchida | pendente
+    total_linhas = Column(Integer, default=0)
+    total_zerados = Column(Integer, default=0)
+    total_multi_campanha = Column(Integer, default=0)
+    arquivos = Column(Text, default="[]")                     # JSON: nomes salvos em disco
+    erro = Column(Text, default="")
+    criado_em = Column(DateTime, default=datetime.utcnow, index=True)
+
+    itens = relationship(
+        "NegociacaoShopeeItem", back_populates="negociacao", cascade="all, delete-orphan"
+    )
+
+
+class NegociacaoShopeeItem(Base):
+    """
+    Uma linha da planilha, no nível model. Guarda o que foi preenchido e também o
+    que a Shopee trouxe de própria lavra (preço referência, estoque D-1, Score,
+    GMV/dia) — esse dado não existe na API e some quando o arquivo é substituído.
+    Os campos que o BI consulta são colunas; o resto fica em `dados_planilha`.
+    """
+    __tablename__ = "negociacoes_shopee_itens"
+
+    id = Column(Integer, primary_key=True)
+    negociacao_id = Column(Integer, ForeignKey("negociacoes_shopee.id"), index=True)
+
+    item_id = Column(String(30), default="", index=True)
+    model_id = Column(String(30), default="", index=True)
+    sku = Column(String(120), default="", index=True)
+    descricao = Column(String(255), default="")
+
+    preco_preenchido = Column(Float, nullable=True)
+    estoque_preenchido = Column(Integer, nullable=True)
+    estoque_full = Column(Integer, nullable=True)
+    campanha_id = Column(String(30), default="")
+    campanha_nome = Column(String(120), default="")
+
+    preco_referencia = Column(Float, nullable=True)
+    preco_site_d1 = Column(Float, nullable=True)
+    estoque_d1 = Column(Integer, nullable=True)
+    estoque_full_d1 = Column(Integer, nullable=True)
+
+    dados_planilha = Column(Text, default="{}")   # Score, ADGMV, ADO, Rebate, Cluster...
+
+    negociacao = relationship("NegociacaoShopee", back_populates="itens")

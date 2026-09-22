@@ -12,6 +12,7 @@ import { OperadoresManager } from './components/OperadoresManager'
 import { ListaCompra } from './components/ListaCompra'
 import { RadarFull } from './components/RadarFull'
 import { DivergenciaDimensoes } from './components/DivergenciaDimensoes'
+import { NegociacaoShopee } from './components/NegociacaoShopee'
 import { EstoqueEmbalagens } from './components/EstoqueEmbalagens'
 import { ConferenciaNcm } from './components/ConferenciaNcm'
 import { PaginaClassificacaoTipos, PaginaFiscalMlOlist } from './components/DashboardProdutos'
@@ -94,7 +95,7 @@ interface ProdutoEstoque {
   }>
 }
 
-type Pagina = 'bemvindo' | 'inicial' | 'conferencia' | 'produtos_nota' | 'relacionamento_produto' | 'fornecedores' | 'full-operacoes' | 'anuncios' | 'notas-fiscais' | 'operadores' | 'garimpador' | 'lista-compra' | 'radar-full' | 'estoque-embalagens' | 'central-devolucoes' | 'conferencia-ncm' | 'classificacao-tipos' | 'fiscal-ml-olist' | 'divergencia-dimensoes'
+type Pagina = 'bemvindo' | 'inicial' | 'conferencia' | 'produtos_nota' | 'relacionamento_produto' | 'fornecedores' | 'full-operacoes' | 'anuncios' | 'notas-fiscais' | 'operadores' | 'garimpador' | 'lista-compra' | 'radar-full' | 'estoque-embalagens' | 'central-devolucoes' | 'conferencia-ncm' | 'classificacao-tipos' | 'fiscal-ml-olist' | 'divergencia-dimensoes' | 'negociacao-shopee'
 
 interface Divergencia {
   item_id: number
@@ -1672,6 +1673,7 @@ function App() {
         { key: 'anuncios', label: 'Anuncios ML', icon: 'megaphone', active: pagina === 'anuncios', onClick: () => setPagina('anuncios') },
         { key: 'central-devolucoes', label: 'Devoluções', icon: 'box', active: pagina === 'central-devolucoes', onClick: () => setPagina('central-devolucoes') },
         { key: 'divergencia-dimensoes', label: 'Medidas ML', icon: 'warning', active: pagina === 'divergencia-dimensoes', onClick: () => setPagina('divergencia-dimensoes') },
+        { key: 'negociacao-shopee', label: 'Negociação Shopee', icon: 'receipt', active: pagina === 'negociacao-shopee', onClick: () => setPagina('negociacao-shopee') },
       ],
     },
     // === FERRAMENTAS ===
@@ -1731,9 +1733,11 @@ function App() {
     if (group.label === 'Marketplace') {
       return {
         ...group,
-        items: group.items.filter(item =>
-          item.key === 'central-devolucoes' ? (platform === 'ml' || platform === 'shopee') : platform === 'ml'
-        )
+        items: group.items.filter(item => {
+          if (item.key === 'negociacao-shopee') return platform === 'shopee'
+          if (item.key === 'central-devolucoes') return platform === 'ml' || platform === 'shopee'
+          return platform === 'ml'
+        })
       }
     }
     if (group.label === 'Arquivados') {
@@ -3085,6 +3089,15 @@ function App() {
       'Medidas ML: declarado x medido',
       'Anúncios cuja embalagem declarada difere da medida pelo Mercado Livre.',
       <DivergenciaDimensoes />
+    )
+  }
+
+  // ===== PÁGINA DA NEGOCIAÇÃO SHOPEE =====
+  if (pagina === 'negociacao-shopee') {
+    return renderComShell(
+      'Negociação Shopee',
+      'A planilha do gerente de contas preenchida pela API, com histórico e BI.',
+      <NegociacaoShopee />
     )
   }
 
