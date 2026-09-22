@@ -6192,9 +6192,14 @@ async def negoc_bi(request: Request):
             key=lambda x: -(x["estoque_full"] or 0),
         )
 
+        # A Shopee só preenche "Preço Referência" em uma minoria das linhas; nas
+        # demais o comparável é o preço que o produto tinha no site (D-1).
         preco = []
         for i in atual.itens:
-            if not i.preco_referencia or i.preco_preenchido is None:
+            if i.preco_preenchido is None:
+                continue
+            base = i.preco_referencia or i.preco_site_d1
+            if not base:
                 continue
             preco.append({
                 "item_id": i.item_id, "sku": i.sku, "descricao": i.descricao,
@@ -6202,9 +6207,8 @@ async def negoc_bi(request: Request):
                 "referencia": i.preco_referencia,
                 "site_d1": i.preco_site_d1,
                 "campanha": i.campanha_nome,
-                "desvio_pct": round(
-                    (i.preco_preenchido - i.preco_referencia) / i.preco_referencia * 100, 1
-                ),
+                "base_tipo": "referencia" if i.preco_referencia else "site",
+                "desvio_pct": round((i.preco_preenchido - base) / base * 100, 1),
             })
         preco.sort(key=lambda x: x["desvio_pct"])
 

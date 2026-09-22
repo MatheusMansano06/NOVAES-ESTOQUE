@@ -34,7 +34,8 @@ interface LinhaRuptura {
 }
 interface LinhaPreco {
   item_id: string; sku: string; descricao: string; campanha: string
-  preco: number; referencia: number; site_d1: number | null; desvio_pct: number
+  preco: number; referencia: number | null; site_d1: number | null
+  base_tipo: 'referencia' | 'site'; desvio_pct: number
 }
 interface LinhaGiro { item_id: string; sku: string; descricao: string }
 interface BI {
@@ -323,7 +324,8 @@ export function NegociacaoShopee() {
           <section>
             <h3 style={{ fontSize: '1rem', margin: '0 0 0.5rem' }}>Preço — o seu contra a referência da Shopee</h3>
             <p style={{ fontSize: '0.82rem', color: '#667085', margin: '0 0 0.6rem' }}>
-              Do maior desconto para o menor. Desvio negativo significa que você está abaixo do preço de referência.
+              Do maior desconto para o menor. Desvio negativo significa que você está abaixo da base de comparação —
+              que é o Preço Referência da Shopee quando ela informa, e o preço que o produto tinha no site no resto.
             </p>
             <div style={caixa}>
               <table style={{ width: '100%', borderCollapse: 'collapse' }}>
@@ -340,10 +342,13 @@ export function NegociacaoShopee() {
                       <td style={td}>{p.descricao}</td>
                       <td style={td}>{p.campanha || '—'}</td>
                       <td style={td}>{reais(p.preco)}</td>
-                      <td style={td}>{reais(p.referencia)}</td>
-                      <td style={td}>{reais(p.site_d1)}</td>
+                      <td style={{ ...td, fontWeight: p.base_tipo === 'referencia' ? 700 : 400 }}>{reais(p.referencia)}</td>
+                      <td style={{ ...td, fontWeight: p.base_tipo === 'site' ? 700 : 400 }}>{reais(p.site_d1)}</td>
                       <td style={{ ...td, ...(p.desvio_pct < 0 ? vermelho : verde) }}>
                         {p.desvio_pct > 0 ? '+' : ''}{p.desvio_pct}%
+                        <span style={{ color: '#667085', fontWeight: 400, fontSize: '0.75rem' }}>
+                          {' '}vs {p.base_tipo === 'referencia' ? 'ref.' : 'site'}
+                        </span>
                       </td>
                     </tr>
                   ))}

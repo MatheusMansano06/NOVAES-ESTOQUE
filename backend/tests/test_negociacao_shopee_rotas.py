@@ -186,5 +186,19 @@ def test_bi_traz_ruptura_preco_e_giro(shopee_ok):
     assert [s["item_id"] for s in bi["giro"]["sairam"]] == ["23893446809"]
 
 
+def test_bi_compara_com_o_preco_de_site_quando_nao_ha_referencia(shopee_ok):
+    """A Shopee só informa Preço Referência numa minoria das linhas — no resto
+    a base tem de ser o Preço Site D-1, senão a visão de preço fica vazia."""
+    sem_referencia = [(p[0], p[1], p[2], p[3], None, p[5], p[6], p[7]) for p in PRODUTOS]
+    subir(produtos=sem_referencia)
+
+    preco = {p["item_id"]: p for p in cliente.get("/api/negociacoes-shopee/bi").json()["preco"]}
+    assert len(preco) == 3                                    # nenhuma linha se perdeu
+    assert all(p["base_tipo"] == "site" for p in preco.values())
+    # 79.99 contra os 67.79 que o produto tinha no site
+    assert preco["23893446809"]["desvio_pct"] == pytest.approx(18.0, abs=0.1)
+    assert preco["23893446809"]["referencia"] is None
+
+
 def test_bi_sem_negociacao_nao_quebra():
     assert cliente.get("/api/negociacoes-shopee/bi").json() == {"vazio": True}
