@@ -1,0 +1,670 @@
+/* ============================================================
+   Negociação Shopee — planilha do gerente de contas.
+   Mesmos tokens do painel Shopee (dashboard-shopee.css); o único
+   acento novo é o laranja da Shopee, reservado à área de upload e
+   à ação principal.
+   ============================================================ */
+
+.ngs {
+  --papel: #fff;
+  --fundo: #f6f8fb;
+  --borda: #e4eaf3;
+  --linha: #f1f5f9;
+  --navy: #061a35;
+  --fraco: #7a8ba1;
+  --verde: #12a150;
+  --ambar: #d97706;
+  --vermelho: #c53434;
+  --shopee: #ee4d2d;
+  --shopee-claro: #fff3f0;
+
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  color: var(--navy);
+  font-variant-numeric: tabular-nums;
+}
+
+.ngs button,
+.ngs a {
+  font: inherit;
+}
+
+.ngs :focus-visible {
+  outline: 2px solid var(--shopee);
+  outline-offset: 2px;
+}
+
+/* --- abas ----------------------------------------------------- */
+.ngs__abas {
+  display: flex;
+  gap: 4px;
+  border-bottom: 1px solid var(--borda);
+}
+
+.ngs__aba {
+  background: none;
+  border: 0;
+  border-bottom: 3px solid transparent;
+  margin-bottom: -1px;
+  padding: 10px 14px;
+  font-size: 0.9rem;
+  font-weight: 700;
+  color: var(--fraco);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.ngs__aba:hover {
+  color: var(--navy);
+}
+
+.ngs__aba[aria-selected='true'] {
+  color: var(--navy);
+  border-bottom-color: var(--shopee);
+}
+
+.ngs__contador {
+  background: var(--fundo);
+  border: 1px solid var(--borda);
+  border-radius: 999px;
+  padding: 1px 8px;
+  font-size: 0.72rem;
+  color: var(--fraco);
+}
+
+/* --- mensagens ------------------------------------------------ */
+.ngs__faixa {
+  background: var(--papel);
+  border: 1px solid var(--borda);
+  border-left: 5px solid var(--navy);
+  border-radius: 14px;
+  padding: 16px 20px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px 28px;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.ngs__faixa h2 {
+  font-size: 1.12rem;
+  font-weight: 800;
+  letter-spacing: -0.015em;
+  line-height: 1.25;
+  margin: 0;
+}
+
+.ngs__faixa p {
+  margin: 4px 0 0;
+  font-size: 0.86rem;
+  color: var(--fraco);
+  max-width: 62ch;
+}
+
+.ngs__faixa--erro {
+  background: linear-gradient(135deg, #fff5f5 0%, #fff 62%);
+  border-color: #f6c6c6;
+  border-left-color: var(--vermelho);
+}
+
+.ngs__faixa--aviso {
+  background: linear-gradient(135deg, #fffaf0 0%, #fff 62%);
+  border-color: #f3dfb8;
+  border-left-color: var(--ambar);
+}
+
+.ngs__faixa--ok {
+  background: linear-gradient(135deg, #f1faf4 0%, #fff 62%);
+  border-color: #bfe3cd;
+  border-left-color: var(--verde);
+}
+
+/* --- upload: a própria planilha ------------------------------- */
+.ngs__envio {
+  display: grid;
+  grid-template-columns: minmax(0, 1.35fr) minmax(260px, 1fr);
+  gap: 18px;
+  align-items: stretch;
+}
+
+.ngs__alvo {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 18px;
+  background: var(--papel);
+  border: 2px dashed #f6c3b7;
+  border-radius: 14px;
+  padding: 22px;
+  cursor: pointer;
+  transition: border-color 0.15s, background-color 0.15s;
+}
+
+.ngs__alvo:hover,
+.ngs__alvo--ativo {
+  border-color: var(--shopee);
+  background: var(--shopee-claro);
+}
+
+.ngs__alvo input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+}
+
+.ngs__alvo:focus-within {
+  outline: 2px solid var(--shopee);
+  outline-offset: 2px;
+}
+
+.ngs__planilha {
+  display: grid;
+  grid-template-columns: 1.1fr 1.6fr 0.7fr repeat(2, 1fr);
+  border: 1px solid var(--borda);
+  border-radius: 8px;
+  overflow: hidden;
+  font-size: 0.72rem;
+  background: var(--papel);
+}
+
+.ngs__planilha span {
+  padding: 7px 9px;
+  border-right: 1px solid var(--linha);
+  border-bottom: 1px solid var(--linha);
+  color: var(--fraco);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ngs__planilha .is-cab {
+  background: var(--fundo);
+  font-weight: 700;
+  color: var(--navy);
+}
+
+.ngs__planilha .is-alvo {
+  background: var(--shopee-claro);
+  color: var(--shopee);
+  font-weight: 700;
+}
+
+.ngs__planilha .is-cab.is-alvo {
+  background: var(--shopee);
+  color: #fff;
+}
+
+.ngs__alvo-texto strong {
+  display: block;
+  font-size: 1.05rem;
+  font-weight: 800;
+  letter-spacing: -0.01em;
+}
+
+.ngs__alvo-texto span {
+  font-size: 0.84rem;
+  color: var(--fraco);
+}
+
+.ngs__arquivos {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.ngs__arquivos li {
+  background: var(--fundo);
+  border: 1px solid var(--borda);
+  border-radius: 8px;
+  padding: 5px 10px;
+  font-size: 0.78rem;
+  font-weight: 600;
+}
+
+/* --- formulário lateral --------------------------------------- */
+.ngs__form {
+  background: var(--papel);
+  border: 1px solid var(--borda);
+  border-radius: 14px;
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.ngs__campo {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--fraco);
+}
+
+.ngs__campo input {
+  padding: 9px 11px;
+  border: 1px solid #cfd8e3;
+  border-radius: 8px;
+  font: inherit;
+  font-size: 0.9rem;
+  color: var(--navy);
+  background: var(--papel);
+}
+
+.ngs__campo input:focus {
+  border-color: var(--shopee);
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(238, 77, 45, 0.15);
+}
+
+.ngs__regras {
+  margin: 2px 0 0;
+  padding: 12px 0 0;
+  border-top: 1px solid var(--linha);
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 0.8rem;
+  color: var(--fraco);
+}
+
+.ngs__regras b {
+  color: var(--navy);
+}
+
+/* --- botões --------------------------------------------------- */
+.ngs__btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 11px 18px;
+  border-radius: 10px;
+  border: 1px solid transparent;
+  font-size: 0.9rem;
+  font-weight: 800;
+  cursor: pointer;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.ngs__btn--principal {
+  background: var(--shopee);
+  color: #fff;
+}
+
+.ngs__btn--principal:hover {
+  background: #d8431f;
+}
+
+.ngs__btn--principal:disabled {
+  background: #f3b3a4;
+  cursor: not-allowed;
+}
+
+.ngs__btn--secundario {
+  background: var(--papel);
+  border-color: var(--borda);
+  color: var(--navy);
+}
+
+.ngs__btn--secundario:hover {
+  border-color: var(--navy);
+}
+
+.ngs__btn--mini {
+  padding: 6px 11px;
+  font-size: 0.78rem;
+  border-radius: 8px;
+}
+
+.ngs__acoes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+/* --- números do resultado ------------------------------------- */
+.ngs__numeros {
+  display: flex;
+  gap: 28px;
+  flex-wrap: wrap;
+}
+
+.ngs__numero {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.ngs__numero strong {
+  font-size: 1.6rem;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  line-height: 1.05;
+}
+
+.ngs__numero span {
+  font-size: 0.76rem;
+  color: var(--fraco);
+}
+
+.ngs__numero--alerta strong {
+  color: var(--vermelho);
+}
+
+/* --- bloco com tabela ----------------------------------------- */
+.ngs__bloco {
+  background: var(--papel);
+  border: 1px solid var(--borda);
+  border-radius: 14px;
+  overflow: hidden;
+}
+
+.ngs__bloco-topo {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 10px 18px;
+  padding: 16px 18px;
+  border-bottom: 1px solid var(--borda);
+}
+
+.ngs__bloco-topo h3 {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 800;
+}
+
+.ngs__bloco-topo p {
+  margin: 3px 0 0;
+  font-size: 0.8rem;
+  color: var(--fraco);
+  max-width: 70ch;
+}
+
+.ngs__rolagem {
+  overflow-x: auto;
+}
+
+.ngs__rolagem--alta {
+  max-height: 520px;
+  overflow-y: auto;
+}
+
+.ngs__tabela {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.85rem;
+}
+
+.ngs__tabela th {
+  position: sticky;
+  top: 0;
+  background: var(--fundo);
+  text-align: left;
+  padding: 9px 14px;
+  font-size: 0.74rem;
+  font-weight: 700;
+  color: var(--fraco);
+  border-bottom: 1px solid var(--borda);
+  white-space: nowrap;
+}
+
+.ngs__tabela td {
+  padding: 11px 14px;
+  border-bottom: 1px solid var(--linha);
+  vertical-align: middle;
+}
+
+.ngs__tabela tr:last-child td {
+  border-bottom: 0;
+}
+
+.ngs__tabela .num {
+  text-align: right;
+  white-space: nowrap;
+}
+
+.ngs__produto {
+  font-weight: 600;
+  line-height: 1.3;
+}
+
+.ngs__sku {
+  display: block;
+  margin-top: 2px;
+  font-size: 0.74rem;
+  font-weight: 500;
+  color: var(--fraco);
+}
+
+.ngs__vazio {
+  padding: 26px 18px;
+  text-align: center;
+  font-size: 0.86rem;
+  color: var(--fraco);
+}
+
+/* --- pílulas de status ---------------------------------------- */
+.ngs__pill {
+  display: inline-block;
+  padding: 3px 9px;
+  border-radius: 999px;
+  background: #e8f7ee;
+  color: var(--verde);
+  font-size: 0.72rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.ngs__pill--pendente {
+  background: #fdf3e2;
+  color: var(--ambar);
+}
+
+.ngs__erro-linha {
+  display: block;
+  margin-top: 3px;
+  font-size: 0.75rem;
+  color: var(--ambar);
+}
+
+/* --- filtro segmentado ---------------------------------------- */
+.ngs__filtro {
+  display: inline-flex;
+  background: var(--fundo);
+  border: 1px solid var(--borda);
+  border-radius: 10px;
+  padding: 3px;
+}
+
+.ngs__filtro button {
+  background: none;
+  border: 0;
+  border-radius: 7px;
+  padding: 6px 11px;
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: var(--fraco);
+  cursor: pointer;
+}
+
+.ngs__filtro button[aria-pressed='true'] {
+  background: var(--papel);
+  color: var(--navy);
+  box-shadow: 0 1px 2px rgba(6, 26, 53, 0.12);
+}
+
+/* --- ruptura: Full ao lado do galpão -------------------------- */
+.ngs__full {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 150px;
+}
+
+.ngs__full-trilho {
+  flex: 1;
+  height: 6px;
+  background: var(--linha);
+  border-radius: 999px;
+  overflow: hidden;
+}
+
+.ngs__full-fill {
+  display: block;
+  height: 100%;
+  background: var(--verde);
+  border-radius: 999px;
+}
+
+.ngs__full-valor {
+  min-width: 2.5ch;
+  text-align: right;
+  font-weight: 800;
+}
+
+.ngs__full--zero .ngs__full-valor {
+  color: var(--vermelho);
+}
+
+/* --- preço: barra divergente centrada no zero ----------------- */
+.ngs__desvio {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 230px;
+}
+
+.ngs__desvio-trilho {
+  position: relative;
+  flex: 1;
+  height: 14px;
+}
+
+.ngs__desvio-trilho::before {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: -3px;
+  bottom: -3px;
+  width: 1px;
+  background: #c7d1de;
+}
+
+.ngs__desvio-barra {
+  position: absolute;
+  top: 3px;
+  height: 8px;
+  border-radius: 3px;
+}
+
+.ngs__desvio-barra--abaixo {
+  right: 50%;
+  background: var(--ambar);
+}
+
+.ngs__desvio-barra--acima {
+  left: 50%;
+  background: #3b6fb6;
+}
+
+.ngs__desvio-valor {
+  min-width: 6.5ch;
+  text-align: right;
+  font-weight: 800;
+}
+
+.ngs__base {
+  display: block;
+  font-size: 0.72rem;
+  font-weight: 500;
+  color: var(--fraco);
+}
+
+/* --- giro ----------------------------------------------------- */
+.ngs__giro {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+}
+
+.ngs__giro-coluna {
+  padding: 16px 18px;
+}
+
+.ngs__giro-coluna + .ngs__giro-coluna {
+  border-left: 1px solid var(--borda);
+}
+
+.ngs__giro-coluna h4 {
+  margin: 0 0 8px;
+  font-size: 0.88rem;
+  font-weight: 800;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.ngs__giro-coluna ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.ngs__giro-coluna li {
+  padding: 8px 0;
+  border-bottom: 1px solid var(--linha);
+  font-size: 0.84rem;
+}
+
+.ngs__giro-coluna li:last-child {
+  border-bottom: 0;
+}
+
+.ngs__marca {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--verde);
+}
+
+.ngs__marca--saiu {
+  background: var(--vermelho);
+}
+
+/* --- responsivo e movimento ----------------------------------- */
+@media (max-width: 860px) {
+  .ngs__envio {
+    grid-template-columns: 1fr;
+  }
+
+  .ngs__planilha {
+    grid-template-columns: 1fr 1.4fr repeat(2, 1fr);
+  }
+
+  .ngs__planilha .is-opcional {
+    display: none;
+  }
+
+  .ngs__giro-coluna + .ngs__giro-coluna {
+    border-left: 0;
+    border-top: 1px solid var(--borda);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ngs__alvo {
+    transition: none;
+  }
+}

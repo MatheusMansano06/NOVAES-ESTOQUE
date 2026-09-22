@@ -185,4 +185,57 @@ export const baixarMultiplosOuPdfs = async (nfIds: number[], formato: 'original'
   }
 }
 
+export interface DevolucaoResumo {
+  id: number
+  marketplace: string
+  order_id: string
+  claim_id: string
+  status_marketplace: string
+  motivo: string
+  prazo_resolucao: string | null
+}
+
+export interface DevolucaoItem {
+  sku_esperado: string
+  produto_nome: string
+  quantidade: number
+  cmv_unitario: number | null
+}
+
+export interface DevolucaoEvento {
+  status: string
+  descricao: string
+  origem: string
+  data_hora: string
+}
+
+export interface DevolucaoOlistLink {
+  produto_id_olist: string
+  sku: string
+  produto_nome_olist: string
+  cmv: number
+  estoque_disponivel: number | null
+}
+
+export interface DevolucaoDetalhe extends DevolucaoResumo {
+  itens: DevolucaoItem[]
+  eventos: DevolucaoEvento[]
+  olist: DevolucaoOlistLink | null
+}
+
+export async function listarDevolucoes(): Promise<DevolucaoResumo[]> {
+  const resp = await api.get<DevolucaoResumo[]>('/devolucoes')
+  return resp.data
+}
+
+export async function buscarDevolucao(id: number): Promise<DevolucaoDetalhe> {
+  const resp = await api.get<DevolucaoDetalhe>(`/devolucoes/${id}`)
+  return resp.data
+}
+
+export async function sincronizarDevolucoes(): Promise<{ novos: number; atualizados: number }> {
+  const resp = await api.post('/devolucoes/sincronizar')
+  return resp.data
+}
+
 export default api

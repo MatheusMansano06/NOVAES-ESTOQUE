@@ -654,6 +654,100 @@ class ShopeeAPI:
                 offset = corpo.get("next_offset", offset + len(item_ids))
         return skus
 
+    def listar_promocoes(self, status: str = "ongoing") -> Dict[str, Any]:
+        """Campanhas de desconto da loja (as "Minha Promoção" do Seller Center)."""
+        promos, page = [], 1
+        while True:
+            resp = self.chamar("/api/v2/discount/get_discount_list", {
+                "discount_status": status,
+                "page_no": page,
+                "page_size": 100,
+            })
+            if resp.get("error"):
+                return {"erro": resp.get("error"), "mensagem": resp.get("message")}
+            corpo = resp.get("response") or {}
+            lote = corpo.get("discount_list") or []
+            promos.extend({
+                "discount_id": p.get("discount_id"),
+                "nome": p.get("discount_name"),
+                "status": p.get("status"),
+                "inicio": p.get("start_time"),
+                "fim": p.get("end_time"),
+                "origem": p.get("source"),
+            } for p in lote)
+            if not corpo.get("more") or not lote:
+                break
+            page += 1
+        return {"total": len(promos), "promocoes": promos}
+
+    def precos_da_promocao(self, discount_id: int) -> Dict[str, Any]:
+        """model_id -> preço promocional dentro de UMA campanha de desconto."""
+        precos, page = {}, 1
+        while True:
+            resp = self.chamar("/api/v2/discount/get_discount", {
+                "discount_id": discount_id,
+                "page_no": page,
+                "page_size": 50,
+            })
+            if resp.get("error"):
+                return {"erro": resp.get("error"), "mensagem": resp.get("message")}
+            corpo = resp.get("response") or {}
+            itens = corpo.get("item_list") or []
+            for item in itens:
+                modelos = item.get("model_list") or []
+                if modelos:
+                    for m in modelos:
+                        if m.get("model_promotion_price") is not None:
+                            precos[str(m.get("model_id"))] = m.get("model_promotion_price")
+                elif item.get("item_promotion_price") is not None:
+                    # item sem variação: a planilha ainda traz um model_id próprio
+                    precos[str(item.get("item_id"))] = item.get("item_promotion_price")
+            if not corpo.get("more") or not itens:
+                break
+            page += 1
+        return {"precos": precos}
+
+    @staticmethod
+    def _separar_estoque(info: Dict[str, Any]) -> Dict[str, int]:
+        """seller_stock é o estoque do lojista; shopee_stock é o Full/FBS."""
+        return {
+            "seller": sum(int(s.get("stock") or 0) for s in info.get("seller_stock") or []),
+            "shopee": sum(int(s.get("stock") or 0) for s in info.get("shopee_stock") or []),
+        }
+
+    def estoque_vendedor(self, item_ids: list) -> Dict[str, Any]:
+        """Estoque do vendedor por model_id — ou por item_id, quando o anúncio
+        não tem variação (aí get_model_list vem vazio e o estoque fica no item).
+        """
+        estoques, falhas, com_variacao = {}, [], []
+        for i in range(0, len(item_ids), 50):
+            lote = item_ids[i:i + 50]
+            resp = self.chamar("/api/v2/product/get_item_base_info", {
+                "item_id_list": ",".join(str(x) for x in lote),
+            })
+            if resp.get("error"):
+                falhas.append({"lote": lote, "erro": resp.get("message") or resp.get("error")})
+                continue
+            for item in (resp.get("response") or {}).get("item_list") or []:
+                if item.get("has_model"):
+                    com_variacao.append(item.get("item_id"))
+                else:
+                    estoques[str(item.get("item_id"))] = self._separar_estoque(
+                        item.get("stock_info_v2") or {}
+                    )
+
+        for item_id in com_variacao:
+            resp = self.chamar("/api/v2/product/get_model_list", {"item_id": int(item_id)})
+            if resp.get("error"):
+                falhas.append({"item_id": item_id, "erro": resp.get("message") or resp.get("error")})
+                continue
+            for m in (resp.get("response") or {}).get("model") or []:
+                estoques[str(m.get("model_id"))] = self._separar_estoque(
+                    m.get("stock_info_v2") or {}
+                )
+
+        return {"estoques": estoques, "falhas": falhas}
+
     def status(self) -> Dict[str, Any]:
         """Campos em português, no mesmo formato de /api/ml|olist/status."""
         if not self.configurado:

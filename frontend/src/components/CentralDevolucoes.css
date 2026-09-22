@@ -1,0 +1,39 @@
+.central-devolucoes__header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16px;
+}
+
+.central-devolucoes__corpo {
+  display: grid;
+  grid-template-columns: 1.5fr 1fr;
+  gap: 16px;
+}
+
+.central-devolucoes__lista {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.central-devolucoes__lista th,
+.central-devolucoes__lista td {
+  padding: 8px 12px;
+  border-bottom: 1px solid #e0e0e0;
+  text-align: left;
+}
+
+.central-devolucoes__lista tr:hover {
+  cursor: pointer;
+  background: #f5f5f5;
+}
+
+.central-devolucoes__lista tr.selecionada {
+  background: #e3f2fd;
+}
+
+.central-devolucoes__detalhe {
+  border: 1px solid #e0e0e0;
+  border-radius: 8px;
+  padding: 16px;
+}

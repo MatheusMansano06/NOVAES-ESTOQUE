@@ -11,10 +11,12 @@ import { Garimpador } from './components/Garimpador'
 import { OperadoresManager } from './components/OperadoresManager'
 import { ListaCompra } from './components/ListaCompra'
 import { RadarFull } from './components/RadarFull'
+import { DivergenciaDimensoes } from './components/DivergenciaDimensoes'
+import { NegociacaoShopee } from './components/NegociacaoShopee'
 import { EstoqueEmbalagens } from './components/EstoqueEmbalagens'
 import { ConferenciaNcm } from './components/ConferenciaNcm'
 import { PaginaClassificacaoTipos, PaginaFiscalMlOlist } from './components/DashboardProdutos'
-import { Devolucoes } from './components/Devolucoes'
+import { CentralDevolucoes } from './components/CentralDevolucoes'
 import { PlataformaSelecao, type Platform, LogoMercadoLivre, LogoShopee, LogoOperacao } from './components/PlataformaSelecao'
 import { LoginNVS } from './components/LoginNVS'
 import { DashboardShopee } from './components/DashboardShopee'
@@ -93,7 +95,7 @@ interface ProdutoEstoque {
   }>
 }
 
-type Pagina = 'bemvindo' | 'inicial' | 'conferencia' | 'produtos_nota' | 'relacionamento_produto' | 'fornecedores' | 'full-operacoes' | 'anuncios' | 'notas-fiscais' | 'operadores' | 'garimpador' | 'lista-compra' | 'radar-full' | 'estoque-embalagens' | 'devolucoes' | 'conferencia-ncm' | 'classificacao-tipos' | 'fiscal-ml-olist'
+type Pagina = 'bemvindo' | 'inicial' | 'conferencia' | 'produtos_nota' | 'relacionamento_produto' | 'fornecedores' | 'full-operacoes' | 'anuncios' | 'notas-fiscais' | 'operadores' | 'garimpador' | 'lista-compra' | 'radar-full' | 'estoque-embalagens' | 'central-devolucoes' | 'conferencia-ncm' | 'classificacao-tipos' | 'fiscal-ml-olist' | 'divergencia-dimensoes' | 'negociacao-shopee'
 
 interface Divergencia {
   item_id: number
@@ -1669,7 +1671,9 @@ function App() {
       label: 'Marketplace',
       items: [
         { key: 'anuncios', label: 'Anuncios ML', icon: 'megaphone', active: pagina === 'anuncios', onClick: () => setPagina('anuncios') },
-        { key: 'devolucoes', label: 'Devolucoes', icon: 'box', active: pagina === 'devolucoes', onClick: () => setPagina('devolucoes') },
+        { key: 'central-devolucoes', label: 'Devoluções', icon: 'box', active: pagina === 'central-devolucoes', onClick: () => setPagina('central-devolucoes') },
+        { key: 'divergencia-dimensoes', label: 'Medidas ML', icon: 'warning', active: pagina === 'divergencia-dimensoes', onClick: () => setPagina('divergencia-dimensoes') },
+        { key: 'negociacao-shopee', label: 'Negociação Shopee', icon: 'receipt', active: pagina === 'negociacao-shopee', onClick: () => setPagina('negociacao-shopee') },
       ],
     },
     // === FERRAMENTAS ===
@@ -1729,7 +1733,11 @@ function App() {
     if (group.label === 'Marketplace') {
       return {
         ...group,
-        items: platform === 'ml' ? group.items : []
+        items: group.items.filter(item => {
+          if (item.key === 'negociacao-shopee') return platform === 'shopee'
+          if (item.key === 'central-devolucoes') return platform === 'ml' || platform === 'shopee'
+          return platform === 'ml'
+        })
       }
     }
     if (group.label === 'Arquivados') {
@@ -3062,10 +3070,9 @@ function App() {
     )
   }
 
-  // ===== PÁGINA DE DEVOLUÇÕES (MERCADO LIVRE) =====
-  // Sem título no shell: a tela portada já abre com o próprio hero.
-  if (pagina === 'devolucoes') {
-    return renderComShell('', '', <Devolucoes />)
+  // ===== PÁGINA CENTRAL DE DEVOLUÇÕES =====
+  if (pagina === 'central-devolucoes') {
+    return renderComShell('', '', <CentralDevolucoes />)
   }
 
   // ===== PÁGINA DE LISTA DE COMPRA =====
@@ -3074,6 +3081,23 @@ function App() {
       'Lista de Compra',
       'Prioridade de compra pela curva ABC do ML cruzada com estoque e velocidade de venda.',
       <ListaCompra />
+    )
+  }
+
+  if (pagina === 'divergencia-dimensoes') {
+    return renderComShell(
+      'Medidas ML: declarado x medido',
+      'Anúncios cuja embalagem declarada difere da medida pelo Mercado Livre.',
+      <DivergenciaDimensoes />
+    )
+  }
+
+  // ===== PÁGINA DA NEGOCIAÇÃO SHOPEE =====
+  if (pagina === 'negociacao-shopee') {
+    return renderComShell(
+      'Negociação Shopee',
+      'A planilha do gerente de contas preenchida pela API, com histórico e BI.',
+      <NegociacaoShopee />
     )
   }
 
