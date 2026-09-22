@@ -707,21 +707,45 @@ class ShopeeAPI:
             page += 1
         return {"precos": precos}
 
+    @staticmethod
+    def _separar_estoque(info: Dict[str, Any]) -> Dict[str, int]:
+        """seller_stock é o estoque do lojista; shopee_stock é o Full/FBS."""
+        return {
+            "seller": sum(int(s.get("stock") or 0) for s in info.get("seller_stock") or []),
+            "shopee": sum(int(s.get("stock") or 0) for s in info.get("shopee_stock") or []),
+        }
+
     def estoque_vendedor(self, item_ids: list) -> Dict[str, Any]:
-        """model_id -> estoque do VENDEDOR (seller_stock), excluindo o Full/FBS
-        (shopee_stock). get_model_list é 1 chamada por item, sem versão em lote."""
-        estoques, falhas = {}, []
-        for item_id in item_ids:
+        """Estoque do vendedor por model_id — ou por item_id, quando o anúncio
+        não tem variação (aí get_model_list vem vazio e o estoque fica no item).
+        """
+        estoques, falhas, com_variacao = {}, [], []
+        for i in range(0, len(item_ids), 50):
+            lote = item_ids[i:i + 50]
+            resp = self.chamar("/api/v2/product/get_item_base_info", {
+                "item_id_list": ",".join(str(x) for x in lote),
+            })
+            if resp.get("error"):
+                falhas.append({"lote": lote, "erro": resp.get("message") or resp.get("error")})
+                continue
+            for item in (resp.get("response") or {}).get("item_list") or []:
+                if item.get("has_model"):
+                    com_variacao.append(item.get("item_id"))
+                else:
+                    estoques[str(item.get("item_id"))] = self._separar_estoque(
+                        item.get("stock_info_v2") or {}
+                    )
+
+        for item_id in com_variacao:
             resp = self.chamar("/api/v2/product/get_model_list", {"item_id": int(item_id)})
             if resp.get("error"):
                 falhas.append({"item_id": item_id, "erro": resp.get("message") or resp.get("error")})
                 continue
             for m in (resp.get("response") or {}).get("model") or []:
-                info = m.get("stock_info_v2") or {}
-                estoques[str(m.get("model_id"))] = {
-                    "seller": sum(int(s.get("stock") or 0) for s in info.get("seller_stock") or []),
-                    "shopee": sum(int(s.get("stock") or 0) for s in info.get("shopee_stock") or []),
-                }
+                estoques[str(m.get("model_id"))] = self._separar_estoque(
+                    m.get("stock_info_v2") or {}
+                )
+
         return {"estoques": estoques, "falhas": falhas}
 
     def status(self) -> Dict[str, Any]:
