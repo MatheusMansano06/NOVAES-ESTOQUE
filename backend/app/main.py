@@ -5916,9 +5916,6 @@ async def shopee_negociacao(request: Request):
     if not discount_id or not item_ids:
         return JSONResponse({"erro": "discount_id e item_ids são obrigatórios"}, status_code=400)
 
-    if corpo.get("raw"):
-        return JSONResponse(shopee.estoque_bruto(item_ids))
-
     precos = shopee.precos_da_promocao(int(discount_id))
     if precos.get("erro"):
         return JSONResponse(precos, status_code=502)

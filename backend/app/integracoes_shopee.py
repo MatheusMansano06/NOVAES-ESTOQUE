@@ -715,19 +715,6 @@ class ShopeeAPI:
             "shopee": sum(int(s.get("stock") or 0) for s in info.get("shopee_stock") or []),
         }
 
-    def estoque_bruto(self, item_ids: list) -> Dict[str, Any]:
-        """stock_info_v2 sem tratamento, para conferir o split seller x Full."""
-        out = {}
-        resp = self.chamar("/api/v2/product/get_item_base_info", {
-            "item_id_list": ",".join(str(x) for x in item_ids[:20]),
-        })
-        for item in (resp.get("response") or {}).get("item_list") or []:
-            out[str(item.get("item_id"))] = {
-                "has_model": item.get("has_model"),
-                "stock_info_v2": item.get("stock_info_v2"),
-            }
-        return {"itens": out, "erro": resp.get("error"), "mensagem": resp.get("message")}
-
     def estoque_vendedor(self, item_ids: list) -> Dict[str, Any]:
         """Estoque do vendedor por model_id — ou por item_id, quando o anúncio
         não tem variação (aí get_model_list vem vazio e o estoque fica no item).
