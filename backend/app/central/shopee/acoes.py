@@ -29,6 +29,22 @@ def _motivo(m: dict) -> dict:
     return {"id": int(id_), "texto": f"Motivo {id_}", "exigencia": exigencia}
 
 
+def campos_disputa(return_sn: str) -> dict:
+    """Diagnóstico: só os campos de disputa/motivo do detalhe da devolução (sem dados do comprador).
+    Serve para descobrir que código de motivo a Shopee gravou numa contestação feita pela Central do Vendedor."""
+    r = client.get("/api/v2/returns/get_return_detail", {"return_sn": return_sn})
+
+    def filtra(v):
+        if isinstance(v, dict):
+            out = {k: (x if any(p in k.lower() for p in ("dispute", "reason", "status")) else filtra(x)) for k, x in v.items()}
+            return {k: x for k, x in out.items() if x not in (None, {}, [], "")}
+        if isinstance(v, list):
+            return [x for x in (filtra(i) for i in v) if x not in (None, {}, [], "")]
+        return None
+
+    return filtra(r)
+
+
 def _urls(fotos: list[Path]) -> list[str]:
     if not fotos:
         return []

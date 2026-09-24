@@ -197,6 +197,11 @@ async def mediacoes_motivos(request: Request):
     return await run_in_threadpool(mediacoes.motivos, _id(request))
 
 
+async def shopee_campos_disputa(request: Request):
+    from app.central.shopee.acoes import campos_disputa
+    return await run_in_threadpool(campos_disputa, request.path_params["return_sn"])
+
+
 async def mediacoes_contestar(request: Request):
     dados = await _corpo(request)
     motivo = dados.get("motivo") or ""  # vazio quando a plataforma não pede motivo (ML, produto voltou perfeito)
@@ -271,6 +276,7 @@ rotas = [
     _rota("/conferencia/{id:int}/nota-devolucao/emitir", conferencia_emitir_nota, "POST"),
     _rota("/conferencia/{id:int}/evidencias", conferencia_evidencia, "POST"),
     _rota("/mediacoes/{id:int}/motivos", mediacoes_motivos),
+    _rota("/shopee/disputa/{return_sn}", shopee_campos_disputa),
     _rota("/mediacoes/{id:int}/contestar", mediacoes_contestar, "POST"),
     _rota("/mediacoes/{id:int}", mediacoes_historico),
     _rota("/mercado-livre/sincronizar", ml_sincronizar, "POST"),
