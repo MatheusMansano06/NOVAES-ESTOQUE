@@ -3329,9 +3329,17 @@ def _aplicar_baixa_item(db, item, embale, qtd_override=None):
         qtd_baixar = _quantidade_planejada_full(item)
 
     if qtd_baixar <= 0:
+        # Nada vai pro FULL: não há o que retirar, mas o item está resolvido (fica verde e conta
+        # como concluído). Sem isso, balanço com FULL=0 corrigia a Olist e o item ficava pendente.
+        item.quantidade_baixar = 0.0
+        item.quantidade_baixada = 0.0
+        item.baixa_aplicada = 1
+        item.data_baixa = datetime.utcnow()
+        db.add(item)
         return {
             "item_id": item.id, "status": "zerado",
-            "mensagem": "Quantidade a baixar é zero"
+            "quantidade_baixada": 0,
+            "mensagem": "Nada a baixar (FULL = 0): item marcado como concluído"
         }
 
     sucesso = olist.atualizar_estoque(

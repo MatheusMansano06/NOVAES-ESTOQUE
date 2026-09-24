@@ -664,8 +664,9 @@ O estoque na Olist volta ao que era antes (vendas que caíram no meio são manti
         quantidade: qtd
       })
       const r = resposta.data
-      if (r.status === 'ok' || r.status === 'ja_baixado') {
-        setItensBaixados({ ...itensBaixados, [it.item_id]: r.quantidade_baixada || qtd })
+      if (r.status === 'ok' || r.status === 'ja_baixado' || r.status === 'zerado') {
+        // FULL = 0 volta 'zerado' com 0 baixado: ainda assim conta como concluído (o valor é só marcador)
+        setItensBaixados({ ...itensBaixados, [it.item_id]: r.quantidade_baixada || qtd || 1 })
         setMessage(r.mensagem || 'Baixa aplicada')
         return true
       } else {
