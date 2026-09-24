@@ -523,6 +523,16 @@ export function EmbaldesManager({ modoSeparacao = false }: { modoSeparacao?: boo
     } catch (erro: any) {
       if (janelaWhats) janelaWhats.close()
       const dados = erro.response?.data || {}
+      if (Array.isArray(dados.resultados)) {
+        // 502 parcial: mostra o que deu certo/errado por componente em vez de só "502"
+        setKitResultado((prev) => ({ ...prev, [item.item_id]: dados.resultados }))
+        const falhas = dados.resultados
+          .filter((r: any) => r.sucesso === false && r.detalhe)
+          .map((r: any) => `${r.sku || r.produto_id}: ${r.detalhe}`)
+          .join(' | ')
+        setMessage('Erro: ' + (dados.mensagem || 'falha no balanço do kit') + (falhas ? ` — ${falhas}` : ''))
+        return false
+      }
       const base = dados.erro || dados.error || String(erro)
       setMessage('Erro: ' + base + (dados.detalhe ? ` — ${dados.detalhe}` : ''))
       return false
@@ -1982,10 +1992,7 @@ export function EmbaldesManager({ modoSeparacao = false }: { modoSeparacao?: boo
 
             <div style={{ display: 'flex', gap: '0.7rem' }}>
               <button
-                onClick={async () => {
-                  const ok = await balancearKit(balanceandoKit.item, balanceandoKit.kit, revisandoId || 0)
-                  if (ok && modoSeparacao) proximo()
-                }}
+                onClick={() => balancearKit(balanceandoKit.item, balanceandoKit.kit, revisandoId || 0)}
                 disabled={balanceandoId !== null}
                 style={{ flex: 1, padding: '0.7rem', background: '#d32f2f', color: '#fff', border: 'none', borderRadius: '4px', cursor: balanceandoId !== null ? 'not-allowed' : 'pointer', fontWeight: 'bold', opacity: balanceandoId !== null ? 0.6 : 1 }}
               >

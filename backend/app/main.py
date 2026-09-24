@@ -4107,7 +4107,8 @@ async def balancear_kit_componentes_embale(request: Request):
                 })
                 continue
 
-            ok_baixa = olist.atualizar_estoque(
+            # Olist recusa saída de quantidade 0 (HTTP 400): nada a baixar = só o balanço.
+            ok_baixa = qtd_baixar == 0 or olist.atualizar_estoque(
                 produto_id=pid,
                 quantidade=qtd_baixar,
                 tipo="S",
