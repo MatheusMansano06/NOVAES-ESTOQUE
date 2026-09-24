@@ -1973,7 +1973,8 @@ def _buscar_itens_inbound_similares(db, olist_produto_id, olist_sku,
             if not motivo:
                 continue
 
-            qtd_sep = it.quantidade_separada or 0
+            qtd_sep = _quantidade_planejada_full(it)  # FULL atual (pode ter sido reduzido)
+            qtd_original = float(it.quantidade_separada or 0)
             qtd_baix = it.quantidade_baixada or 0
             candidatos.append({
                 "inbound_id": emb.id,
@@ -1986,6 +1987,8 @@ def _buscar_itens_inbound_similares(db, olist_produto_id, olist_sku,
                 "qtd_full": qtd_sep,
                 "qtd_baixada": qtd_baix,
                 "restante_full": max(0, qtd_sep - qtd_baix),
+                "qtd_original": qtd_original,
+                "full_reduzido": qtd_sep < qtd_original,
                 "baixa_aplicada": int(it.baixa_aplicada or 0),
                 "ja_vinculado": bool(it.olist_produto_id),
                 "score": score,
@@ -2112,6 +2115,51 @@ def _calcular_reserva_inbound(db, olist_produto_id, olist_sku, disponivel=None,
     return reserva_total, detalhes
 
 
+def _itens_full_reduzidos(db, olist_produto_id, olist_sku):
+    """Itens ainda sem baixa, em inbound ativo, deste produto, cujo Vai pro FULL está
+    ABAIXO do original do PDF (ex.: zerado por falta de estoque). A conferência da NF
+    pergunta se quer segurar o original — nunca restaura sozinha."""
+    pid = str(olist_produto_id) if olist_produto_id else None
+    sku = (olist_sku or "").strip().lower()
+    if not pid and not sku:
+        return []
+    saida = []
+    for emb in db.query(EmbaleFU).filter(EmbaleFU.status != "encerrado").all():
+        for it in emb.itens:
+            if it.baixa_aplicada == 1 or (it.nao_enviar or 0) == 1:
+                continue
+            casa = (pid and it.olist_produto_id and str(it.olist_produto_id) == pid) or \
+                   (sku and it.sku_inbound and it.sku_inbound.strip().lower() == sku)
+            if not casa:
+                continue
+            original = float(it.quantidade_separada or 0)
+            atual = _quantidade_planejada_full(it)
+            if atual < original:
+                saida.append({"inbound_id": emb.id, "numero_inbound": emb.numero_inbound,
+                              "nome_inbound": emb.nome_embalde, "item_id": it.id,
+                              "titulo": it.titulo_anuncio, "original": original, "atual": atual})
+    return saida
+
+
+def _restaurar_full_original(db, request, item_ids, olist_produto_id, olist_sku):
+    """Volta o Vai pro FULL ao original do PDF nos itens escolhidos pelo conferente
+    (só os que _itens_full_reduzidos devolve para ESTE produto). Registra no histórico. Não commita."""
+    validos = {r["item_id"]: r for r in _itens_full_reduzidos(db, olist_produto_id, olist_sku)}
+    quem = _operador_contexto(request)["operador_nome"]
+    for iid in item_ids or []:
+        r = validos.get(int(iid)) if str(iid).isdigit() else None
+        if not r:
+            continue
+        it = db.query(ItemEmbaleFU).filter(ItemEmbaleFU.id == r["item_id"]).first()
+        it.quantidade_baixar = r["original"]
+        db.add(it)
+        db.add(HistoricoFullEmbale(
+            embale_id=r["inbound_id"], item_id=it.id, titulo_anuncio=it.titulo_anuncio,
+            sku_inbound=it.sku_inbound, quantidade_anterior=r["atual"], quantidade_nova=r["original"],
+            tipo="aumento", status="aprovado", solicitante=quem, decidido_por=quem, decidido_em=datetime.utcnow(),
+        ))
+
+
 async def reserva_inbound_produto(request: Request):
     """
     GET /api/embaldes/reserva-produto?olist_produto_id=X&olist_sku=Y
@@ -2127,6 +2175,7 @@ async def reserva_inbound_produto(request: Request):
             "reservado_full": reserva,
             "tem_reserva": reserva > 0,
             "detalhes": detalhes,
+            "reduzidos": _itens_full_reduzidos(db, pid, sku),
         })
     except Exception as e:
         return JSONResponse({"erro": str(e)}, status_code=500)
@@ -2159,6 +2208,12 @@ async def atualizar_estoque_olist(request: Request):
         agora = datetime.utcnow()
         modo_balanco = estoque_real is not None
         estoque_final_balanco = None
+
+        # Conferente marcou "segurar a quantidade original" em itens com FULL reduzido.
+        restaurar_ids = data.get("restaurar_full_item_ids") or []
+        if restaurar_ids and (modo_balanco or tipo == "E"):
+            _restaurar_full_original(db, request, restaurar_ids, item.olist_produto_id, item.olist_sku)
+            db.flush()
 
         if modo_balanco:
             # Corrige a base fictícia e soma só a parte ORGÂNICA da NF,
@@ -3184,6 +3239,17 @@ async def revisar_baixa_embale(request: Request):
         _preencher_imagens_olist(db, itens)
 
         if embale.revisao_salva_em and not force_refresh:
+            # Item vinculado sem estoque de referência (vínculo novo, ou desfeito na versão antiga)
+            # aparecia como "Estoque indisponível" e sem botões: busca na Olist e grava.
+            # ponytail: no máximo 10 por abertura, para não deixar a revisão lenta.
+            sem_saldo = [i for i in itens if i.olist_produto_id and i.olist_estoque_antes is None and i.baixa_aplicada != 1][:10]
+            for i in sem_saldo:
+                saldo = (olist.obter_estoque(str(i.olist_produto_id)) or {}).get("saldo")
+                if saldo is not None:
+                    i.olist_estoque_antes = float(saldo)
+                    db.add(i)
+            if sem_saldo:
+                db.commit()
             revisao = [_resumo_revisao_salva_item(item) for item in itens]
             _marcar_historico_full(db, embale.id, revisao)
             resumo = {

@@ -289,6 +289,14 @@ function App() {
   // Candidatos do inbound que podem ser este mesmo produto (p/ confirmar)
   const [inboundCandidatos, setInboundCandidatos] = useState<any[]>([])
   const [candidatoVinculado, setCandidatoVinculado] = useState<any>(null)
+  // Itens de inbound deste produto com o Vai pro FULL reduzido abaixo do original (ex.: zerado por falta).
+  // O conferente decide se segura o original; nunca é automático.
+  const [fullReduzidos, setFullReduzidos] = useState<any[]>([])
+  const [restaurarFull, setRestaurarFull] = useState(false)
+  const extraRestaurar = restaurarFull
+    ? fullReduzidos.reduce((t, r) => t + Math.max(0, Math.round((r.original || 0) - (r.atual || 0))), 0)
+    : 0
+  const reservaEfetiva = reservaInbound + extraRestaurar
   const [vinculandoCandidato, setVinculandoCandidato] = useState(false)
   // Memória de vínculos (de-para fornecedor -> Olist)
   const [sugestaoVinculo, setSugestaoVinculo] = useState<any>(null)
@@ -567,6 +575,8 @@ function App() {
   useEffect(() => {
     setCandidatoVinculado(null)
     setInboundCandidatos([])
+    setFullReduzidos([])
+    setRestaurarFull(false)
     if (!produtoOlistSelecionado.sku && !produtoOlistSelecionado.id) {
       setReservaInbound(0)
       setReservaInboundInbs('')
@@ -581,6 +591,7 @@ function App() {
       .then((d) => {
         const reserva = Math.round(d.reservado_full || 0)
         setReservaInbound(reserva)
+        setFullReduzidos(d.reduzidos || [])
         setReservaInboundInbs((d.detalhes || []).map((x: any) => `#${x.numero_inbound}`).join(', '))
         // Se já casou direto (vínculo/SKU), não precisa pedir confirmação.
         if (reserva > 0) return
@@ -634,6 +645,7 @@ function App() {
       const d = await r.json()
       setReservaInbound(Math.round(d.reservado_full || 0))
       setReservaInboundInbs((d.detalhes || []).map((x: any) => `#${x.numero_inbound}`).join(', '))
+      setFullReduzidos(d.reduzidos || [])
       setCandidatoVinculado(cand)
       setInboundCandidatos([])
     } catch (err) {
@@ -1298,6 +1310,10 @@ function App() {
       const resR = await fetch(`${API_BASE}/api/embaldes/reserva-produto?${params}`)
       const dataR = await resR.json()
       reservaFull = Math.round(dataR.reservado_full || 0)
+      if (restaurarFull) {
+        reservaFull += (dataR.reduzidos || []).reduce((t: number, r: any) => t + Math.max(0, Math.round((r.original || 0) - (r.atual || 0))), 0)
+      }
+      reservaFull = Math.min(reservaFull, qtdNF)
       if (reservaFull > 0) {
         const inbs = (dataR.detalhes || []).map((d: any) => `#${d.numero_inbound}`).join(', ')
         reservaInfo = `\n⚠️ ${reservaFull} un estão num inbound ativo (${inbs}) e serão SEGURADAS pro FULL.\n`
@@ -1349,7 +1365,8 @@ function App() {
           item_id: itemId,
           item_ids: idsMassa && idsMassa.length > 1 ? idsMassa : undefined,
           quantidade: qtdNF,
-          tipo: 'E'
+          tipo: 'E',
+          restaurar_full_item_ids: restaurarFull ? fullReduzidos.map((r) => r.item_id) : undefined
         })
       })
 
@@ -1408,7 +1425,7 @@ function App() {
     }
 
     const qtdNF = Math.round(produtoSelecionado.quantidade_nf)
-    const reservaFull = Math.min(reservaInbound, qtdNF)
+    const reservaFull = Math.min(reservaEfetiva, qtdNF)
     const qtdSubir = Math.max(0, qtdNF - reservaFull)
     const novoTotal = real + qtdSubir
     const reservaInfo = reservaFull > 0
@@ -1458,7 +1475,8 @@ function App() {
           item_id: itemId,
           item_ids: idsMassa && idsMassa.length > 1 ? idsMassa : undefined,
           quantidade: qtdNF,
-          estoque_real: real
+          estoque_real: real,
+          restaurar_full_item_ids: restaurarFull ? fullReduzidos.map((r) => r.item_id) : undefined
         })
       })
       const dataEst = await resEst.json()
@@ -3706,6 +3724,24 @@ function App() {
               </div>
             )}
 
+            {/* FULL REDUZIDO — o conferente decide se segura o original */}
+            {produtoOlistSelecionado.sku && produtoSelecionado && fullReduzidos.length > 0 && (
+              <div style={{ background: '#fff8e1', border: '2px solid #ffb300', padding: '1rem 1.25rem', borderRadius: '8px', marginBottom: '1.5rem' }}>
+                <h3 style={{ color: '#e65100', marginTop: 0, marginBottom: '0.5rem', fontSize: '1rem' }}>
+                  ⚠️ O FULL deste produto foi reduzido no inbound
+                </h3>
+                {fullReduzidos.map((r) => (
+                  <div key={r.item_id} style={{ fontSize: '0.88rem', color: '#7a5b00', marginBottom: '0.3rem' }}>
+                    Inbound {r.nome_inbound}{r.numero_inbound ? ` #${r.numero_inbound}` : ''}: tinha <strong>{Math.round(r.original)}</strong> no FULL e hoje está com <strong>{Math.round(r.atual)}</strong>.
+                  </div>
+                ))}
+                <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginTop: '0.6rem', fontWeight: 700, color: '#5d4037', cursor: 'pointer' }}>
+                  <input type="checkbox" checked={restaurarFull} onChange={(e) => setRestaurarFull(e.target.checked)} />
+                  Segurar a quantidade original para o FULL (+{fullReduzidos.reduce((t, r) => t + Math.max(0, Math.round(r.original - r.atual)), 0)} un) e voltar o Vai pro FULL ao original
+                </label>
+              </div>
+            )}
+
             {/* CANDIDATOS NO INBOUND — confirmar se é o mesmo produto */}
             {produtoOlistSelecionado.sku && produtoSelecionado && reservaInbound === 0 &&
              !candidatoVinculado && inboundCandidatos.length > 0 && (
@@ -3743,6 +3779,7 @@ function App() {
                         ) : (
                           <span style={{ color: '#e65100', fontWeight: 600 }}>
                             📦 {c.restante_full} un destinadas ao FULL — ainda NÃO baixadas
+                            {c.full_reduzido ? ` (original do inbound: ${c.qtd_original}, foi reduzido)` : ''}
                           </span>
                         )}
                       </div>
@@ -3782,7 +3819,7 @@ function App() {
                 <h3 style={{ color: '#2e7d32', marginTop: 0 }}>Atualização de Estoque</h3>
                 {(() => {
                   const qtdNF = Math.round(produtoSelecionado.quantidade_nf)
-                  const reserva = Math.min(reservaInbound, qtdNF)
+                  const reserva = Math.min(reservaEfetiva, qtdNF)
                   const qtdSubir = Math.max(0, qtdNF - reserva)
                   const novoTotal = produtoOlistSelecionado.estoque_saldo + qtdSubir
                   return (
@@ -3842,7 +3879,7 @@ function App() {
                 </p>
                 {(() => {
                   const qtdNF = Math.round(produtoSelecionado.quantidade_nf)
-                  const reserva = Math.min(reservaInbound, qtdNF)
+                  const reserva = Math.min(reservaEfetiva, qtdNF)
                   const qtdSubir = Math.max(0, qtdNF - reserva)
                   const novoTotal = estoqueRealNF.trim() !== '' && !isNaN(Number(estoqueRealNF))
                     ? Math.round(Number(estoqueRealNF)) + qtdSubir
