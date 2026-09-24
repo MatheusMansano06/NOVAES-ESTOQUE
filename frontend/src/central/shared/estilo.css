@@ -34,9 +34,10 @@
 @media (prefers-reduced-motion: reduce) { .central-dev, .central-dev * { transition: none !important; animation: none !important; } }
 
 /* ---------- Estrutura: o app ocupa a janela, sem rolagem ---------- */
-/* Dentro do shell do estoque: janela menos cabeçalho (161px) e margem de baixo (26px) do nvs-workspace. */
-.central-dev .cd-app { height: calc(100vh - 187px); min-height: 560px; display: grid; grid-template-rows: 60px minmax(0, 1fr); overflow: hidden; }
+.central-dev .cd-app { height: 100vh; display: grid; grid-template-rows: 60px minmax(0, 1fr); overflow: hidden; }
 .central-dev .topo { display: flex; align-items: center; gap: 2.5rem; padding: 0 1.75rem; background: var(--papel); border-bottom: 1px solid var(--linha); }
+.central-dev .voltar { width: 34px; height: 34px; margin-right: -1.5rem; border: 1px solid var(--linha); border-radius: 8px; background: var(--papel); color: var(--suave); font-size: 1.1rem; }
+.central-dev .voltar:hover { color: var(--tinta); border-color: var(--linha-forte); }
 .central-dev .marca { display: flex; align-items: center; gap: 0.85rem; }
 .central-dev .marca-nvs { font-weight: 800; font-size: 1.3rem; letter-spacing: -0.03em; line-height: 0.85; display: grid; }
 .central-dev .marca-nvs small { font-size: 0.55rem; letter-spacing: 0.38em; font-weight: 700; }

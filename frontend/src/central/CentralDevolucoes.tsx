@@ -24,7 +24,7 @@ export interface Navegacao {
   statusInicial?: string;
 }
 
-function Central() {
+function Central({ onVoltar }: { onVoltar: () => void }) {
   const [tela, setTela] = useState<IdTela>("resumo");
   const [statusInicial, setStatusInicial] = useState<string | undefined>();
   const [codigo, setCodigo] = useState<string | null>(null);
@@ -66,7 +66,11 @@ function Central() {
   return (
     <div className="cd-app">
       <header className="topo">
-        <h1 className="marca-produto">Central de<strong>Devolução</strong></h1>
+        <button className="voltar" onClick={onVoltar} aria-label="Voltar para o início">←</button>
+        <div className="marca" aria-label="NVS Tech, Central de Devolução">
+          <span className="marca-nvs">NVS<small>TECH</small></span>
+          <span className="marca-produto">Central de<strong>Devolução</strong></span>
+        </div>
         <nav aria-label="Telas">
           {TELAS.map((t) => (
             <button key={t.id} aria-current={tela === t.id ? "page" : undefined} onClick={() => irPara(t.id)}>{t.nome}</button>
@@ -104,11 +108,11 @@ class Protecao extends Component<{ children: ReactNode }, { erro: Error | null }
   }
 }
 
-/** Aba Devoluções do estoque. `.central-dev` isola o CSS da Central do resto do app. */
-export function CentralDevolucoes() {
+/** Central de Devoluções: página própria do estoque. `.central-dev` isola o CSS da Central do resto do app. */
+export function CentralDevolucoes({ onVoltar }: { onVoltar: () => void }) {
   return (
     <div className="central-dev">
-      <Protecao><Central /></Protecao>
+      <Protecao><Central onVoltar={onVoltar} /></Protecao>
     </div>
   );
 }

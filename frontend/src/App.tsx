@@ -1671,7 +1671,6 @@ function App() {
       label: 'Marketplace',
       items: [
         { key: 'anuncios', label: 'Anuncios ML', icon: 'megaphone', active: pagina === 'anuncios', onClick: () => setPagina('anuncios') },
-        { key: 'central-devolucoes', label: 'Devoluções', icon: 'box', active: pagina === 'central-devolucoes', onClick: () => setPagina('central-devolucoes') },
         { key: 'divergencia-dimensoes', label: 'Medidas ML', icon: 'warning', active: pagina === 'divergencia-dimensoes', onClick: () => setPagina('divergencia-dimensoes') },
         { key: 'negociacao-shopee', label: 'Negociação Shopee', icon: 'receipt', active: pagina === 'negociacao-shopee', onClick: () => setPagina('negociacao-shopee') },
       ],
@@ -1735,7 +1734,6 @@ function App() {
         ...group,
         items: group.items.filter(item => {
           if (item.key === 'negociacao-shopee') return platform === 'shopee'
-          if (item.key === 'central-devolucoes') return platform === 'ml' || platform === 'shopee'
           return platform === 'ml'
         })
       }
@@ -1802,9 +1800,15 @@ function App() {
     )
   }
 
+  // Central de Devoluções: página própria em tela cheia, aberta pelo acesso rápido da seleção de plataforma.
+  if (pagina === 'central-devolucoes') {
+    return <CentralDevolucoes onVoltar={() => { setPagina('inicial'); setEscolhendoPlataforma(true) }} />
+  }
+
   if (escolhendoPlataforma) {
     return (
       <PlataformaSelecao
+        onDevolucoes={() => setPagina('central-devolucoes')}
         onEscolher={handlePlatformChange}
         atual={localStorage.getItem('platform-tab') ? platform : null}
         onSair={trocarOperador}
@@ -3068,11 +3072,6 @@ function App() {
       'Acompanhe anuncios, estoque, imagens, precificacao e dimensoes.',
       <AnunciosML onVoltar={voltarParaInicial} />
     )
-  }
-
-  // ===== PÁGINA CENTRAL DE DEVOLUÇÕES =====
-  if (pagina === 'central-devolucoes') {
-    return renderComShell('', '', <CentralDevolucoes />)
   }
 
   // ===== PÁGINA DE LISTA DE COMPRA =====

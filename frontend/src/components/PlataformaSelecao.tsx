@@ -12,6 +12,8 @@ interface PlataformaSelecaoProps {
   onSair?: () => void
   /** Abre uma ferramenta da operação direto pelo acesso rápido. */
   onAtalho?: (destino: Atalho) => void
+  /** Abre a Central de Devoluções (página própria, fora das plataformas). */
+  onDevolucoes?: () => void
   operadorNome?: string
   operadorCargo?: string
   mlConectado?: boolean
@@ -60,6 +62,15 @@ function IconeLista() {
   return (
     <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
       <path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01" />
+    </svg>
+  )
+}
+
+function IconeDevolucao() {
+  return (
+    <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M9 14 4 9l5-5" />
+      <path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11" />
     </svg>
   )
 }
@@ -140,6 +151,7 @@ export function PlataformaSelecao({
   atual,
   onSair,
   onAtalho,
+  onDevolucoes,
   operadorNome = 'NVS Tech',
   operadorCargo = 'Operador',
   mlConectado,
@@ -379,6 +391,13 @@ export function PlataformaSelecao({
             </div>
 
             <div className="cop__rapido-btns">
+              {onDevolucoes && (
+                <button className="cop__atalho cop__atalho--devolucoes" onClick={onDevolucoes}>
+                  <IconeDevolucao />
+                  <span>Devoluções</span>
+                  <Chevron />
+                </button>
+              )}
               {ferramentas.map((f) => (
                 <button key={f.chave} className="cop__atalho" onClick={() => onAtalho(f.chave)}>
                   {f.icone}
