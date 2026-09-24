@@ -258,13 +258,19 @@ def lancar_estoque(devolucao_id: int) -> list[dict]:
                 continue
             produto_id, sku = vendido if lanc["sku"] == "vendido" else recebido
             item = {**lanc, "sku_olist": sku, "produto_id": produto_id, "quantidade": quantidade}
+            # Kit lança por componente; os já lançados numa tentativa anterior não repetem.
+            feitos = list(anteriores[n].get("feitos") or []) if n < len(anteriores) else []
             try:
-                olist.movimentar(produto_id, olist.deposito_id(lanc["deposito"], d.plataforma), lanc["tipo"],
-                                 quantidade, custo_do_sku(sku),
-                                 f"Central de Devoluções: {d.plataforma} {d.id_externo} (classe {conf.classe})")
-                resultado.append({**item, "ok": True})
+                for pid, sku_peca, qtd in olist.pecas(produto_id, sku, quantidade):
+                    if pid in feitos:
+                        continue
+                    olist.movimentar(pid, olist.deposito_id(lanc["deposito"], d.plataforma), lanc["tipo"],
+                                     qtd, custo_do_sku(sku_peca),
+                                     f"Central de Devoluções: {d.plataforma} {d.id_externo} (classe {conf.classe})")
+                    feitos.append(pid)
+                resultado.append({**item, "ok": True, "feitos": feitos})
             except RuntimeError as e:
-                resultado.append({**item, "ok": False, "erro": str(e)})
+                resultado.append({**item, "ok": False, "erro": str(e), "feitos": feitos})
                 break
         conf.estoque_resultado = resultado
         if len(resultado) == len(conf.lancamentos) and all(r["ok"] for r in resultado):

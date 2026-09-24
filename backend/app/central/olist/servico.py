@@ -187,6 +187,15 @@ def movimentar(produto_id: int, deposito: int, tipo: str, quantidade: float, cus
     })
 
 
+def pecas(produto_id: int, sku: str, quantidade: float) -> list[tuple[int, str, float]]:
+    """Kit (tipo K) não aceita lançamento de estoque na Olist: devolve os componentes com a qtd proporcional."""
+    p = client.get(f"/produtos/{produto_id}") or {}
+    if p.get("tipo") != "K" or not p.get("kit"):
+        return [(produto_id, sku, quantidade)]
+    return [(c["produto"]["id"], c["produto"].get("sku") or "", quantidade * float(c.get("quantidade") or 1))
+            for c in p["kit"]]
+
+
 def deposito_id(tipo: str, plataforma: str) -> int:
     """tipo 'vendavel' | 'avaria'. Avaria é separada por plataforma, como a Novaes já organiza na Olist."""
     chave = "OLIST_DEPOSITO_VENDAVEL" if tipo == "vendavel" else f"OLIST_DEPOSITO_AVARIA_{plataforma.upper()}"
