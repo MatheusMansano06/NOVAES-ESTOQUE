@@ -4,6 +4,7 @@ import type { Navegacao } from "../../CentralDevolucoes";
 import { MOTIVO, type Plataforma } from "../../shared/devolucao";
 import { prazoRestante } from "../../shared/formato";
 import { Icone } from "../../shared/Icone";
+import { ACaminho } from "../../shared/ACaminho";
 import { LogoPlataforma } from "../../shared/LogoPlataforma";
 import { codigoDe, ENVIO, type Envio, type LinhaOperacao, type Operacao, type Status } from "../../shared/operacao";
 import { usarDados } from "../../shared/usarDados";
@@ -47,8 +48,8 @@ export function OperacaoPage({ nav }: { nav: Navegacao }) {
   const [bancada, setBancada] = useState(lerBancada);
   const inicial = ABAS.find((a) => (a.status as readonly string[]).includes(nav.statusInicial ?? ""))?.id ?? "aguardando_conferencia";
   const [aba, setAba] = useState<IdAba>(inicial);
-  const [plataforma, setPlataforma] = useState<Plataforma | "">("");
-  const [envio, setEnvio] = useState<Envio | "">("");
+  const [plataforma, setPlataforma] = useState<Plataforma | "">(nav.filtroInicial?.plataforma ?? "");
+  const [envio, setEnvio] = useState<Envio | "">(nav.filtroInicial?.envio ?? "");
   const [pagina, setPagina] = useState(1);
 
   const atual = ABAS.find((a) => a.id === aba)!;
@@ -115,26 +116,8 @@ export function OperacaoPage({ nav }: { nav: Navegacao }) {
         ))}
       </div>
 
-      {aba === "a_caminho" && todas?.a_caminho && (
-        <section className="cartao a-caminho" aria-label="A caminho por plataforma">
-          {(["mercado_livre", "shopee"] as Plataforma[]).map((p) => {
-            const c = todas.a_caminho[p];
-            return (
-              <div key={p} className="a-caminho-plataforma">
-                <LogoPlataforma plataforma={p} tamanho={22} comNome />
-                <strong>{c.aguardando_postagem + c.postado + c.sem_info}</strong>
-                {(["aguardando_postagem", "postado"] as Envio[]).map((e) => (
-                  <button key={e} type="button" className="a-caminho-numero" aria-pressed={plataforma === p && envio === e}
-                          onClick={() => { setPlataforma(p); setEnvio(e); }}>
-                    <span className="sub">{e === "aguardando_postagem" ? "Não postou ainda" : "Postado, a caminho"}</span>
-                    {c[e]}
-                  </button>
-                ))}
-                {c.sem_info > 0 && <span className="sub">{c.sem_info} sem informação de envio</span>}
-              </div>
-            );
-          })}
-        </section>
+      {aba === "a_caminho" && (
+        <ACaminho dados={todas?.a_caminho} ativo={{ plataforma, envio }} onEscolher={(p, e) => { setPlataforma(p); setEnvio(e); }} />
       )}
 
       <section className="cartao lista">

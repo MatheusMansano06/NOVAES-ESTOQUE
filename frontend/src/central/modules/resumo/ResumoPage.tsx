@@ -6,17 +6,19 @@ import { quando, reais } from "../../shared/formato";
 import { Rosca } from "../../shared/graficos";
 import { Icone, type NomeIcone } from "../../shared/Icone";
 import { LogoPlataforma } from "../../shared/LogoPlataforma";
+import { ACaminho, type ACaminhoDados } from "../../shared/ACaminho";
 import { codigoDe, STATUS, type Status } from "../../shared/operacao";
 import { usarDados } from "../../shared/usarDados";
 
 interface Dinheiro {
-  frete_reverso: number; perda_bancada?: number; perda_plataforma?: number; em_risco?: number;
+  frete_reverso: number; perda_bancada?: number; perda_motivo?: number;
   recuperado: number; custo_total: number;
 }
 interface Resumo {
   total: number;
   total_anterior: number;
   status: Partial<Record<Status, number>>;
+  a_caminho: ACaminhoDados;
   por_plataforma: Partial<Record<Plataforma, Dinheiro & { devolucoes: number }>>;
   dinheiro: Dinheiro;
   dinheiro_anterior: Dinheiro;
@@ -54,7 +56,6 @@ export function ResumoPage({ nav }: { nav: Navegacao }) {
   const st = r?.status ?? {};
   const emAberto = (r?.total ?? 0) - (st.finalizada ?? 0) - (st.com_a_plataforma ?? 0);
   const d = r?.dinheiro;
-  const perdido = (d?.perda_bancada ?? 0) + (d?.perda_plataforma ?? 0);
   const varCusto = r && variacao(r.dinheiro.custo_total, r.dinheiro_anterior.custo_total);
 
   return (
@@ -87,11 +88,14 @@ export function ResumoPage({ nav }: { nav: Navegacao }) {
           {varCusto && <p className={varCusto.sobe ? "financeiro-var ruim" : "financeiro-var bom"}>{varCusto.texto}</p>}
           <dl>
             <div><dt>Frete reverso</dt><dd>{reais(d?.frete_reverso)}</dd></div>
-            <div><dt>Produtos quebrados ou perdidos</dt><dd>{reais(perdido)}</dd></div>
-            <div><dt>Em risco, a conferir</dt><dd>{reais(d?.em_risco ?? 0)}</dd></div>
+            <div><dt>Quebrado, conferido na bancada</dt><dd>{reais(d?.perda_bancada ?? 0)}</dd></div>
+            <div><dt>Quebrado, pelo motivo</dt><dd>{reais(d?.perda_motivo ?? 0)}</dd></div>
           </dl>
         </div>
       </section>
+
+      <ACaminho titulo="A caminho da Novaes" dados={r?.a_caminho}
+                onEscolher={(p, e) => nav.irPara("operacao", "a_caminho", { plataforma: p, envio: e })} />
 
       <section className="cartao funil" aria-labelledby="t-funil">
         <header><h2 id="t-funil">Devoluções por etapa</h2>

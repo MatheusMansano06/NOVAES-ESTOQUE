@@ -8,11 +8,17 @@ import { LogoPlataforma } from "../../shared/LogoPlataforma";
 import { usarDados } from "../../shared/usarDados";
 
 interface Dinheiro {
-  frete_reverso: number; perda_bancada?: number; perda_plataforma?: number; em_risco?: number; recuperado: number;
+  frete_reverso: number; perda_bancada?: number; perda_motivo?: number; recuperado: number;
   custo_total: number; prejuizo_liquido: number; taxa_recuperacao: number; sem_custo: number;
 }
+interface Celula { quantidade: number; valor: number; sem_custo: number }
+interface Quebrados {
+  segmentos: (Celula & { origem: "bancada" | "motivo"; tipo: string; nome: string; por_plataforma: Record<Plataforma, Celula> })[];
+  por_origem: Record<"bancada" | "motivo", Celula>;
+  total: Celula;
+}
 interface Resumo {
-  total: number; total_anterior: number; dinheiro: Dinheiro; dinheiro_anterior: Dinheiro;
+  total: number; total_anterior: number; dinheiro: Dinheiro; dinheiro_anterior: Dinheiro; quebrados: Quebrados;
   serie: { dia: string; total: number; resolvidas: number; em_aberto: number; custo: number; recuperado: number }[];
   por_plataforma: Partial<Record<Plataforma, Dinheiro & { devolucoes: number }>>;
   motivos: { motivo: string; quantidade: number; pct: number }[];
@@ -44,7 +50,8 @@ export function BiPage({ nav }: { nav: Navegacao }) {
   const [dias, setDias] = useState(30);
   const { dados: r, erro } = usarDados<Resumo>(`/bi/resumo?dias=${dias}`, nav.versao);
   const d = r?.dinheiro, a = r?.dinheiro_anterior;
-  const perdido = (x?: Dinheiro) => (x?.perda_bancada ?? 0) + (x?.perda_plataforma ?? 0);
+  const perdido = (x?: Dinheiro) => (x?.perda_bancada ?? 0) + (x?.perda_motivo ?? 0);
+  const q = r?.quebrados;
   const maiorMotivo = Math.max(1, ...(r?.motivos.map((m) => m.quantidade) ?? [1]));
   const mediacoesTotal = r ? r.mediacoes.ganha + r.mediacoes.perdida + r.mediacoes.parcial + r.mediacoes.em_andamento : 0;
 
@@ -68,8 +75,8 @@ export function BiPage({ nav }: { nav: Navegacao }) {
         <Metrica rotulo="Recuperado em mediações" valor={reais(d?.recuperado)} v={d && a && variacao(d.recuperado, a.recuperado, true)}
                  nota="Estimado pelas mediações ganhas" />
         <Metrica rotulo="Frete reverso cobrado" valor={reais(d?.frete_reverso)} v={d && a && variacao(d.frete_reverso, a.frete_reverso)} />
-        <Metrica rotulo="Produtos quebrados ou perdidos" valor={reais(perdido(d))} v={d && a && variacao(perdido(d), perdido(a))}
-                 nota={d?.em_risco ? `+ ${reais(d.em_risco)} em risco, a conferir` : "Confirmado na bancada ou pela plataforma"} />
+        <Metrica rotulo="Mercadoria quebrada" valor={reais(perdido(d))} v={d && a && variacao(perdido(d), perdido(a))}
+                 nota="Da bancada + do motivo da devolução" />
         <Metrica rotulo="Taxa de recuperação" valor={`${(d?.taxa_recuperacao ?? 0).toLocaleString("pt-BR")}%`} />
       </section>
 
@@ -145,6 +152,36 @@ export function BiPage({ nav }: { nav: Navegacao }) {
         <p className="recuperado">{reais(r?.mediacoes.recuperado)} <span className="sub">recuperados nas mediações ganhas (estimado)</span></p>
       </section>
 
+      <section className="cartao financeiro-detalhe quebrados">
+        <header><h2>Mercadoria quebrada</h2>
+          <span className="sub">só entra o que a Novaes conferiu e não vende, ou o que já veio como danificado ou com defeito no motivo</span></header>
+        <div className="quebrados-totais">
+          <div className="quebrado-total"><span className="sub">Da bancada: conferimos e não dá para vender</span>
+            <strong>{reais(q?.por_origem.bancada.valor)}</strong><span className="sub">{q?.por_origem.bancada.quantidade ?? 0} devoluções</span></div>
+          <div className="quebrado-total"><span className="sub">Do motivo: a devolução já veio como quebrada</span>
+            <strong>{reais(q?.por_origem.motivo.valor)}</strong><span className="sub">{q?.por_origem.motivo.quantidade ?? 0} devoluções</span></div>
+          <div className="quebrado-total geral"><span className="sub">Total de mercadoria quebrada</span>
+            <strong>{reais(q?.total.valor)}</strong><span className="sub">{q?.total.quantidade ?? 0} devoluções</span></div>
+        </div>
+        <table className="tabela compacta">
+          <thead><tr><th scope="col">Origem e tipo</th>{PLATAFORMAS.map((p) => <th key={p} scope="col" className="num"><LogoPlataforma plataforma={p} tamanho={16} comNome /></th>)}
+            <th scope="col" className="num">Total</th></tr></thead>
+          <tbody>
+            {q?.segmentos.map((s) => (
+              <tr key={`${s.origem}-${s.tipo}`}>
+                <td>{s.nome}</td>
+                {PLATAFORMAS.map((p) => <td key={p} className="num">{textoCelula(s.por_plataforma[p])}</td>)}
+                <td className="num">{textoCelula(s)}</td>
+              </tr>
+            ))}
+            <tr className="total-linha"><td>Total</td>
+              {PLATAFORMAS.map((p) => <td key={p} className="num">{textoCelula(somar(q?.segmentos.map((s) => s.por_plataforma[p])))}</td>)}
+              <td className="num">{textoCelula(q?.total)}</td></tr>
+          </tbody>
+        </table>
+        {q && q.total.sem_custo > 0 && <p className="sub">* {q.total.sem_custo} devoluções sem custo cadastrado no estoque: contam na quantidade, mas não no valor</p>}
+      </section>
+
       <section className="cartao financeiro-detalhe">
         <header><h2>Detalhamento financeiro</h2>
           {d && d.sem_custo > 0 && <span className="sub">{d.sem_custo} perdas sem custo cadastrado no estoque não entram na conta</span>}</header>
@@ -154,8 +191,8 @@ export function BiPage({ nav }: { nav: Navegacao }) {
           <tbody>
             {([
               ["Frete reverso cobrado", "frete_reverso"],
-              ["Produto quebrado, conferido na bancada", "perda_bancada"],
-              ["Produto sem condição de venda, segundo o ML", "perda_plataforma"],
+              ["Mercadoria quebrada, conferida na bancada", "perda_bancada"],
+              ["Mercadoria quebrada, pelo motivo da devolução", "perda_motivo"],
               ["Recuperado em mediações", "recuperado"],
               ["Prejuízo líquido", "prejuizo_liquido"],
             ] as [string, keyof Dinheiro][]).map(([rotulo, k]) => (
@@ -166,14 +203,22 @@ export function BiPage({ nav }: { nav: Navegacao }) {
                 <td className="num">{d?.custo_total ? `${Math.round((Number(d[k] ?? 0) / d.custo_total) * 100)}%` : "—"}</td>
               </tr>
             ))}
-            <tr className="linha-risco"><td>Em risco: comprador disse que chegou quebrado (a conferir)</td>
-              {PLATAFORMAS.map((p) => <td key={p} className="num">{reais(r?.por_plataforma[p]?.em_risco ?? 0)}</td>)}
-              <td className="num">{reais(d?.em_risco ?? 0)}</td><td className="num">fora do custo</td></tr>
           </tbody>
         </table>
       </section>
     </div>
   );
+}
+
+/** "3 · R$ 120,00" (quantidade de devoluções e custo); * quando alguma não tem custo cadastrado. */
+function textoCelula(c?: Celula) {
+  if (!c || !c.quantidade) return "—";
+  return `${c.quantidade} · ${reais(c.valor)}${c.sem_custo ? "*" : ""}`;
+}
+
+function somar(cs?: Celula[]): Celula {
+  return (cs ?? []).reduce((t, c) => ({ quantidade: t.quantidade + c.quantidade, valor: t.valor + c.valor, sem_custo: t.sem_custo + c.sem_custo }),
+                           { quantidade: 0, valor: 0, sem_custo: 0 });
 }
 
 function Metrica({ rotulo, valor, v, nota }: { rotulo: string; valor: string; v?: { texto: string; bom: boolean } | null | 0; nota?: string }) {

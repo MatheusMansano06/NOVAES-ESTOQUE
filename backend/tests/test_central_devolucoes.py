@@ -89,3 +89,26 @@ def test_envio_a_caminho():
                                  bruto={"devolucao": {"status": "shipped"}})])
     r = cliente.get("/api/central/operacao?status=a_caminho&envio=postado").json()
     assert r["a_caminho"]["mercado_livre"]["postado"] == 1 and [l["id_externo"] for l in r["itens"]] == ["C2"]
+
+
+def test_mercadoria_quebrada_bancada_e_motivo():
+    """Duas origens: bancada (conferiu e não vende) e motivo (já veio como danificado/defeito).
+    Revisão do ML não conta; conferência que diz 'voltou bom' derruba o motivo."""
+    from app.central.bi import servico as bi
+    base = {"etapa": "entregue", "motivo": "arrependimento", "plataforma": "mercado_livre", "conferencia": None,
+            "condicao_produto": None, "itens": []}
+    assert bi.perda({**base, "condicao_produto": "unsaleable"}) == (None, 0.0)  # revisão do ML sozinha: não conta
+    assert bi.perda({**base, "motivo": "danificado"})[0] == "motivo"
+    assert bi.perda({**base, "motivo": "defeito", "etapa": "cancelada"}) == (None, 0.0)
+    assert bi.perda({**base, "motivo": "danificado", "conferencia": {"classe": "A", "perda_produto": 0.0}}) == (None, 0.0)
+    assert bi.perda({**base, "conferencia": {"classe": "B", "perda_produto": 50.0}}) == ("bancada", 50.0)
+
+    ls = [{**base, "conferencia": {"classe": "B", "perda_produto": 50.0}},
+          {**base, "plataforma": "shopee", "motivo": "danificado"},
+          {**base, "plataforma": "shopee", "motivo": "danificado"}]
+    q = bi.quebrados(ls)
+    seg = {(s["origem"], s["tipo"]): s for s in q["segmentos"]}
+    assert seg[("bancada", "B")]["por_plataforma"]["mercado_livre"] == {"quantidade": 1, "valor": 50.0, "sem_custo": 0}
+    assert seg[("motivo", "danificado")]["por_plataforma"]["shopee"]["quantidade"] == 2
+    assert q["por_origem"]["bancada"]["quantidade"] == 1 and q["por_origem"]["motivo"]["quantidade"] == 2
+    assert q["total"]["quantidade"] == 3

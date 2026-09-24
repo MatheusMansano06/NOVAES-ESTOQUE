@@ -5,7 +5,9 @@ import { ConferenciaModal } from "./modules/conferencia/ConferenciaModal";
 import { HistoricoPage } from "./modules/historico/HistoricoPage";
 import { OperacaoPage } from "./modules/operacao/OperacaoPage";
 import { ResumoPage } from "./modules/resumo/ResumoPage";
+import type { Plataforma } from "./shared/devolucao";
 import { Icone } from "./shared/Icone";
+import type { Envio } from "./shared/operacao";
 import "./shared/estilo.css";
 
 const TELAS = [
@@ -16,24 +18,29 @@ const TELAS = [
 ] as const;
 export type IdTela = (typeof TELAS)[number]["id"];
 
+/** Filtros que a tela Operação já abre aplicados (vindos de um clique no Resumo). */
+export interface FiltroOperacao { plataforma?: Plataforma; envio?: Envio }
+
 export interface Navegacao {
   abrir: (codigo: string) => void;
-  irPara: (tela: IdTela, statusFiltro?: string) => void;
+  irPara: (tela: IdTela, statusFiltro?: string, filtro?: FiltroOperacao) => void;
   /** Muda depois de qualquer ação no modal: as telas recarregam os números. */
   versao: number;
   statusInicial?: string;
+  filtroInicial?: FiltroOperacao;
 }
 
 function Central({ onVoltar }: { onVoltar: () => void }) {
   const [tela, setTela] = useState<IdTela>("resumo");
   const [statusInicial, setStatusInicial] = useState<string | undefined>();
+  const [filtroInicial, setFiltroInicial] = useState<FiltroOperacao | undefined>();
   const [codigo, setCodigo] = useState<string | null>(null);
   const [versao, setVersao] = useState(0);
   const [busca, setBusca] = useState("");
   const campoBusca = useRef<HTMLInputElement>(null);
 
   const abrir = useCallback((c: string) => setCodigo(c.trim()), []);
-  const irPara = useCallback((t: IdTela, s?: string) => { setStatusInicial(s); setTela(t); }, []);
+  const irPara = useCallback((t: IdTela, s?: string, f?: FiltroOperacao) => { setStatusInicial(s); setFiltroInicial(f); setTela(t); }, []);
   const fechar = useCallback(() => { setCodigo(null); setVersao((v) => v + 1); }, []);
 
   // Painel vivo: a sincronização roda no servidor a cada 10 min; a tela busca os números a cada minuto.
@@ -61,7 +68,7 @@ function Central({ onVoltar }: { onVoltar: () => void }) {
     setBusca("");
   }
 
-  const nav: Navegacao = { abrir, irPara, versao, statusInicial };
+  const nav: Navegacao = { abrir, irPara, versao, statusInicial, filtroInicial };
 
   return (
     <div className="cd-app">

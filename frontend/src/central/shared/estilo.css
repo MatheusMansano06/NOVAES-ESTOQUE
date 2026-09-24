@@ -103,8 +103,8 @@
 .central-dev .trilho > span { display: block; height: 100%; background: #2a78d6; border-radius: 999px; }
 
 /* ---------- Panorama (Resumo) ---------- */
-.central-dev .resumo { grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); grid-template-rows: auto auto minmax(0, 0.8fr) minmax(0, 1.2fr); }
-.central-dev .resumo .hero, .central-dev .resumo .kpis, .central-dev .resumo > .aviso { grid-column: 1 / -1; }
+.central-dev .resumo { grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); grid-template-rows: auto auto min-content minmax(200px, 0.8fr) minmax(270px, 1.2fr); overflow-y: auto; }
+.central-dev .resumo .hero, .central-dev .resumo .kpis, .central-dev .resumo > .aviso, .central-dev .resumo > .a-caminho { grid-column: 1 / -1; }
 .central-dev .hero { display: flex; align-items: center; gap: 1rem; }
 .central-dev .hero > div:first-child { margin-right: auto; }
 .central-dev .hero-saudacao { color: var(--azul); font-weight: 600; font-size: 0.85rem; }
@@ -232,9 +232,11 @@
 .central-dev .linha-risco td { color: var(--suave); font-style: italic; }
 
 /* ---------- Inteligência (B.I) ---------- */
-.central-dev .bi { grid-template-columns: repeat(3, minmax(0, 1fr)); grid-template-rows: auto auto minmax(0, 1fr) minmax(0, 1fr) auto; gap: 0.85rem; }
+.central-dev .bi { grid-template-columns: repeat(3, minmax(0, 1fr)); grid-template-rows: auto auto minmax(210px, 1fr) minmax(210px, 1fr) min-content min-content; gap: 0.85rem; overflow-y: auto; }
 .central-dev .bi .cabecalho, .central-dev .bi .metricas, .central-dev .bi .financeiro-detalhe { grid-column: 1 / -1; }
 .central-dev .bi .cartao { padding: 0.8rem 1rem; }
+/* Linhas automáticas não encolhem abaixo do conteúdo: falta espaço, a tela rola (em vez de cortar a tabela). */
+.central-dev .bi .financeiro-detalhe, .central-dev .resumo > .a-caminho { min-height: min-content; }
 .central-dev .bi .cartao > header { flex-wrap: wrap; row-gap: 0.3rem; margin-bottom: 0.5rem; }
 .central-dev .bi .financeiro-detalhe .tabela td, .central-dev .bi .financeiro-detalhe .tabela th { padding: 0.28rem 0.6rem; }
 .central-dev .bi .financeiro-detalhe > header { margin-bottom: 0.2rem; }
@@ -393,11 +395,20 @@
 }
 
 /* ---------- A caminho: por plataforma e situação do envio ---------- */
-.central-dev .a-caminho { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.75rem; padding: 0.85rem 1rem; }
+.central-dev .a-caminho { display: flex; flex-direction: row; align-items: center; gap: 1.5rem; padding: 0.85rem 1rem; }
+.central-dev .a-caminho > h2 { font-size: 0.95rem; font-weight: 700; white-space: nowrap; }
+.central-dev .a-caminho-grade { flex: 1; min-width: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.75rem; }
 .central-dev .a-caminho-plataforma { display: flex; align-items: center; gap: 0.9rem; flex-wrap: wrap; }
 .central-dev .a-caminho-plataforma > strong { font-size: 1.35rem; font-weight: 800; margin-right: 0.25rem; }
 .central-dev .a-caminho-numero { display: grid; text-align: left; font-weight: 700; font-size: 1.05rem; border: 1px solid var(--linha);
   border-radius: 8px; background: var(--papel); padding: 0.3rem 0.7rem; }
 .central-dev .a-caminho-numero[aria-pressed="true"] { border-color: var(--azul); background: var(--azul-fundo); }
 .central-dev .lista-topo { flex-wrap: wrap; }
-@media (max-width: 1100px) { .central-dev .a-caminho { grid-template-columns: 1fr; } }
+@media (max-width: 1100px) { .central-dev .a-caminho { flex-wrap: wrap; } .central-dev .a-caminho-grade { grid-template-columns: 1fr; } }
+
+/* ---------- B.I.: mercadoria quebrada ---------- */
+.central-dev .quebrados-totais { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0.75rem; margin-bottom: 0.6rem; }
+.central-dev .quebrado-total { display: grid; gap: 0.1rem; padding: 0.55rem 0.8rem; border: 1px solid var(--linha); border-radius: 10px; }
+.central-dev .quebrado-total strong { font-size: 1.25rem; font-weight: 800; }
+.central-dev .quebrado-total.geral { background: var(--fundo); }
+@media (max-width: 1100px) { .central-dev .quebrados-totais { grid-template-columns: 1fr; } }

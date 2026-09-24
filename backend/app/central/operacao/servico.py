@@ -46,14 +46,19 @@ def _prejuizo(linha: dict) -> float | None:
     return linha["custo_plataforma"]
 
 
+def a_caminho_por_plataforma(ls: list[dict]) -> dict:
+    """A caminho por plataforma e situação do envio: sempre as duas plataformas, para comparar."""
+    saida = {p: {e: 0 for e in ENVIOS} for p in ("mercado_livre", "shopee")}
+    for l in ls:
+        if l["status"] == "a_caminho" and l["plataforma"] in saida:
+            saida[l["plataforma"]][l["envio"]] += 1
+    return saida
+
+
 def listar(status_filtro: str | None, plataforma: str | None, motivo: str | None, destino: str | None,
            pagina: int, por_pagina: int, envio_filtro: str | None = None) -> dict:
     base = [l for l in linhas() if (not motivo or l["motivo"] == motivo) and (not destino or l["destino"] == destino)]
-    # "A caminho" por plataforma e situação do envio: sempre as duas plataformas, para comparar.
-    a_caminho = {p: {e: 0 for e in ENVIOS} for p in ("mercado_livre", "shopee")}
-    for l in base:
-        if l["status"] == "a_caminho" and l["plataforma"] in a_caminho:
-            a_caminho[l["plataforma"]][l["envio"]] += 1
+    a_caminho = a_caminho_por_plataforma(base)
     filtradas = [l for l in base if not plataforma or l["plataforma"] == plataforma]
     contagens = {s: 0 for s in STATUS}
     for l in filtradas:
