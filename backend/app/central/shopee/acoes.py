@@ -16,7 +16,16 @@ def motivos_contestacao(return_sn: str, produto_perfeito: bool) -> list[dict]:
     if not lista:
         # Na Shopee lista vazia nunca significa "sem motivo": a disputa sempre exige um. Mostra a resposta crua para diagnóstico.
         raise RuntimeError(f"A Shopee não devolveu motivos de disputa para esta devolução. Resposta: {str(r)[:300]}")
-    return [{"id": m["reason_id"], "texto": m.get("reason_text") or str(m["reason_id"])} for m in lista]
+    return [_motivo(m) for m in lista]
+
+
+def _motivo(m: dict) -> dict:
+    """A Shopee não documenta o nome dos campos de forma confiável: pega o id (inteiro) e o texto pelo nome aproximado."""
+    id_ = next((v for k, v in m.items() if "id" in k.lower() and str(v).isdigit()), None)
+    texto = next((v for k, v in m.items() if isinstance(v, str) and v and ("text" in k.lower() or "reason" in k.lower() or "name" in k.lower())), None)
+    if id_ is None:
+        raise RuntimeError(f"Formato inesperado do motivo de disputa da Shopee: {str(m)[:300]}")
+    return {"id": int(id_), "texto": texto or str(id_)}
 
 
 def _urls(fotos: list[Path]) -> list[str]:
