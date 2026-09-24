@@ -88,6 +88,13 @@ def _garantir_colunas_sqlite():
                     conn.exec_driver_sql(f"ALTER TABLE itens_embale_fu ADD COLUMN {nome} {tipo}")
                     print(f"[DB] Coluna itens_embale_fu.{nome} criada")
 
+            colunas_hist = {row[1] for row in conn.exec_driver_sql("PRAGMA table_info(historico_full_embale)").fetchall()}
+            for nome, tipo in (("status", "VARCHAR(20)"), ("solicitante", "VARCHAR(120)"),
+                               ("decidido_por", "VARCHAR(120)"), ("decidido_em", "DATETIME")):
+                if colunas_hist and nome not in colunas_hist:
+                    conn.exec_driver_sql(f"ALTER TABLE historico_full_embale ADD COLUMN {nome} {tipo}")
+                    print(f"[DB] Coluna historico_full_embale.{nome} criada")
+
             colunas_embale_header = {row[1] for row in conn.exec_driver_sql("PRAGMA table_info(embaldes_fu)").fetchall()}
             if "revisao_salva_em" not in colunas_embale_header:
                 conn.exec_driver_sql("ALTER TABLE embaldes_fu ADD COLUMN revisao_salva_em DATETIME")
@@ -3000,6 +3007,16 @@ def _progresso_item_full(item) -> tuple[float, float]:
     return planejado, realizado
 
 
+def _pedido_full_pendente(db, item_id):
+    """Pedido de mudança do "Vai pro FULL" esperando o master (None se não há)."""
+    return (db.query(HistoricoFullEmbale)
+            .filter(HistoricoFullEmbale.item_id == item_id, HistoricoFullEmbale.status == "pendente")
+            .order_by(HistoricoFullEmbale.id.desc()).first())
+
+
+_MSG_PENDENTE = "A mudança do Vai pro FULL deste item aguarda aprovação do administrador. Nada é retirado até lá."
+
+
 def _marcar_historico_full(db, embale_id, revisao):
     """Marca cada item da revisão com tem_historico_full = True quando houve
     qualquer mudança registrada na quantidade do FULL daquele item."""
@@ -3008,8 +3025,16 @@ def _marcar_historico_full(db, embale_id, revisao):
                .filter(HistoricoFullEmbale.embale_id == embale_id).all()}
     except Exception:
         ids = set()
+    try:
+        pendentes = {h.item_id: h for h in db.query(HistoricoFullEmbale)
+                     .filter(HistoricoFullEmbale.embale_id == embale_id, HistoricoFullEmbale.status == "pendente")}
+    except Exception:
+        pendentes = {}
     for r in revisao:
         r["tem_historico_full"] = r.get("item_id") in ids
+        h = pendentes.get(r.get("item_id"))
+        r["full_pendente"] = None if not h else {"id": h.id, "de": h.quantidade_anterior, "para": h.quantidade_nova,
+                                                  "solicitante": h.solicitante}
 
 
 def _resumo_revisao_salva_item(item):
@@ -3314,6 +3339,9 @@ def _aplicar_baixa_item(db, item, embale, qtd_override=None):
             "mensagem": "Já foi baixado anteriormente",
             "quantidade_baixada": item.quantidade_baixada
         }
+
+    if _pedido_full_pendente(db, item.id):
+        return {"item_id": item.id, "status": "pendente_aprovacao", "erro": _MSG_PENDENTE}
 
     produto_id, nome_olist = _resolver_olist_para_item(item)
     if not produto_id:
@@ -3686,6 +3714,43 @@ async def ajustar_quantidade_full_embale(request: Request):
 
         # Quantidade planejada ANTES da mudança (para registrar no histórico)
         quantidade_anterior = _quantidade_planejada_full(item)
+        mudou = abs(quantidade_full - quantidade_anterior) > 0.0001
+        pendente = _pedido_full_pendente(db, item.id)
+
+        # Operador não muda o FULL direto: vira pedido pendente no histórico até o master aprovar.
+        if not _request_eh_master(request):
+            if pendente:
+                if not mudou:
+                    db.delete(pendente)  # voltou ao valor original: cancela o pedido
+                else:
+                    pendente.quantidade_nova = quantidade_full
+                    pendente.tipo = "aumento" if quantidade_full > quantidade_anterior else "reducao"
+                    pendente.criado_em = datetime.utcnow()
+            elif mudou:
+                db.add(HistoricoFullEmbale(
+                    embale_id=embale.id, item_id=item.id, titulo_anuncio=item.titulo_anuncio,
+                    sku_inbound=item.sku_inbound, quantidade_anterior=quantidade_anterior,
+                    quantidade_nova=quantidade_full,
+                    tipo="aumento" if quantidade_full > quantidade_anterior else "reducao",
+                    status="pendente", solicitante=_operador_contexto(request)["operador_nome"],
+                ))
+            db.commit()
+            if mudou:
+                _registrar_log_operacao(request, "quantidade_full_solicitada", "item_embale", item.id,
+                                        f"Pedido de mudança do FULL para {quantidade_full:g}",
+                                        {"embale_id": embale.id, "quantidade_anterior": quantidade_anterior,
+                                         "quantidade_nova": quantidade_full})
+            return JSONResponse({
+                "sucesso": True, "pendente": mudou, "item_id": item.id,
+                "quantidade_full": quantidade_anterior,
+                "mensagem": (f"Pedido enviado: {quantidade_anterior:g} -> {quantidade_full:g}. Aguarda o administrador aprovar; nada é retirado até lá."
+                             if mudou else "Pedido de mudança cancelado."),
+            })
+
+        if pendente:  # master mudou direto: o pedido do operador perde o sentido
+            pendente.status = "recusado"
+            pendente.decidido_por = _operador_contexto(request)["operador_nome"]
+            pendente.decidido_em = datetime.utcnow()
 
         item.quantidade_baixar = quantidade_full
         if item.olist_estoque_antes is not None:
@@ -3702,6 +3767,8 @@ async def ajustar_quantidade_full_embale(request: Request):
                 quantidade_anterior=quantidade_anterior,
                 quantidade_nova=quantidade_full,
                 tipo="aumento" if quantidade_full > quantidade_anterior else "reducao",
+                status="aprovado", solicitante=_operador_contexto(request)["operador_nome"],
+                decidido_por=_operador_contexto(request)["operador_nome"], decidido_em=datetime.utcnow(),
             ))
 
         db.commit()
@@ -3770,6 +3837,8 @@ async def balancear_item_embale(request: Request):
 
         if not item.olist_produto_id:
             return JSONResponse({"erro": "Item não está vinculado à Olist"}, status_code=400)
+        if _pedido_full_pendente(db, item.id):
+            return JSONResponse({"erro": _MSG_PENDENTE}, status_code=409)
 
         # Obter estoque ANTES (sem cache, p/ valor fiel no momento do balanço)
         produto_id = item.olist_produto_id
@@ -4041,6 +4110,8 @@ async def balancear_kit_componentes_embale(request: Request):
             return JSONResponse({"erro": "Item não encontrado neste inbound"}, status_code=404)
         if item.baixa_aplicada == 1:
             return JSONResponse({"erro": "Este item já teve a baixa aplicada"}, status_code=400)
+        if _pedido_full_pendente(db, item.id):
+            return JSONResponse({"erro": _MSG_PENDENTE}, status_code=409)
 
         qtd_full = _quantidade_planejada_full(item)
         resultados = []
@@ -4244,6 +4315,8 @@ async def baixar_kit_componentes_embale(request: Request):
             return JSONResponse({"erro": "Item não encontrado neste inbound"}, status_code=404)
         if item.baixa_aplicada == 1:
             return JSONResponse({"erro": "Este item já teve a baixa aplicada"}, status_code=400)
+        if _pedido_full_pendente(db, item.id):
+            return JSONResponse({"erro": _MSG_PENDENTE}, status_code=409)
 
         resultados = []
         for c in componentes:
@@ -4440,6 +4513,48 @@ async def desfazer_item_embale(request: Request):
         db.close()
 
 
+async def decidir_pedido_full_embale(request: Request):
+    """
+    POST /api/embaldes/{embale_id}/historico-full/{hist_id}/decidir   Body: {"aprovar": true|false}
+    Só o master. Aprovar aplica a nova qtd no "Vai pro FULL"; recusar mantém a anterior.
+    """
+    if not _request_eh_master(request):
+        return JSONResponse({"erro": "Só o administrador aprova mudança do Vai pro FULL."}, status_code=403)
+    db = SessionLocal()
+    try:
+        embale_id = int(request.path_params.get("embale_id"))
+        hist_id = int(request.path_params.get("hist_id"))
+        aprovar = bool((await request.json() or {}).get("aprovar"))
+        h = db.query(HistoricoFullEmbale).filter(HistoricoFullEmbale.id == hist_id,
+                                                 HistoricoFullEmbale.embale_id == embale_id).first()
+        if not h:
+            return JSONResponse({"erro": "Pedido não encontrado"}, status_code=404)
+        if h.status != "pendente":
+            return JSONResponse({"erro": f"Este pedido já foi {h.status or 'aplicado'}."}, status_code=409)
+        item = db.query(ItemEmbaleFU).filter(ItemEmbaleFU.id == h.item_id).first()
+        if aprovar:
+            if not item or item.baixa_aplicada == 1:
+                return JSONResponse({"erro": "O item já teve a baixa aplicada: não dá para mudar o FULL."}, status_code=409)
+            item.quantidade_baixar = float(h.quantidade_nova)
+            if item.olist_estoque_antes is not None:
+                item.falta = max(0.0, float(h.quantidade_nova) - float(item.olist_estoque_antes or 0))
+            db.add(item)
+        h.status = "aprovado" if aprovar else "recusado"
+        h.decidido_por = _operador_contexto(request)["operador_nome"]
+        h.decidido_em = datetime.utcnow()
+        db.commit()
+        _registrar_log_operacao(request, "quantidade_full_aprovada" if aprovar else "quantidade_full_recusada",
+                                "item_embale", h.item_id,
+                                f"{'Aprovou' if aprovar else 'Recusou'} FULL {h.quantidade_anterior:g} -> {h.quantidade_nova:g}",
+                                {"embale_id": embale_id, "hist_id": h.id, "solicitante": h.solicitante})
+        return JSONResponse({"sucesso": True, "status": h.status})
+    except Exception as e:
+        db.rollback()
+        return JSONResponse({"erro": str(e)}, status_code=500)
+    finally:
+        db.close()
+
+
 async def listar_historico_full_embale(request: Request):
     """
     GET /api/embaldes/{embale_id}/historico-full
@@ -4465,6 +4580,9 @@ async def listar_historico_full_embale(request: Request):
                     "quantidade_anterior": h.quantidade_anterior,
                     "quantidade_nova": h.quantidade_nova,
                     "tipo": h.tipo,
+                    "status": h.status or "aprovado",
+                    "solicitante": h.solicitante,
+                    "decidido_por": h.decidido_por,
                     "criado_em": h.criado_em.isoformat() if h.criado_em else None,
                 }
                 for h in registros
@@ -4693,6 +4811,9 @@ async def listar_historico_completo_embale(request: Request):
                 "quantidade_nova": h.quantidade_nova,
                 "estoque_atual": resumo_por_item.get(h.item_id, {}).get("estoque_atual"),
                 "tipo": h.tipo,
+                "status": h.status or "aprovado",
+                "solicitante": h.solicitante,
+                "decidido_por": h.decidido_por,
                 "criado_em": h.criado_em.isoformat() if h.criado_em else None,
             }
             for h in registros
@@ -6776,6 +6897,7 @@ routes = [
     Route("/api/embaldes/{embale_id}/itens/{item_id}/baixar-kit", baixar_kit_componentes_embale, methods=["POST"]),
     Route("/api/embaldes/{embale_id}/itens/{item_id}/desfazer", desfazer_item_embale, methods=["POST"]),
     Route("/api/embaldes/{embale_id}/historico-full", listar_historico_full_embale, methods=["GET"]),
+    Route("/api/embaldes/{embale_id}/historico-full/{hist_id}/decidir", decidir_pedido_full_embale, methods=["POST"]),
     Route("/api/embaldes/{embale_id}/historico-completo", listar_historico_completo_embale, methods=["GET"]),
     Route("/api/embaldes/{embale_id}/posicao-separacao", salvar_posicao_separacao, methods=["POST"]),
     Route("/api/embaldes/{embale_id}/itens/{item_id}/em-espera", marcar_em_espera_embale, methods=["POST"]),

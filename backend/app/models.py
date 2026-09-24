@@ -251,6 +251,12 @@ class HistoricoFullEmbale(Base):
     quantidade_nova = Column(Float, default=0)
     tipo = Column(String(20))  # "aumento" ou "reducao"
     criado_em = Column(DateTime, default=datetime.utcnow, index=True)
+    # Operador muda o "Vai pro FULL" → pedido "pendente" até o master aprovar; só então vale.
+    # None (registros antigos) = aplicado direto.
+    status = Column(String(20), nullable=True, index=True)  # pendente | aprovado | recusado
+    solicitante = Column(String(120), nullable=True)
+    decidido_por = Column(String(120), nullable=True)
+    decidido_em = Column(DateTime, nullable=True)
 
     embalde = relationship("EmbaleFU", back_populates="historico_full")
 
