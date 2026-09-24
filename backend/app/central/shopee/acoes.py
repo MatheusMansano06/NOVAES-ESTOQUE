@@ -12,7 +12,11 @@ EMAIL = os.environ.get("SHOPEE_EMAIL_DISPUTA", "")
 
 def motivos_contestacao(return_sn: str, produto_perfeito: bool) -> list[dict]:
     r = client.get("/api/v2/returns/get_return_dispute_reason", {"return_sn": return_sn})
-    return [{"id": m["reason_id"], "texto": m["reason_text"]} for m in r.get("dispute_reason") or []]
+    lista = r.get("dispute_reason") or r.get("dispute_reason_list") or r.get("reason_list") or []
+    if not lista:
+        # Na Shopee lista vazia nunca significa "sem motivo": a disputa sempre exige um. Mostra a resposta crua para diagnóstico.
+        raise RuntimeError(f"A Shopee não devolveu motivos de disputa para esta devolução. Resposta: {str(r)[:300]}")
+    return [{"id": m["reason_id"], "texto": m.get("reason_text") or str(m["reason_id"])} for m in lista]
 
 
 def _urls(fotos: list[Path]) -> list[str]:
