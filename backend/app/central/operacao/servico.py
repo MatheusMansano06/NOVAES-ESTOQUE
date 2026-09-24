@@ -12,7 +12,7 @@ from app.central.mercado_livre import catalogo
 from app.central.olist import servico as olist
 from app.central.db import Sessao
 
-from .regras import STATUS, pendencias, status
+from .regras import ENVIOS, STATUS, envio, envio_plataforma, pendencias, status
 
 COLUNAS_CONF = ("classe", "lancamentos", "estoque_lancado_em", "contestar", "chamado_manual", "chamado_aberto_em",
                 "chamado_protocolo", "perda_produto", "frete_reverso", "conferida_em")
@@ -31,8 +31,11 @@ def linhas(desde: datetime | None = None) -> list[dict]:
         for d in devs:
             dev, conf = publico(d), confs.get(d.id)
             contestada = d.id in contestadas
+            st = status(dev, conf, contestada)
             linhas.append({**dev, "conferencia": conf, "contestada": contestada,
-                           "status": status(dev, conf, contestada), "pendencias": pendencias(conf, contestada)})
+                           "status": st, "pendencias": pendencias(conf, contestada),
+                           "envio": envio(d.plataforma, d.bruto) if st == "a_caminho" else None,
+                           "envio_plataforma": envio_plataforma(d.plataforma, d.bruto) if st == "a_caminho" else None})
     return linhas
 
 
@@ -44,14 +47,21 @@ def _prejuizo(linha: dict) -> float | None:
 
 
 def listar(status_filtro: str | None, plataforma: str | None, motivo: str | None, destino: str | None,
-           pagina: int, por_pagina: int) -> dict:
-    filtradas = [l for l in linhas() if (not plataforma or l["plataforma"] == plataforma)
-                 and (not motivo or l["motivo"] == motivo) and (not destino or l["destino"] == destino)]
+           pagina: int, por_pagina: int, envio_filtro: str | None = None) -> dict:
+    base = [l for l in linhas() if (not motivo or l["motivo"] == motivo) and (not destino or l["destino"] == destino)]
+    # "A caminho" por plataforma e situação do envio: sempre as duas plataformas, para comparar.
+    a_caminho = {p: {e: 0 for e in ENVIOS} for p in ("mercado_livre", "shopee")}
+    for l in base:
+        if l["status"] == "a_caminho" and l["plataforma"] in a_caminho:
+            a_caminho[l["plataforma"]][l["envio"]] += 1
+    filtradas = [l for l in base if not plataforma or l["plataforma"] == plataforma]
     contagens = {s: 0 for s in STATUS}
     for l in filtradas:
         contagens[l["status"]] += 1
     if status_filtro:  # aceita vários separados por vírgula (ex.: histórico = resolvida,finalizada)
         filtradas = [l for l in filtradas if l["status"] in status_filtro.split(",")]
+    if envio_filtro:
+        filtradas = [l for l in filtradas if l["envio"] == envio_filtro]
     # Prazo que ainda dá para cumprir, o mais apertado primeiro; o resto (vencido ou sem prazo), mais recente primeiro.
     agora = datetime.now(timezone.utc).replace(tzinfo=None)
     filtradas.sort(key=lambda l: (0, l["prazo_vendedor"].timestamp()) if l["prazo_vendedor"] and l["prazo_vendedor"] > agora
@@ -63,7 +73,7 @@ def listar(status_filtro: str | None, plataforma: str | None, motivo: str | None
         l["produto"] = item.get("nome") or olist.descricao_em_cache(l["pacote"] or l["pedido"])
         l["imagem"] = item.get("imagem") or fotos.get(item.get("item_id"))
         l["prejuizo"] = _prejuizo(l)
-    return {"total": len(filtradas), "contagens": contagens, "itens": pagina_itens}
+    return {"total": len(filtradas), "contagens": contagens, "a_caminho": a_caminho, "itens": pagina_itens}
 
 
 def atencao() -> dict:

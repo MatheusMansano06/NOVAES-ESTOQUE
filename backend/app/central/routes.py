@@ -238,7 +238,7 @@ async def operacao_listar(request: Request):
     destino = request.query_params.get("destino", "vendedor")
     return await run_in_threadpool(
         operacao.listar, _q(request, "status"), _q(request, "plataforma"), _q(request, "motivo"), destino or None,
-        _q(request, "pagina", 1, int, 1), _q(request, "por_pagina", 8, int, 1, 100))
+        _q(request, "pagina", 1, int, 1), _q(request, "por_pagina", 8, int, 1, 100), _q(request, "envio"))
 
 
 async def operacao_atencao(request: Request):

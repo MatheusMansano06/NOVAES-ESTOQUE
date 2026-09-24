@@ -1,4 +1,4 @@
-import type { Devolucao } from "./devolucao";
+import type { Devolucao, Plataforma } from "./devolucao";
 
 /** Status de operação que o backend (trilha Operação) calcula para cada devolução. */
 export type Status =
@@ -20,6 +20,15 @@ export const PENDENCIA: Record<string, string> = {
   chamado_manual: "Abrir chamado manual",
 };
 
+/** Dentro de "a caminho": o comprador ainda não postou x já postou e está vindo. */
+export type Envio = "aguardando_postagem" | "postado" | "sem_info";
+
+export const ENVIO: Record<Envio, string> = {
+  aguardando_postagem: "Comprador ainda não postou",
+  postado: "Postado, vindo para a Novaes",
+  sem_info: "Sem informação de envio",
+};
+
 export interface LinhaOperacao extends Devolucao {
   status: Status;
   pendencias: string[];
@@ -27,11 +36,15 @@ export interface LinhaOperacao extends Devolucao {
   imagem: string | null;
   prejuizo: number | null;
   atualizada_em: string;
+  envio: Envio | null;
+  envio_plataforma: string | null;
 }
 
 export interface Operacao {
   total: number;
   contagens: Record<Status, number>;
+  /** A caminho por plataforma e situação do envio (sempre as duas plataformas). */
+  a_caminho: Record<Plataforma, Record<Envio, number>>;
   itens: LinhaOperacao[];
 }
 

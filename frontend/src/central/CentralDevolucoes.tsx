@@ -68,7 +68,7 @@ function Central({ onVoltar }: { onVoltar: () => void }) {
       <header className="topo">
         <button className="voltar" onClick={onVoltar} aria-label="Voltar para o início">←</button>
         <div className="marca" aria-label="NVS Tech, Central de Devolução">
-          <span className="marca-nvs">NVS<small>TECH</small></span>
+          <img className="marca-logo" src="/assets/nvs-tech-logo.jpeg" alt="NVS Tech" />
           <span className="marca-produto">Central de<strong>Devolução</strong></span>
         </div>
         <nav aria-label="Telas">

@@ -72,3 +72,20 @@ def test_fluxo_conferencia():
     assert cliente.get("/api/central/operacao/atencao").status_code == 200
     assert cliente.get("/api/central/bi/resumo?dias=30").status_code == 200
     assert cliente.get("/api/central/bi/resumo?dias=0").status_code == 422
+
+
+def test_envio_a_caminho():
+    from app.central.operacao.regras import envio
+    ml = lambda st: {"devolucao": {"status": st}}  # noqa: E731
+    assert envio("mercado_livre", ml("label_generated")) == "aguardando_postagem"
+    assert envio("mercado_livre", ml("shipped")) == "postado"
+    sp = lambda st, rl=None: {"devolucao": {"status": st, "rastreio_reverso": rl and {"reverse_logistics_status": rl}}}  # noqa: E731
+    assert envio("shopee", sp("PROCESSING")) == "aguardando_postagem"
+    assert envio("shopee", sp("ACCEPTED", "LOGISTICS_PICKUP_DONE")) == "postado"
+    assert envio("shopee", sp("ACCEPTED", "LOGISTICS_PENDING_ARRANGE")) == "aguardando_postagem"
+    assert envio("shopee", sp("ACCEPTED")) == "sem_info"
+
+    devolucoes.salvar([_registro(id_externo="C2", etapa="em_transito", rastreio="BR999999999BR", codigos=[],
+                                 bruto={"devolucao": {"status": "shipped"}})])
+    r = cliente.get("/api/central/operacao?status=a_caminho&envio=postado").json()
+    assert r["a_caminho"]["mercado_livre"]["postado"] == 1 and [l["id_externo"] for l in r["itens"]] == ["C2"]

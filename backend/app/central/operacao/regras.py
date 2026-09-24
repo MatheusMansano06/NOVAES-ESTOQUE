@@ -1,5 +1,11 @@
 """Em que pé está cada devolução, do ponto de vista de quem opera a bancada da Novaes."""
 
+# Dentro de "a caminho": o comprador ainda não postou x já postou e está vindo.
+ENVIOS = ("aguardando_postagem", "postado", "sem_info")
+# ponytail: mapeamento por palavra-chave do status da Shopee; trocar por tabela fechada quando os valores reais estiverem mapeados.
+_POSTADO = ("PICKUP_DONE", "TRANSIT", "SHIPPED", "DELIVER", "HANDOVER", "DROP_OFF_DONE")
+_AGUARDANDO = ("PENDING", "READY", "REQUEST", "NOT_START", "CREATED", "NEW", "INIT", "ARRANGE")
+
 STATUS = ("a_caminho", "aguardando_conferencia", "precisa_acao", "em_mediacao", "com_a_plataforma", "resolvida", "finalizada")
 FINAIS = ("encerrada", "cancelada")
 
@@ -33,3 +39,27 @@ def status(dev: dict, conf: dict | None, contestada: bool) -> str:
     if dev["em_mediacao"] or contestada:
         return "em_mediacao"
     return "resolvida"
+
+
+def envio_plataforma(plataforma: str, bruto: dict | None) -> str | None:
+    """Status de envio como a plataforma escreve (aparece na tela e serve para conferir o mapeamento)."""
+    dev = (bruto or {}).get("devolucao") or {}
+    if plataforma == "mercado_livre":
+        return dev.get("status")
+    rastreio = dev.get("rastreio_reverso") or {}
+    return rastreio.get("reverse_logistics_status") or rastreio.get("logistics_status") or dev.get("status")
+
+
+def envio(plataforma: str, bruto: dict | None) -> str:
+    bruto_status = (envio_plataforma(plataforma, bruto) or "").upper()
+    if plataforma == "mercado_livre":
+        if bruto_status == "SHIPPED":
+            return "postado"
+        return "aguardando_postagem" if bruto_status in ("LABEL_GENERATED", "PENDING", "OPENED") else "sem_info"
+    if bruto_status in ("REQUESTED", "PROCESSING"):
+        return "aguardando_postagem"  # a Shopee ainda nem aprovou: o comprador não tem como postar
+    if any(k in bruto_status for k in _POSTADO):
+        return "postado"
+    if any(k in bruto_status for k in _AGUARDANDO):
+        return "aguardando_postagem"
+    return "sem_info"

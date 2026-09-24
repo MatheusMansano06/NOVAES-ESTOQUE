@@ -38,6 +38,7 @@
 .central-dev .topo { display: flex; align-items: center; gap: 2.5rem; padding: 0 1.75rem; background: var(--papel); border-bottom: 1px solid var(--linha); }
 .central-dev .voltar { width: 34px; height: 34px; margin-right: -1.5rem; border: 1px solid var(--linha); border-radius: 8px; background: var(--papel); color: var(--suave); font-size: 1.1rem; }
 .central-dev .voltar:hover { color: var(--tinta); border-color: var(--linha-forte); }
+.central-dev .marca-logo { width: 96px; height: 42px; object-fit: cover; object-position: center 50%; flex-shrink: 0; }
 .central-dev .marca { display: flex; align-items: center; gap: 0.85rem; }
 .central-dev .marca-nvs { font-weight: 800; font-size: 1.3rem; letter-spacing: -0.03em; line-height: 0.85; display: grid; }
 .central-dev .marca-nvs small { font-size: 0.55rem; letter-spacing: 0.38em; font-weight: 700; }
@@ -156,6 +157,7 @@
 
 /* ---------- Operação: bancada do operador ---------- */
 .central-dev .operacao { grid-template-rows: auto auto minmax(0, 1fr); }
+.central-dev .operacao:has(> .a-caminho) { grid-template-rows: auto auto auto minmax(0, 1fr); }
 .central-dev .bipe-cartao { gap: 0.8rem; }
 .central-dev .bipe-topo { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
 .central-dev .bipe-topo h1 { font-size: 1.3rem; font-weight: 700; letter-spacing: -0.02em; }
@@ -389,3 +391,13 @@
   .central-dev .modal { height: 100%; border-radius: 0; }
   .central-dev .stepper { grid-template-columns: 1fr; }
 }
+
+/* ---------- A caminho: por plataforma e situação do envio ---------- */
+.central-dev .a-caminho { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.75rem; padding: 0.85rem 1rem; }
+.central-dev .a-caminho-plataforma { display: flex; align-items: center; gap: 0.9rem; flex-wrap: wrap; }
+.central-dev .a-caminho-plataforma > strong { font-size: 1.35rem; font-weight: 800; margin-right: 0.25rem; }
+.central-dev .a-caminho-numero { display: grid; text-align: left; font-weight: 700; font-size: 1.05rem; border: 1px solid var(--linha);
+  border-radius: 8px; background: var(--papel); padding: 0.3rem 0.7rem; }
+.central-dev .a-caminho-numero[aria-pressed="true"] { border-color: var(--azul); background: var(--azul-fundo); }
+.central-dev .lista-topo { flex-wrap: wrap; }
+@media (max-width: 1100px) { .central-dev .a-caminho { grid-template-columns: 1fr; } }
