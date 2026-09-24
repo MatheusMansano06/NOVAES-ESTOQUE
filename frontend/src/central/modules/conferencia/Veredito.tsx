@@ -71,7 +71,9 @@ export function Veredito({ tela, onAtualizar, onIrParaProvas }: Props) {
           )}
           {c.chamado_manual
             ? <ChamadoManual devolucaoId={d.id} abertoEm={c.chamado_aberto_em} protocolo={c.chamado_protocolo} onFeito={onAtualizar} />
-            : c.contestar && <Contestar devolucaoId={d.id} textoInicial={c.observacao ?? ""} temFoto={temFoto} onMudou={onAtualizar} />}
+            : c.contestar
+              ? <Contestar devolucaoId={d.id} textoInicial={c.observacao ?? ""} temFoto={temFoto} podeAceitar={d.plataforma === "shopee"} onMudou={onAtualizar} />
+              : d.plataforma === "shopee" && <AceitarSozinho devolucaoId={d.id} onMudou={onAtualizar} />}
         </section>
       </div>
     </div>
@@ -198,8 +200,53 @@ function ChamadoManual({ devolucaoId, abertoEm, protocolo, onFeito }:
   );
 }
 
-function Contestar({ devolucaoId, textoInicial, temFoto, onMudou }:
-  { devolucaoId: number; textoInicial: string; temFoto: boolean; onMudou: () => void }) {
+function resultadoEnviado(r: Contestacao) {
+  return r.caminho === "aceite"
+    ? <p className="aviso ok">Devolução aceita em {quando(r.enviada_em)}. A plataforma reembolsa o comprador.</p>
+    : <p className="aviso ok">Disputa aberta em {quando(r.enviada_em)}.{r.aviso ? ` ${r.aviso}` : ""}</p>;
+}
+
+// Aceitar = reembolsar o comprador na plataforma. Irreversível: confirma antes.
+function BotaoAceitar({ devolucaoId, onResultado }: { devolucaoId: number; onResultado: (r: Contestacao) => void }) {
+  const [enviando, setEnviando] = useState(false);
+  async function aceitar() {
+    if (!window.confirm("Aceitar a devolução? A plataforma reembolsa o comprador e não dá para abrir disputa depois.")) return;
+    setEnviando(true);
+    try {
+      onResultado(await api.post<Contestacao>(`/mediacoes/${devolucaoId}/aceitar`));
+    } catch (e) {
+      onResultado({ ok: false, caminho: null, aviso: null, erro: (e as Error).message, enviada_em: "" });
+    } finally {
+      setEnviando(false);
+    }
+  }
+  return (
+    <button type="button" className="botao" onClick={aceitar} disabled={enviando}>
+      {enviando ? "Aceitando…" : "Aceitar devolução"}
+    </button>
+  );
+}
+
+function AceitarSozinho({ devolucaoId, onMudou }: { devolucaoId: number; onMudou: () => void }) {
+  const [historico, setHistorico] = useState<Contestacao[]>([]);
+  useEffect(() => {
+    let ativo = true;
+    api.get<Contestacao[]>(`/mediacoes/${devolucaoId}`).then((h) => ativo && setHistorico(h)).catch(() => {});
+    return () => { ativo = false; };
+  }, [devolucaoId]);
+  const feito = historico.find((h) => h.ok);
+  if (feito) return resultadoEnviado(feito);
+  const ultimo = historico[historico.length - 1];
+  return (
+    <div className="linha-botoes">
+      <BotaoAceitar devolucaoId={devolucaoId} onResultado={(r) => { setHistorico((h) => [...h, r]); onMudou(); }} />
+      {ultimo?.erro && <p className="aviso erro" role="alert">{ultimo.erro}</p>}
+    </div>
+  );
+}
+
+function Contestar({ devolucaoId, textoInicial, temFoto, podeAceitar, onMudou }:
+  { devolucaoId: number; textoInicial: string; temFoto: boolean; podeAceitar: boolean; onMudou: () => void }) {
   const [motivos, setMotivos] = useState<{ id: string; texto: string; exigencia?: string }[] | null>(null);
   const [historico, setHistorico] = useState<Contestacao[]>([]);
   const [motivo, setMotivo] = useState("");
@@ -217,9 +264,7 @@ function Contestar({ devolucaoId, textoInicial, temFoto, onMudou }:
   }, [devolucaoId]);
 
   const enviada = historico.find((h) => h.ok);
-  if (enviada) {
-    return <p className="aviso ok">Contestação enviada em {quando(enviada.enviada_em)}.{enviada.aviso ? ` ${enviada.aviso}` : ""}</p>;
-  }
+  if (enviada) return resultadoEnviado(enviada);
   const falhou = historico.length > 0;
 
   async function enviar() {
@@ -268,8 +313,15 @@ function Contestar({ devolucaoId, textoInicial, temFoto, onMudou }:
       </label>
       <div className="linha-botoes">
         <button type="button" className="botao alerta" onClick={enviar} disabled={!pronto || enviando}>
-          {enviando ? "Enviando…" : "Enviar contestação"}
+          {enviando ? "Enviando…" : "Abrir disputa"}
         </button>
+        {podeAceitar && (
+          <BotaoAceitar devolucaoId={devolucaoId} onResultado={(r) => {
+            if (!r.ok) setErro(r.erro);
+            setHistorico((h) => [...h, r]);
+            onMudou();
+          }} />
+        )}
         {falhou && <button type="button" className="botao" onClick={guardarParaDepois}>Guardar para chamado manual</button>}
       </div>
       {erro && <p className="aviso erro" role="alert">{erro}</p>}

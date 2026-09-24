@@ -25,8 +25,27 @@ def _motivo(m: dict) -> dict:
     if id_ is None or not str(id_).isdigit():
         raise RuntimeError(f"Formato inesperado do motivo de disputa da Shopee: {str(m)[:300]}")
     exigencia = (m.get("dispute_requirement") or "").strip()
-    # A exigência é longa e vai fora do <select>; o menu mostra só o código.
-    return {"id": int(id_), "texto": f"Motivo {id_}", "exigencia": exigencia}
+    # A exigência é longa e vai fora do <select>; o menu mostra nome + código.
+    nome = NOMES_MOTIVO.get(int(id_))
+    return {"id": int(id_), "texto": f"{nome} (cód. {id_})" if nome else f"Motivo {id_}", "exigencia": exigencia}
+
+
+# ponytail: a API só manda o código. Mapeado pela ordem da lista da Central do Vendedor (46-50) e pelo motivo
+# "buyer's claim is incorrect" das disputas antigas (56). Se a Shopee reordenar, conferir com get_return_detail.
+NOMES_MOTIVO = {
+    46: "Não recebi a devolução, mas consta como entregue",
+    47: "Chegou amassado, arranhado, quebrado ou danificado",
+    48: "Chegou vazio ou faltando peças/acessórios",
+    49: "O produto recebido não é o mesmo que enviei",
+    50: "Não concordo com o desconto das taxas de devolução",
+    56: "Recebi a devolução, mas a alegação do comprador está incorreta",
+}
+
+
+def aceitar(return_sn: str) -> dict:
+    """Aceita a devolução: a Shopee reembolsa o comprador. Irreversível, só por clique do operador."""
+    client.post("/api/v2/returns/confirm", {"return_sn": return_sn})
+    return {"caminho": "aceite", "anexos": [], "aviso": None}
 
 
 def campos_disputa(return_sn: str) -> dict:

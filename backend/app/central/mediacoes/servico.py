@@ -49,7 +49,7 @@ def contestar(devolucao_id: int, motivo: str, texto: str) -> dict:
         if not conf.contestar:
             raise Travada(f"A conferência concluiu que não vale contestar: {conf.motivo}")
         if s.scalar(select(Contestacao).filter_by(devolucao_id=d.id, ok=True)):
-            raise Travada("Esta devolução já foi contestada.")
+            raise Travada("Esta devolução já foi contestada ou aceita.")
         evidencias = s.scalars(select(Evidencia).filter_by(devolucao_id=d.id)).all()
         fotos = [PASTA / str(d.id) / e.arquivo for e in evidencias if e.tipo == "foto"]
         videos = [PASTA / str(d.id) / e.arquivo for e in evidencias if e.tipo == "video"]
@@ -61,6 +61,28 @@ def contestar(devolucao_id: int, motivo: str, texto: str) -> dict:
     try:
         r = PLATAFORMAS[plataforma].contestar(id_externo, motivo, texto, fotos, videos, perfeito)
         registro.ok, registro.caminho, registro.anexos, registro.aviso = True, r["caminho"], r["anexos"], r.get("aviso")
+    except RuntimeError as e:
+        registro.ok, registro.erro = False, str(e)
+    with Sessao.begin() as s:
+        s.add(registro)
+        s.flush()
+        return {c.name: getattr(registro, c.name) for c in Contestacao.__table__.columns}
+
+
+def aceitar(devolucao_id: int) -> dict:
+    """Aceita a devolução na plataforma (reembolso ao comprador). Fica no mesmo histórico, caminho 'aceite'."""
+    with Sessao() as s:
+        d = _devolucao(s, devolucao_id)
+        if s.scalar(select(Contestacao).filter_by(devolucao_id=d.id, ok=True)):
+            raise Travada("Esta devolução já foi contestada ou aceita.")
+        plataforma, id_externo = d.plataforma, d.id_externo
+    modulo = PLATAFORMAS[plataforma]
+    if not hasattr(modulo, "aceitar"):
+        raise ValueError("Aceite esta devolução pelo painel da plataforma.")
+    registro = Contestacao(devolucao_id=devolucao_id, motivo="aceite", texto="Devolução aceita", anexos=[], enviada_em=_agora())
+    try:
+        r = modulo.aceitar(id_externo)
+        registro.ok, registro.caminho, registro.anexos = True, r["caminho"], r["anexos"]
     except RuntimeError as e:
         registro.ok, registro.erro = False, str(e)
     with Sessao.begin() as s:
