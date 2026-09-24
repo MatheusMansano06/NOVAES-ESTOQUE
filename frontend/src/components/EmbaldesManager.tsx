@@ -270,6 +270,28 @@ export function EmbaldesManager({ modoSeparacao = false }: { modoSeparacao?: boo
     }
   }
 
+  // Desfaz na Olist a baixa/balanço do item (pela diferença) e o devolve para pendente, para refazer.
+  const [desfazendoId, setDesfazendoId] = useState<number | null>(null)
+  const desfazerItem = async (it: ItemRevisao) => {
+    if (!revisao) return
+    if (!confirm(`Desfazer a baixa/balanço de "${it.titulo_anuncio}"?
+
+O estoque na Olist volta ao que era antes (vendas que caíram no meio são mantidas) e o item fica pendente para refazer.`)) return
+    try {
+      setDesfazendoId(it.item_id)
+      const r = await api.post(`/embaldes/${revisao.embale_id}/itens/${it.item_id}/desfazer`)
+      setItensBaixados((prev) => { const n = { ...prev }; delete n[it.item_id]; return n })
+      setKitResultado((prev) => { const n = { ...prev }; delete n[it.item_id]; return n })
+      setMessage(r.data?.mensagem || 'Desfeito na Olist')
+      await carregarRevisao(revisao.embale_id)
+    } catch (erro: any) {
+      const dados = erro.response?.data || {}
+      setMessage('Erro: ' + (dados.erro || String(erro)) + (dados.detalhe ? ` — ${dados.detalhe}` : ''))
+    } finally {
+      setDesfazendoId(null)
+    }
+  }
+
   const carregarInbounds = async () => {
     try {
       setLoading(true)
@@ -1424,7 +1446,12 @@ export function EmbaldesManager({ modoSeparacao = false }: { modoSeparacao?: boo
                                   {emEspera ? (
                                     <span style={{ padding: '0.6rem 1rem', color: '#999', fontWeight: 700, background: '#f0f0f0', borderRadius: '8px' }}>Bloqueado (em espera)</span>
                                   ) : jaBaixado ? (
-                                    <span style={{ padding: '0.6rem 1rem', color: '#2e7d32', fontWeight: 700, background: '#e8f5e9', borderRadius: '8px' }}>✓ Estoque retirado</span>
+                                    <span style={{ display: 'inline-flex', gap: '0.6rem', alignItems: 'center', flexWrap: 'wrap' }}>
+                                      <span style={{ padding: '0.6rem 1rem', color: '#2e7d32', fontWeight: 700, background: '#e8f5e9', borderRadius: '8px' }}>✓ Estoque retirado</span>
+                                      <button onClick={() => desfazerItem(it)} disabled={desfazendoId === it.item_id} style={{ padding: '0.55rem 1rem', background: '#fff', color: '#c62828', border: '1px solid #c62828', borderRadius: '8px', cursor: desfazendoId === it.item_id ? 'wait' : 'pointer', fontWeight: 700, fontSize: '0.85rem' }}>
+                                        {desfazendoId === it.item_id ? 'Desfazendo…' : '↩ Desfazer'}
+                                      </button>
+                                    </span>
                                   ) : naoAchado ? (
                                     <button onClick={() => abrirVinculo(it)} style={{ padding: '0.7rem 1.4rem', background: '#fff', color: '#ef6c00', border: '1px solid #ef6c00', borderRadius: '8px', cursor: 'pointer', fontWeight: 700, fontSize: '0.95rem' }}>Vincular na Olist</button>
                                   ) : (() => {
@@ -1801,7 +1828,12 @@ export function EmbaldesManager({ modoSeparacao = false }: { modoSeparacao?: boo
                                         {itensEmEspera[it.item_id] ? (
                                           <span style={{ color: '#999', fontWeight: 'bold', fontSize: '0.8rem' }}>Bloqueado</span>
                                         ) : jaBaixado ? (
-                                          <span style={{ color: '#2e7d32', fontWeight: 'bold', fontSize: '0.8rem' }}>✓ Baixado</span>
+                                          <span style={{ display: 'inline-flex', gap: '0.4rem', alignItems: 'center' }}>
+                                            <span style={{ color: '#2e7d32', fontWeight: 'bold', fontSize: '0.8rem' }}>✓ Baixado</span>
+                                            <button onClick={() => desfazerItem(it)} disabled={desfazendoId === it.item_id} title="Desfazer baixa/balanço na Olist" style={{ padding: '0.2rem 0.5rem', background: '#fff', color: '#c62828', border: '1px solid #c62828', borderRadius: '4px', cursor: 'pointer', fontSize: '0.75rem', fontWeight: 'bold' }}>
+                                              {desfazendoId === it.item_id ? '…' : '↩ Desfazer'}
+                                            </button>
+                                          </span>
                                         ) : naoAchado ? (
                                           <button
                                             onClick={() => abrirVinculo(it)}

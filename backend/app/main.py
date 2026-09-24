@@ -4296,6 +4296,142 @@ async def baixar_kit_componentes_embale(request: Request):
         db.close()
 
 
+_ACOES_ITEM_FULL = ("balanco_item_full", "balanco_item_full_divergente", "balanco_kit_componentes", "baixa_kit_componentes")
+
+
+def _movimentos_desfazer(item_produto_id: str | None, qtd_baixada: float, logs: list[tuple[str, dict]]) -> list[dict]:
+    """
+    Calcula o que lançar na Olist para desfazer a baixa/balanço de um item do inbound.
+    logs: (acao, detalhes) do item, do MAIS NOVO para o mais antigo.
+    Devolve [{"produto_id", "sku", "ajuste"}]: ajuste > 0 = entrada (E), < 0 = saída (S).
+    Soma o EFEITO (diferença) de cada operação desde o último desfazer e aplica o contrário —
+    não volta a um valor absoluto, para não apagar vendas que caíram na Olist no meio.
+    """
+    ja_revertidos: set[str] = set()
+    efeito: dict[str, float] = {}
+    skus: dict[str, str] = {}
+    kit = False
+
+    def soma(pid, sku, valor):
+        if pid:
+            efeito[str(pid)] = efeito.get(str(pid), 0.0) + valor
+            skus.setdefault(str(pid), sku or "")
+
+    for acao, det in logs:
+        if acao == "desfazer_item_full":
+            break  # daqui para trás já foi desfeito
+        if acao == "desfazer_item_full_parcial":
+            ja_revertidos.update(str(x) for x in det.get("revertidos") or [])
+        elif acao in ("balanco_item_full", "balanco_item_full_divergente"):
+            # Só a parte do balanço (tipo B); a baixa do item entra uma vez só, abaixo.
+            soma(item_produto_id, det.get("sku_inbound"), float(det.get("quantidade_real") or 0) - float(det.get("estoque_antes") or 0))
+        elif acao == "baixa_kit_componentes":
+            kit = True
+            for r in det.get("resultados") or []:
+                if r.get("sucesso"):
+                    soma(r.get("produto_id"), r.get("sku"), -float(r.get("quantidade") or 0))
+        elif acao == "balanco_kit_componentes":
+            kit = True
+            for r in det.get("resultados") or []:
+                st = r.get("status")
+                if st not in ("ok", "divergencia", "falha_baixa"):
+                    continue  # falha_balanco/invalido: nada foi lançado nesse componente
+                baixou = float(r.get("quantidade_baixar") or 0) if st == "ok" else 0.0
+                soma(r.get("produto_id"), r.get("sku"), float(r.get("quantidade_real") or 0) - baixou - float(r.get("estoque_antes") or 0))
+
+    # Baixa do próprio item (simples ou a que veio junto do balanço): é quantidade_baixada.
+    # Em kit a baixa é por componente e já está nos logs acima (quantidade_baixada do item é só o marcador).
+    if not kit and qtd_baixada > 0:
+        soma(item_produto_id, "", -qtd_baixada)
+
+    return [{"produto_id": pid, "sku": skus[pid], "ajuste": -v}
+            for pid, v in efeito.items() if abs(v) > 1e-9 and pid not in ja_revertidos]
+
+
+async def desfazer_item_embale(request: Request):
+    """
+    POST /api/embaldes/{embale_id}/itens/{item_id}/desfazer
+    Desfaz na Olist a baixa/balanço do item e o devolve para pendente (para refazer).
+    Se um lançamento falhar no meio, guarda o que já foi revertido para não repetir no próximo clique.
+    """
+    db = SessionLocal()
+    try:
+        embale_id = int(request.path_params.get("embale_id"))
+        item_id = int(request.path_params.get("item_id"))
+        embale = db.query(EmbaleFU).filter(EmbaleFU.id == embale_id).first()
+        if not embale:
+            return JSONResponse({"erro": "Inbound não encontrado"}, status_code=404)
+        if embale.status == "encerrado":
+            return JSONResponse({"erro": "Inbound já está encerrado"}, status_code=400)
+        item = next((i for i in embale.itens if i.id == item_id), None)
+        if not item:
+            return JSONResponse({"erro": "Item não encontrado neste inbound"}, status_code=404)
+        if item.baixa_aplicada != 1 and item.foi_balanceado != 1:
+            return JSONResponse({"erro": "Este item não tem baixa nem balanço para desfazer"}, status_code=400)
+
+        logs = [
+            (l.acao, json.loads(l.detalhes_json) if l.detalhes_json else {})
+            for l in db.query(LogOperacao)
+            .filter(LogOperacao.entidade_tipo == "item_embale", LogOperacao.entidade_id == str(item.id),
+                    LogOperacao.acao.in_(_ACOES_ITEM_FULL + ("desfazer_item_full", "desfazer_item_full_parcial")))
+            .order_by(LogOperacao.id.desc())
+            .limit(20)
+        ]
+        produto_id = item.olist_produto_id or _resolver_olist_para_item(item)[0]
+        movs = _movimentos_desfazer(str(produto_id) if produto_id else None, float(item.quantidade_baixada or 0), logs)
+
+        revertidos, falha = [], None
+        for m in movs:
+            ok = olist.atualizar_estoque(
+                produto_id=m["produto_id"],
+                quantidade=abs(m["ajuste"]),
+                tipo="E" if m["ajuste"] > 0 else "S",
+                observacao=f"Desfazer baixa/balanço do Inbound #{embale.numero_inbound} ({item.sku_inbound or item.titulo_anuncio or ''})",
+            )
+            if not ok:
+                falha = {**m, "detalhe": olist._ultimo_erro_estoque}
+                break
+            revertidos.append(m["produto_id"])
+
+        if falha:
+            _registrar_log_operacao(request, "desfazer_item_full_parcial", "item_embale", item.id,
+                                    f"Desfazer parcial do item {item.sku_inbound or item.titulo_anuncio}",
+                                    {"embale_id": embale.id, "revertidos": revertidos, "falha": falha})
+            return JSONResponse({
+                "erro": f"Falhou ao desfazer {falha['sku'] or falha['produto_id']} na Olist. Clique de novo: o que já voltou não é repetido.",
+                "detalhe": falha["detalhe"],
+                "revertidos": revertidos,
+            }, status_code=502)
+
+        item.baixa_aplicada = 0
+        item.quantidade_baixada = None
+        item.data_baixa = None
+        item.foi_balanceado = 0
+        item.data_balanceamento = None
+        item.saldo_disponivel = None
+        item.falta = None
+        item.olist_estoque_antes = None
+        if item.em_espera == 1:
+            item.em_espera = 0
+            item.data_em_espera = None
+        db.add(item)
+        db.commit()
+        _registrar_log_operacao(request, "desfazer_item_full", "item_embale", item.id,
+                                f"Desfez baixa/balanço do item {item.sku_inbound or item.titulo_anuncio}",
+                                {"embale_id": embale.id, "movimentos": movs})
+        resumo = ", ".join(f"{'+' if m['ajuste'] > 0 else '-'}{abs(m['ajuste']):g} {m['sku'] or m['produto_id']}" for m in movs)
+        return JSONResponse({
+            "sucesso": True,
+            "movimentos": movs,
+            "mensagem": f"Desfeito na Olist ({resumo or 'nada a lançar'}). O item voltou para pendente.",
+        })
+    except Exception as e:
+        db.rollback()
+        return JSONResponse({"erro": str(e)}, status_code=500)
+    finally:
+        db.close()
+
+
 async def listar_historico_full_embale(request: Request):
     """
     GET /api/embaldes/{embale_id}/historico-full
@@ -6630,6 +6766,7 @@ routes = [
     Route("/api/embaldes/{embale_id}/itens/{item_id}/kit", kit_componentes_embale, methods=["GET"]),
     Route("/api/embaldes/{embale_id}/itens/{item_id}/balancear-kit", balancear_kit_componentes_embale, methods=["POST"]),
     Route("/api/embaldes/{embale_id}/itens/{item_id}/baixar-kit", baixar_kit_componentes_embale, methods=["POST"]),
+    Route("/api/embaldes/{embale_id}/itens/{item_id}/desfazer", desfazer_item_embale, methods=["POST"]),
     Route("/api/embaldes/{embale_id}/historico-full", listar_historico_full_embale, methods=["GET"]),
     Route("/api/embaldes/{embale_id}/historico-completo", listar_historico_completo_embale, methods=["GET"]),
     Route("/api/embaldes/{embale_id}/posicao-separacao", salvar_posicao_separacao, methods=["POST"]),
