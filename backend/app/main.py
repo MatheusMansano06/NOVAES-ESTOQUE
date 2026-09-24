@@ -3824,6 +3824,8 @@ async def balancear_item_embale(request: Request):
 
         if quantidade_real < 0:
             return JSONResponse({"erro": "Quantidade não pode ser negativa"}, status_code=400)
+        if not float(quantidade_real).is_integer():
+            return JSONResponse({"erro": f"Quantidade real deve ser em unidades inteiras (recebi {quantidade_real:g}). Digite sem ponto: 1527, não 1.527."}, status_code=400)
 
         embale = db.query(EmbaleFU).filter(EmbaleFU.id == embale_id).first()
         if not embale:
@@ -3895,6 +3897,7 @@ async def balancear_item_embale(request: Request):
                     "embale_id": embale.id,
                     "item_id": item.id,
                     "sku_inbound": item.sku_inbound,
+                    "olist_produto_id": str(produto_id),
                     "quantidade_real": quantidade_real,
                     "qtd_full": qtd_full,
                     "falta": item.falta,
@@ -3944,6 +3947,7 @@ async def balancear_item_embale(request: Request):
                 "embale_id": embale.id,
                 "item_id": item.id,
                 "sku_inbound": item.sku_inbound,
+                "olist_produto_id": str(produto_id),
                 "quantidade_real": quantidade_real,
                 "qtd_full": qtd_full,
                 "falta": item.falta,
@@ -4135,7 +4139,7 @@ async def balancear_kit_componentes_embale(request: Request):
             if por_kit <= 0:
                 por_kit = 1
 
-            if not pid or qtd_real < 0 or qtd_baixar < 0:
+            if not pid or qtd_real < 0 or qtd_baixar < 0 or not float(qtd_real).is_integer():
                 resultados.append({
                     "produto_id": pid,
                     "sku": sku_c,
@@ -4398,14 +4402,21 @@ def _movimentos_desfazer(item_produto_id: str | None, qtd_baixada: float, logs: 
             efeito[str(pid)] = efeito.get(str(pid), 0.0) + valor
             skus.setdefault(str(pid), sku or "")
 
+    produto_da_vez = item_produto_id  # produto do item naquele ponto do histórico (andando para trás)
     for acao, det in logs:
         if acao == "desfazer_item_full":
             break  # daqui para trás já foi desfeito
+        if acao == "vinculo_item_inbound":
+            # A troca de vínculo já transferiu a baixa para o produto novo (fica em qtd_baixada);
+            # o que veio antes dela foi lançado no produto antigo.
+            produto_da_vez = str(det.get("olist_produto_id_antigo") or "") or None
+            continue
         if acao == "desfazer_item_full_parcial":
             ja_revertidos.update(str(x) for x in det.get("revertidos") or [])
         elif acao in ("balanco_item_full", "balanco_item_full_divergente"):
             # Só a parte do balanço (tipo B); a baixa do item entra uma vez só, abaixo.
-            soma(item_produto_id, det.get("sku_inbound"), float(det.get("quantidade_real") or 0) - float(det.get("estoque_antes") or 0))
+            soma(det.get("olist_produto_id") or produto_da_vez, det.get("sku_inbound"),
+                 float(det.get("quantidade_real") or 0) - float(det.get("estoque_antes") or 0))
         elif acao == "baixa_kit_componentes":
             kit = True
             for r in det.get("resultados") or []:
@@ -4454,7 +4465,8 @@ async def desfazer_item_embale(request: Request):
             (l.acao, json.loads(l.detalhes_json) if l.detalhes_json else {})
             for l in db.query(LogOperacao)
             .filter(LogOperacao.entidade_tipo == "item_embale", LogOperacao.entidade_id == str(item.id),
-                    LogOperacao.acao.in_(_ACOES_ITEM_FULL + ("desfazer_item_full", "desfazer_item_full_parcial")))
+                    LogOperacao.acao.in_(_ACOES_ITEM_FULL + ("desfazer_item_full", "desfazer_item_full_parcial",
+                                                             "vinculo_item_inbound")))
             .order_by(LogOperacao.id.desc())
             .limit(20)
         ]
@@ -4491,7 +4503,9 @@ async def desfazer_item_embale(request: Request):
         item.data_balanceamento = None
         item.saldo_disponivel = None
         item.falta = None
-        item.olist_estoque_antes = None
+        if produto_id:
+            saldo = (olist.obter_estoque(str(produto_id), usar_cache=False) or {}).get("saldo")
+            item.olist_estoque_antes = float(saldo) if saldo is not None else item.olist_estoque_antes
         if item.em_espera == 1:
             item.em_espera = 0
             item.data_em_espera = None

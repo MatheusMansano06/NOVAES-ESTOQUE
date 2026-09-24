@@ -20,3 +20,14 @@ def test_desfazer_baixa_balanco_e_kit():
     assert f("K",1,[("desfazer_item_full_parcial",{"revertidos":["Y"]}),("balanco_kit_componentes",{"resultados":res})])==[]
     # baixa kit simples
     assert f("K",1,[("baixa_kit_componentes",{"resultados":[{"produto_id":"X","sucesso":True,"quantidade":3}]})])==[{"produto_id":"X","sku":"","ajuste":3}]
+
+
+def test_desfazer_respeita_troca_de_vinculo():
+    # Caso real (Aranha ARAREDCAP35): balanço e baixa no produto antigo 383, depois vínculo trocado
+    # para 402 (a troca estorna 2 no antigo e baixa 2 no novo). Desfazer: +2 no novo, desfaz o balanço no antigo.
+    logs = [
+        ("vinculo_item_inbound", {"olist_produto_id": "402", "olist_produto_id_antigo": "383"}),
+        ("balanco_item_full_divergente", {"quantidade_real": 1.527, "estoque_antes": 0}),
+    ]
+    r = {m["produto_id"]: round(m["ajuste"], 6) for m in f("402", 2, logs)}
+    assert r == {"402": 2, "383": -1.527}, r
