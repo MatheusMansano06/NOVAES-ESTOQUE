@@ -112,3 +112,20 @@ def test_mercadoria_quebrada_bancada_e_motivo():
     assert seg[("motivo", "danificado")]["por_plataforma"]["shopee"]["quantidade"] == 2
     assert q["por_origem"]["bancada"]["quantidade"] == 1 and q["por_origem"]["motivo"]["quantidade"] == 2
     assert q["total"]["quantidade"] == 3
+
+
+def test_401_do_ml_nao_forca_renovacao_do_token(monkeypatch):
+    """O ML também responde 401 para recurso que a conta não enxerga. Renovar a cada 401 gastava o refresh_token
+    de uso único (dezenas de renovações por hora em produção)."""
+    from app.central.mercado_livre import client
+
+    renovacoes = []
+    monkeypatch.setattr(client._ml, "get_access_token", lambda invalidar=None: renovacoes.append(invalidar) or "tok")
+
+    class Resposta:
+        status_code, is_error, text, headers = 401, True, "unauthorized", {}
+
+    monkeypatch.setattr(client._http, "get", lambda *a, **k: Resposta())
+    with pytest.raises(RuntimeError, match="HTTP 401"):
+        client.get("/post-purchase/v1/claims/1")
+    assert all(inv is None for inv in renovacoes), "nenhuma chamada pode pedir renovação forçada"
