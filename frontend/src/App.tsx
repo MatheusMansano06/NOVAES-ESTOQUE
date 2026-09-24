@@ -6,6 +6,7 @@ import { ModalDetalhesNotaFiscal } from './ModalDetalhesNotaFiscal'
 import { FornecedoresManager } from './components/FornecedoresManager'
 import { EmbaldesManager } from './components/EmbaldesManager'
 import { HistoricoFull } from './components/HistoricoFull'
+import { DivergenciasFull } from './components/DivergenciasFull'
 import { AnunciosML } from './components/AnunciosML'
 import { Garimpador } from './components/Garimpador'
 import { OperadoresManager } from './components/OperadoresManager'
@@ -4064,9 +4065,10 @@ function App() {
           {abaFull === 'historico' && <HistoricoFull />}
           {abaFull === 'divergencias' && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+              <DivergenciasFull onResolver={() => setAbaFull('historico')} />
               {divergencias.length === 0 ? (
-                <div style={{ textAlign: 'center', padding: '2rem', color: '#999' }}>
-                  <p>Nenhuma divergência encontrada.</p>
+                <div style={{ textAlign: 'center', padding: '1rem', color: '#999' }}>
+                  <p>Nenhuma divergência de nota fiscal.</p>
                 </div>
               ) : (
                 divergencias.map(div => (

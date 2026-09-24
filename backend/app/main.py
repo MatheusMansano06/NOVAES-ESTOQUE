@@ -3,6 +3,7 @@ from starlette.routing import Route, Mount
 from starlette.responses import JSONResponse, FileResponse, RedirectResponse, HTMLResponse, Response
 from starlette.middleware.cors import CORSMiddleware
 from starlette.requests import Request
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 from database import engine, Base, SessionLocal
 import os
@@ -1309,6 +1310,44 @@ async def listar_divergencias(request: Request):
         })
     finally:
         db.close()
+
+async def listar_divergencias_full(request: Request):
+    """
+    GET /api/divergencias-full
+    Itens de inbounds abertos em que o balanço achou MENOS que o Vai pro FULL e que ainda
+    não foram resolvidos (sem baixa, não excluídos). Resolve-se no Histórico FULL.
+    """
+    db = SessionLocal()
+    try:
+        linhas = (db.query(ItemEmbaleFU, EmbaleFU)
+                  .join(EmbaleFU, ItemEmbaleFU.embalde_id == EmbaleFU.id)
+                  .filter(EmbaleFU.status != "encerrado",
+                          ItemEmbaleFU.foi_balanceado == 1,
+                          ItemEmbaleFU.falta > 0,
+                          func.coalesce(ItemEmbaleFU.baixa_aplicada, 0) != 1,
+                          func.coalesce(ItemEmbaleFU.nao_enviar, 0) != 1)
+                  .order_by(ItemEmbaleFU.data_balanceamento.desc())
+                  .all())
+        itens = [{
+            "item_id": i.id,
+            "embale_id": e.id,
+            "inbound": e.nome_embalde,
+            "numero_inbound": e.numero_inbound,
+            "titulo_anuncio": i.titulo_anuncio,
+            "sku_inbound": i.sku_inbound,
+            "quantidade_full": _quantidade_planejada_full(i),
+            "falta": i.falta,
+            "conferido": max(0.0, _quantidade_planejada_full(i) - float(i.falta or 0)),
+            "em_espera": i.em_espera or 0,
+            "data_balanceamento": i.data_balanceamento.isoformat() if i.data_balanceamento else None,
+            "imagem": i.olist_imagem,
+        } for i, e in linhas]
+        return JSONResponse({"total": len(itens), "itens": itens}, headers={"Cache-Control": "no-store"})
+    except Exception as ex:
+        return JSONResponse({"erro": str(ex)}, status_code=500)
+    finally:
+        db.close()
+
 
 async def resolver_divergencia(request: Request):
     """Marca uma divergência como resolvida"""
@@ -6860,6 +6899,7 @@ routes = [
     Route("/api/historico-confirmacao/{item_id}", get_historico_confirmacao, methods=["GET"]),
     Route("/api/notas-fiscais/{nf_id}/tem-divergencias", nf_tem_divergencias, methods=["GET"]),
     Route("/api/divergencias", listar_divergencias, methods=["GET"]),
+    Route("/api/divergencias-full", listar_divergencias_full, methods=["GET"]),
     Route("/api/produtos-manuais", adicionar_produto_manual, methods=["POST"]),
     Route("/api/resolver-divergencia", resolver_divergencia, methods=["POST"]),
     Route("/api/deletar-divergencia", deletar_divergencia, methods=["POST"]),
