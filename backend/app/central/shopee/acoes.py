@@ -20,12 +20,12 @@ def motivos_contestacao(return_sn: str, produto_perfeito: bool) -> list[dict]:
 
 
 def _motivo(m: dict) -> dict:
-    """A Shopee não documenta o nome dos campos de forma confiável: pega o id (inteiro) e o texto pelo nome aproximado."""
-    id_ = next((v for k, v in m.items() if "id" in k.lower() and str(v).isdigit()), None)
-    texto = next((v for k, v in m.items() if isinstance(v, str) and v and ("text" in k.lower() or "reason" in k.lower() or "name" in k.lower())), None)
-    if id_ is None:
+    """Formato real da Shopee: {'dispute_reason': 46, 'dispute_requirement': '', ...}. Só o código vem; o texto é a exigência, se houver."""
+    id_ = m.get("dispute_reason")
+    if id_ is None or not str(id_).isdigit():
         raise RuntimeError(f"Formato inesperado do motivo de disputa da Shopee: {str(m)[:300]}")
-    return {"id": int(id_), "texto": texto or str(id_)}
+    exigencia = (m.get("dispute_requirement") or "").strip()
+    return {"id": int(id_), "texto": f"Motivo {id_}" + (f" — {exigencia}" if exigencia else "")}
 
 
 def _urls(fotos: list[Path]) -> list[str]:
