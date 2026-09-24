@@ -23,7 +23,7 @@ def pendencias(conf: dict | None, contestada: bool) -> list[str]:
     return faltam
 
 
-def status(dev: dict, conf: dict | None, contestada: bool) -> str:
+def status(dev: dict, conf: dict | None, contestada: bool, aceita: bool = False) -> str:
     """Ordem importa: o que depende da mão do operador aparece antes do que depende da plataforma."""
     if pendencias(conf, contestada):
         return "precisa_acao"
@@ -36,7 +36,8 @@ def status(dev: dict, conf: dict | None, contestada: bool) -> str:
             return "a_caminho"
     if dev["etapa"] in FINAIS:
         return "finalizada"
-    if dev["em_mediacao"] or contestada:
+    # Aceitar resolve a pendência de contestar, mas não abre mediação: vai para resolvida.
+    if dev["em_mediacao"] or (contestada and not aceita):
         return "em_mediacao"
     return "resolvida"
 

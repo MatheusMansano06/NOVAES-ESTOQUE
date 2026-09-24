@@ -27,11 +27,12 @@ def linhas(desde: datetime | None = None) -> list[dict]:
         devs = s.scalars(q).all()
         confs = {c.devolucao_id: {k: getattr(c, k) for k in COLUNAS_CONF} for c in s.scalars(select(Conferencia))}
         contestadas = set(s.scalars(select(Contestacao.devolucao_id).where(Contestacao.ok.is_(True))))
+        aceitas = set(s.scalars(select(Contestacao.devolucao_id).where(Contestacao.ok.is_(True), Contestacao.caminho == "aceite")))
         linhas = []
         for d in devs:
             dev, conf = publico(d), confs.get(d.id)
             contestada = d.id in contestadas
-            st = status(dev, conf, contestada)
+            st = status(dev, conf, contestada, d.id in aceitas)
             linhas.append({**dev, "conferencia": conf, "contestada": contestada,
                            "status": st, "pendencias": pendencias(conf, contestada),
                            "envio": envio(d.plataforma, d.bruto) if st == "a_caminho" else None,
