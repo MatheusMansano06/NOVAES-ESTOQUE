@@ -25,7 +25,8 @@ def _motivo(m: dict) -> dict:
     if id_ is None or not str(id_).isdigit():
         raise RuntimeError(f"Formato inesperado do motivo de disputa da Shopee: {str(m)[:300]}")
     exigencia = (m.get("dispute_requirement") or "").strip()
-    return {"id": int(id_), "texto": f"Motivo {id_}" + (f" — {exigencia}" if exigencia else "")}
+    # A exigência é longa e vai fora do <select>; o menu mostra só o código.
+    return {"id": int(id_), "texto": f"Motivo {id_}", "exigencia": exigencia}
 
 
 def _urls(fotos: list[Path]) -> list[str]:

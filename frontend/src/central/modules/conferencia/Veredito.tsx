@@ -200,7 +200,7 @@ function ChamadoManual({ devolucaoId, abertoEm, protocolo, onFeito }:
 
 function Contestar({ devolucaoId, textoInicial, temFoto, onMudou }:
   { devolucaoId: number; textoInicial: string; temFoto: boolean; onMudou: () => void }) {
-  const [motivos, setMotivos] = useState<{ id: string; texto: string }[] | null>(null);
+  const [motivos, setMotivos] = useState<{ id: string; texto: string; exigencia?: string }[] | null>(null);
   const [historico, setHistorico] = useState<Contestacao[]>([]);
   const [motivo, setMotivo] = useState("");
   const [texto, setTexto] = useState(textoInicial);
@@ -255,9 +255,12 @@ function Contestar({ devolucaoId, textoInicial, temFoto, onMudou }:
           <span>Motivo oficial</span>
           <select value={motivo} onChange={(e) => setMotivo(e.target.value)} disabled={!motivos}>
             <option value="">{motivos ? "Escolha o motivo" : "Carregando motivos…"}</option>
-            {motivos?.map((m) => <option key={m.id} value={m.id}>{m.texto}</option>)}
+            {motivos?.map((m) => <option key={m.id} value={m.id}>{m.texto}{m.exigencia ? " (pede provas)" : ""}</option>)}
           </select>
         </label>
+      )}
+      {!semMotivo && motivos?.find((m) => String(m.id) === motivo)?.exigencia && (
+        <p className="sub">{motivos.find((m) => String(m.id) === motivo)!.exigencia}</p>
       )}
       <label className="campo">
         <span>O que aconteceu (vai para a plataforma)</span>
