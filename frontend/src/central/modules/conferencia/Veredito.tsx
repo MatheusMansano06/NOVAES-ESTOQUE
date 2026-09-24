@@ -125,9 +125,9 @@ function NotaDevolucao({ tela, onFeito }: { tela: Tela; onFeito: () => void }) {
   } else if (c.classe === "C" && !c.erro_nosso) {
     conteudo = <p className="aviso">O produto vendido não voltou: não há nota de devolução a fazer.</p>;
   } else if (!pedido.nota_devolucao) {
-    conteudo = <button type="button" className="botao" disabled={enviando}
-                       onClick={() => agir("", "Criar na Olist a NF de devolução da venda? Ela fica pendente até você emitir.")}>
-      {enviando ? "Gerando…" : "Gerar NF de devolução"}</button>;
+    // Gera a NF pela própria Olist: abre o pedido lá numa aba nova.
+    conteudo = <a className="botao" href={`https://erp.tiny.com.br/vendas#edit/${pedido.id}`} target="_blank" rel="noopener noreferrer">
+      Gerar NF de devolução na Olist ↗</a>;
   } else if (pedido.nota_devolucao.situacao === "Pendente") {
     conteudo = (
       <>
