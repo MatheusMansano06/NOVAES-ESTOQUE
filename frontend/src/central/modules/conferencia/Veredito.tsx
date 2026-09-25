@@ -146,10 +146,17 @@ function NotaDevolucao({ tela }: { tela: Tela }) {
     <div className="bloco-nota">
       <h4>NF de devolução</h4>
       {conteudo}
-      {pedido && (
-        <a className="botao" href={`https://erp.tiny.com.br/vendas#edit/${pedido.id}`} target="_blank" rel="noopener noreferrer">
-          Ver pedido na Olist ↗</a>
-      )}
+      <div className="linha-botoes">
+        {/* A NF de devolução é documento próprio: não aparece dentro do pedido de venda, só em Notas Fiscais. */}
+        {pedido?.nota_devolucao && (
+          <a className="botao" href={`https://erp.olist.com/notas_fiscais#edit/${pedido.nota_devolucao.id}`}
+             target="_blank" rel="noopener noreferrer">Ver NF de devolução na Olist ↗</a>
+        )}
+        {pedido && (
+          <a className="botao" href={`https://erp.olist.com/vendas#edit/${pedido.id}`} target="_blank" rel="noopener noreferrer">
+            Ver pedido na Olist ↗</a>
+        )}
+      </div>
     </div>
   );
 }
