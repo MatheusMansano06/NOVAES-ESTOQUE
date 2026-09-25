@@ -22,7 +22,7 @@ interface Resumo {
   serie: { dia: string; total: number; resolvidas: number; em_aberto: number; custo: number; recuperado: number }[];
   por_plataforma: Partial<Record<Plataforma, Dinheiro & { devolucoes: number }>>;
   motivos: { motivo: string; quantidade: number; pct: number }[];
-  produtos: { sku: string | null; nome: string | null; imagem: string | null; plataforma: Plataforma; quantidade: number; pct: number; prejuizo: number }[];
+  produtos: Partial<Record<Plataforma, { sku: string | null; nome: string | null; imagem: string | null; plataforma: Plataforma; quantidade: number; pct: number; prejuizo: number }[]>>;
   mediacoes: { ganha: number; perdida: number; parcial: number; em_andamento: number; recuperado: number };
 }
 
@@ -119,10 +119,12 @@ export function BiPage({ nav }: { nav: Navegacao }) {
           ))}
         </ul>
       </section>
-      <section className="cartao">
-        <header><h2>Produtos que mais voltam</h2></header>
+      {PLATAFORMAS.map((plat) => (
+      <section key={plat} className="cartao">
+        <header><h2>Produtos que mais voltam</h2><LogoPlataforma plataforma={plat} tamanho={18} comNome /></header>
+        {r && !r.produtos[plat]?.length && <p className="sub">Nenhuma devolução no período.</p>}
         <ol className="ranking">
-          {r?.produtos.map((p, i) => (
+          {r?.produtos[plat]?.map((p, i) => (
             <li key={`${p.plataforma}-${p.sku}-${i}`}>
               <span className="posicao">{i + 1}</span>
               {p.imagem ? <img src={p.imagem} alt="" loading="lazy" /> : <span className="foto-vazia" />}
@@ -133,6 +135,7 @@ export function BiPage({ nav }: { nav: Navegacao }) {
           ))}
         </ol>
       </section>
+      ))}
       <section className="cartao">
         <header><h2>Resultado das mediações</h2></header>
         <div className="rosca-e-legenda">

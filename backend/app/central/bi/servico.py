@@ -148,7 +148,7 @@ def resumo(dias: int = 30) -> dict:
             chave = i.get("sku") or i.get("item_id")
             if not chave:
                 continue
-            item = produtos.setdefault(chave, {"sku": i.get("sku"), "nome": i.get("nome"), "imagem": i.get("imagem"),
+            item = produtos.setdefault((l["plataforma"], chave), {"sku": i.get("sku"), "nome": i.get("nome"), "imagem": i.get("imagem"),
                                                "item_id": i.get("item_id"), "plataforma": l["plataforma"],
                                                "quantidade": 0, "prejuizo": 0.0})
             item["quantidade"] += 1
@@ -158,8 +158,9 @@ def resumo(dias: int = 30) -> dict:
             item["imagem"] = item["imagem"] or i.get("imagem")
 
     total = len(atual) or 1
-    top = sorted(produtos.values(), key=lambda p: (-p["quantidade"], -p["prejuizo"]))[:5]
-    _imagens(top)
+    top = {p: sorted((x for x in produtos.values() if x["plataforma"] == p), key=lambda x: (-x["quantidade"], -x["prejuizo"]))[:5]
+           for p in PLATAFORMAS}
+    _imagens([x for t in top.values() for x in t])
     return {
         "dias": dias,
         "total": len(atual),
@@ -172,7 +173,7 @@ def resumo(dias: int = 30) -> dict:
         "por_plataforma": {k: {"devolucoes": len(v), **_dinheiro(v)} for k, v in por_plataforma.items()},
         "status": dict(Counter(l["status"] for l in atual)),
         "motivos": [{"motivo": m, "quantidade": q, "pct": round(100 * q / total, 1)} for m, q in motivos.most_common()],
-        "produtos": [{**p, "pct": round(100 * p["quantidade"] / total, 1)} for p in top],
+        "produtos": {p: [{**x, "pct": round(100 * x["quantidade"] / (len(por_plataforma[p]) or 1), 1)} for x in t] for p, t in top.items()},
         "mediacoes": {**{k: mediacoes.get(k, 0) for k in ("ganha", "perdida", "parcial", "em_andamento")},
                       "recuperado": _dinheiro(atual)["recuperado"]},
     }
