@@ -267,6 +267,41 @@ def emitir_nota_devolucao(devolucao_id: int) -> dict:
     return olist.emitir_nota_devolucao(nota["id"])
 
 
+def devolver_produto(devolucao_id: int) -> dict:
+    """Um clique, como o "Devolver" da Olist: estoque no depósito que a conferência decidiu + NF de devolução
+    criada e emitida. A NF vai pela API, que não relança estoque. Passo já feito é pulado: repetir continua."""
+    with Sessao() as s:
+        d = s.get(Devolucao, devolucao_id)
+        conf = d and s.scalar(select(Conferencia).filter_by(devolucao_id=d.id))
+        if not conf:
+            raise LookupError("Confira o produto antes de devolver.")
+        precisa_estoque = bool(conf.lancamentos) and not conf.estoque_lancado_em
+        sem_nota = conf.classe == "C" and not conf.erro_nosso
+    if precisa_estoque:
+        falha = next((r for r in lancar_estoque(devolucao_id) if not r["ok"]), None)
+        if falha:
+            raise RuntimeError(f"Estoque não lançado: {falha['erro']}. Nenhuma nota foi gerada.")
+    if sem_nota:
+        return {"nota": "O produto vendido não voltou: não há nota de devolução."}
+    with Sessao() as s:
+        try:
+            pedido = _pedido_com_nota(s.get(Devolucao, devolucao_id))
+        except ValueError as e:
+            raise ValueError(f"Estoque lançado, mas a NF de devolução não: {e}")
+    if pedido["nota"]["situacao"] == "Cancelada":
+        return {"nota": "A NF de venda foi cancelada: não precisa de nota de devolução."}
+    nota = pedido.get("nota_devolucao")
+    if nota and nota["situacao"] != "Pendente":
+        return {"nota": f"NF de devolução {nota['numero']}: {nota['situacao'].lower()}."}
+    try:
+        if not nota:
+            nota = gerar_nota_devolucao(devolucao_id)
+        emitir_nota_devolucao(devolucao_id)
+    except (ValueError, RuntimeError) as e:
+        raise type(e)(f"Estoque lançado, mas a NF de devolução parou: {e}. Clique de novo para terminar.")
+    return {"nota": f"NF de devolução {nota['numero']} enviada para a SEFAZ."}
+
+
 def lancar_estoque(devolucao_id: int) -> list[dict]:
     """Executa na Olist os lançamentos decididos na conferência. Só roda por clique do operador."""
     with Sessao.begin() as s:

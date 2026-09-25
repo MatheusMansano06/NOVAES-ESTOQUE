@@ -54,10 +54,9 @@ export function Veredito({ tela, onAtualizar, onIrParaProvas }: Props) {
               })}
             </ul>
           )}
-          {c.lancamentos.length > 0 && (
-            <LancarEstoque devolucaoId={d.id} lancadoEm={c.estoque_lancado_em} parcial={resultado.length > 0} onFeito={onAtualizar} />
-          )}
-          <NotaDevolucao tela={tela} onFeito={onAtualizar} />
+          {c.estoque_lancado_em && <p className="aviso ok">Estoque lançado em {quando(c.estoque_lancado_em)}.</p>}
+          <NotaDevolucao tela={tela} />
+          <DevolverProduto tela={tela} onFeito={onAtualizar} />
         </section>
 
         <section aria-labelledby="t-contestar">
@@ -80,19 +79,31 @@ export function Veredito({ tela, onAtualizar, onIrParaProvas }: Props) {
   );
 }
 
-function LancarEstoque({ devolucaoId, lancadoEm, parcial, onFeito }:
-  { devolucaoId: number; lancadoEm: string | null; parcial: boolean; onFeito: () => void }) {
+/** A NF de devolução ainda precisa ser criada ou emitida? Mesmas regras do backend (devolver_produto). */
+function notaPendente(tela: Tela): boolean {
+  const pedido = tela.olist.pedidos.find((p) => p.nota);
+  const c = tela.conferencia!;
+  if (!pedido?.nota || pedido.nota.situacao === "Cancelada" || (c.classe === "C" && !c.erro_nosso)) return false;
+  return !pedido.nota_devolucao || pedido.nota_devolucao.situacao === "Pendente";
+}
+
+/** Um clique, como o "Devolver" da Olist: lança o estoque no depósito certo e cria + emite a NF de devolução. */
+function DevolverProduto({ tela, onFeito }: { tela: Tela; onFeito: () => void }) {
   const [enviando, setEnviando] = useState(false);
   const [erro, setErro] = useState<string | null>(null);
+  const c = tela.conferencia!;
+  const falta_estoque = c.lancamentos.length > 0 && !c.estoque_lancado_em;
+  const falta_nota = notaPendente(tela);
+  if (!falta_estoque && !falta_nota) return null;
 
-  if (lancadoEm) return <p className="aviso ok">Estoque lançado em {quando(lancadoEm)}.</p>;
-
-  async function lancar() {
-    if (!window.confirm("Lançar estes movimentos no estoque da Olist agora? Isso altera o saldo real.")) return;
+  async function devolver() {
+    const passos = [falta_estoque && "lança o estoque na Olist", falta_nota && "cria e emite a NF de devolução na SEFAZ"]
+      .filter(Boolean).join(" e ");
+    if (!window.confirm(`Devolver o produto agora? Isso ${passos}. Nota autorizada só se desfaz com cancelamento fiscal.`)) return;
     setErro(null);
     setEnviando(true);
     try {
-      await api.post(`/conferencia/${devolucaoId}/lancar-estoque`);
+      await api.post(`/conferencia/${tela.devolucao.id}/devolver`);
     } catch (e) {
       setErro((e as Error).message);
     } finally {
@@ -101,19 +112,18 @@ function LancarEstoque({ devolucaoId, lancadoEm, parcial, onFeito }:
     }
   }
 
+  const parcial = (c.estoque_resultado ?? []).length > 0 || (!falta_estoque && falta_nota);
   return (
     <>
-      <button type="button" className="botao principal" onClick={lancar} disabled={enviando}>
-        {enviando ? "Lançando…" : parcial ? "Terminar lançamento na Olist" : "Lançar estoque na Olist"}
+      <button type="button" className="botao principal" onClick={devolver} disabled={enviando}>
+        {enviando ? "Devolvendo…" : parcial ? "Terminar devolução" : "Devolver produto"}
       </button>
       {erro && <p className="aviso erro" role="alert">{erro}</p>}
     </>
   );
 }
 
-function NotaDevolucao({ tela, onFeito }: { tela: Tela; onFeito: () => void }) {
-  const [enviando, setEnviando] = useState(false);
-  const [erro, setErro] = useState<string | null>(null);
+function NotaDevolucao({ tela }: { tela: Tela }) {
   const pedido = tela.olist.pedidos.find((p) => p.nota);
   const c = tela.conferencia!;
 
@@ -125,48 +135,21 @@ function NotaDevolucao({ tela, onFeito }: { tela: Tela; onFeito: () => void }) {
   } else if (c.classe === "C" && !c.erro_nosso) {
     conteudo = <p className="aviso">O produto vendido não voltou: não há nota de devolução a fazer.</p>;
   } else if (!pedido.nota_devolucao) {
-    // Pela API, não pelo recurso "devolução" da Olist: esse relança o estoque, que a bancada já lançou.
-    conteudo = (
-      <div className="linha-botoes">
-        <button type="button" className="botao" disabled={enviando}
-                onClick={() => agir("", "Criar na Olist a NF de devolução da venda? Ela fica pendente até você emitir.")}>
-          {enviando ? "Gerando…" : "Gerar NF de devolução"}</button>
-        <a className="botao" href={`https://erp.tiny.com.br/vendas#edit/${pedido.id}`} target="_blank" rel="noopener noreferrer">
-          Ver pedido na Olist ↗</a>
-      </div>
-    );
+    conteudo = <p className="sub">Será criada e emitida junto com a devolução do produto.</p>;
   } else if (pedido.nota_devolucao.situacao === "Pendente") {
-    conteudo = (
-      <>
-        <p className="sub">NF de devolução {pedido.nota_devolucao.numero} criada, ainda pendente.</p>
-        <button type="button" className="botao principal" disabled={enviando}
-                onClick={() => agir("/emitir", "Emitir a NF de devolução na SEFAZ agora? Nota autorizada só se desfaz com cancelamento fiscal.")}>
-          {enviando ? "Emitindo…" : "Emitir NF de devolução"}</button>
-      </>
-    );
+    conteudo = <p className="sub">NF de devolução {pedido.nota_devolucao.numero} criada, falta emitir.</p>;
   } else {
     conteudo = <p className="aviso ok">NF de devolução {pedido.nota_devolucao.numero}: {pedido.nota_devolucao.situacao.toLowerCase()}.</p>;
-  }
-
-  async function agir(sufixo: string, pergunta: string) {
-    if (!window.confirm(pergunta)) return;
-    setErro(null);
-    setEnviando(true);
-    try {
-      await api.post(`/conferencia/${tela.devolucao.id}/nota-devolucao${sufixo}`);
-      onFeito();
-    } catch (e) {
-      setErro((e as Error).message);
-    } finally {
-      setEnviando(false);
-    }
   }
 
   return (
     <div className="bloco-nota">
       <h4>NF de devolução</h4>
       {conteudo}
-      {erro && <p className="aviso erro" role="alert">{erro}</p>}
+      {pedido && (
+        <a className="botao" href={`https://erp.tiny.com.br/vendas#edit/${pedido.id}`} target="_blank" rel="noopener noreferrer">
+          Ver pedido na Olist ↗</a>
+      )}
     </div>
   );
 }
