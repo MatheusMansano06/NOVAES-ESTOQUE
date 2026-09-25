@@ -74,10 +74,12 @@ def _dinheiro(ls: list[dict]) -> dict:
         elif origem:
             d[f"perda_{origem}"] += valor
         d["recuperado"] += _recuperado(l)
-    custo = d["frete_reverso"] + d["perda_bancada"] + d["perda_motivo"]
+    # frete de mediação ganha não é pago: fica fora do custo (e fora do recuperado, senão desconta duas vezes)
+    bruto = d["frete_reverso"] + d["perda_bancada"] + d["perda_motivo"]
+    custo = bruto - d["frete_estornado"]
     return {**{k: round(v, 2) for k, v in d.items()}, "custo_total": round(custo, 2),
-            "prejuizo_liquido": round(custo - d["recuperado"], 2),
-            "taxa_recuperacao": round(100 * d["recuperado"] / custo, 1) if custo else 0.0, "sem_custo": sem_custo}
+            "prejuizo_liquido": round(custo - (d["recuperado"] - d["frete_estornado"]), 2),
+            "taxa_recuperacao": round(100 * d["recuperado"] / bruto, 1) if bruto else 0.0, "sem_custo": sem_custo}
 
 
 def quebrados(ls: list[dict]) -> dict:

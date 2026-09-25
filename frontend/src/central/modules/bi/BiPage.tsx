@@ -8,7 +8,7 @@ import { LogoPlataforma } from "../../shared/LogoPlataforma";
 import { usarDados } from "../../shared/usarDados";
 
 interface Dinheiro {
-  frete_reverso: number; perda_bancada?: number; perda_motivo?: number; recuperado: number;
+  frete_reverso: number; frete_cobrado?: number; frete_em_mediacao?: number; perda_bancada?: number; perda_motivo?: number; recuperado: number;
   custo_total: number; prejuizo_liquido: number; taxa_recuperacao: number; sem_custo: number;
 }
 interface Celula { quantidade: number; valor: number; sem_custo: number }
@@ -74,7 +74,7 @@ export function BiPage({ nav }: { nav: Navegacao }) {
         <Metrica rotulo="Custo total com devoluções" valor={reais(d?.custo_total)} v={d && a && variacao(d.custo_total, a.custo_total)} />
         <Metrica rotulo="Recuperado em mediações" valor={reais(d?.recuperado)} v={d && a && variacao(d.recuperado, a.recuperado, true)}
                  nota="Estimado pelas mediações ganhas" />
-        <Metrica rotulo="Frete reverso cobrado" valor={reais(d?.frete_reverso)} v={d && a && variacao(d.frete_reverso, a.frete_reverso)} />
+        <Metrica rotulo="Frete reverso cobrado" valor={reais(d?.frete_cobrado)} v={d && a && variacao(d.frete_cobrado ?? 0, a.frete_cobrado ?? 0)} />
         <Metrica rotulo="Mercadoria quebrada" valor={reais(perdido(d))} v={d && a && variacao(perdido(d), perdido(a))}
                  nota="Da bancada + do motivo da devolução" />
         <Metrica rotulo="Taxa de recuperação" valor={`${(d?.taxa_recuperacao ?? 0).toLocaleString("pt-BR")}%`} />
@@ -190,7 +190,8 @@ export function BiPage({ nav }: { nav: Navegacao }) {
             <th scope="col" className="num">Total</th><th scope="col" className="num">% do custo</th></tr></thead>
           <tbody>
             {([
-              ["Frete reverso cobrado", "frete_reverso"],
+              ["Frete reverso cobrado", "frete_cobrado"],
+              ["Frete em mediação (cobra se perder)", "frete_em_mediacao"],
               ["Mercadoria quebrada, conferida na bancada", "perda_bancada"],
               ["Mercadoria quebrada, pelo motivo da devolução", "perda_motivo"],
               ["Recuperado em mediações", "recuperado"],

@@ -87,9 +87,9 @@ export function ResumoPage({ nav }: { nav: Navegacao }) {
           <p className="financeiro-valor">{reais(d?.custo_total)}</p>
           {varCusto && <p className={varCusto.sobe ? "financeiro-var ruim" : "financeiro-var bom"}>{varCusto.texto}</p>}
           <dl>
-            <div><dt>Frete reverso já cobrado</dt><dd>{reais(d?.frete_cobrado ?? 0)}</dd></div>
-            <div><dt>Frete em mediação (cobra se perder)</dt><dd>{reais(d?.frete_em_mediacao ?? 0)}</dd></div>
-            {!!d?.frete_estornado && <div><dt>Frete estornado (mediação ganha)</dt><dd>{reais(d.frete_estornado)}</dd></div>}
+            <div className="frete cobrado"><dt>Frete reverso já cobrado</dt><dd>{reais(d?.frete_cobrado ?? 0)}</dd></div>
+            <div className="frete mediacao"><dt>Frete em mediação (cobra se perder)</dt><dd>{reais(d?.frete_em_mediacao ?? 0)}</dd></div>
+            <div className="frete ganho"><dt>Frete ganho na mediação (fora do total)</dt><dd>− {reais(d?.frete_estornado ?? 0)}</dd></div>
             <div><dt>Quebrado, conferido na bancada</dt><dd>{reais(d?.perda_bancada ?? 0)}</dd></div>
             <div><dt>Quebrado, pelo motivo</dt><dd>{reais(d?.perda_motivo ?? 0)}</dd></div>
           </dl>
