@@ -25,12 +25,12 @@ def mapa() -> dict[tuple[str, str], bool]:
 
 
 def _ml(devs: list[Devolucao]) -> dict[str, str]:
-    from app.central.bi.mediacao_origem import em_paralelo
+    from app.central.bi.mediacao_origem import _sem_acesso, em_paralelo
     from app.central.mercado_livre import client
     envios = {d.pedido: e for d in devs if (e := (((d.bruto or {}).get("pedido") or {}).get("shipping") or {}).get("id"))}
     resultados = em_paralelo(lambda p: client.get(f"/shipments/{envios[p]}", headers={"x-format-new": "true"}) or {},
                              list(envios))
-    if conexao := next((r for _, r in resultados if isinstance(r, RuntimeError) and "HTTP 403" not in str(r)), None):
+    if conexao := next((r for _, r in resultados if isinstance(r, RuntimeError) and not _sem_acesso(r)), None):
         raise conexao  # conexão caída: a rodada registra o erro; 403 é só daquele envio e não trava a fila
     return {p: ((({} if isinstance(r, RuntimeError) else r).get("logistic")) or {}).get("type") or "desconhecido"
             for p, r in resultados}

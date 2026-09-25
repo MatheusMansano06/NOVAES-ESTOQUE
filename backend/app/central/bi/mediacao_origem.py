@@ -49,8 +49,9 @@ def mapa() -> dict[tuple[str, str], str]:
 
 
 def _sem_acesso(e: Exception) -> bool:
-    """O ML nega algumas reclamações (403 "User does not have access to claim"): é da reclamação, não da conexão."""
-    return "HTTP 403" in str(e)
+    """O ML nega alguns itens: 403 "User does not have access to claim" ou 401 "invalid_caller_id" (envio de outro
+    vendedor). É daquele item, não da conexão: marca e segue. 401 de token vencido não tem esse código e para a rodada."""
+    return "HTTP 403" in str(e) or "invalid_caller_id" in str(e)
 
 
 def _ml(claim_id: str) -> str:
