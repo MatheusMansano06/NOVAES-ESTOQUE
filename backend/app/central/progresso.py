@@ -4,8 +4,8 @@ quanto já andou dela (0 a 1) com `parcial`."""
 from datetime import datetime, timezone
 
 # Peso de cada tarefa na barra: a varredura do ML é a que demora (4 chamadas por reclamação).
-PESOS = {"mercado_livre": 12, "logistica_venda": 3, "mediacao_origem": 3, "fatura_ml": 2}
-estado: dict = {"varredura": False, "rodando": False, "tarefa": None, "tarefas": [], "feitas": 0, "fracao": 0.0,
+PESOS = {"mercado_livre": 12, "refazer_ml": 12, "refazer_shopee": 4, "refazer_fatura": 2, "logistica_venda": 3, "mediacao_origem": 3, "fatura_ml": 2}
+estado: dict = {"refazendo": None, "varredura": False, "rodando": False, "tarefa": None, "tarefas": [], "feitas": 0, "fracao": 0.0,
                 "iniciada_em": None, "terminada_em": None}
 
 
@@ -13,8 +13,8 @@ def _agora() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-def iniciar(tarefas: list[str], varredura: bool = False) -> None:
-    estado.update(varredura=varredura, rodando=True, tarefas=tarefas, feitas=0, tarefa=None, fracao=0.0, iniciada_em=_agora())
+def iniciar(tarefas: list[str], varredura: bool = False, refazendo: str | None = None) -> None:
+    estado.update(refazendo=refazendo, varredura=varredura, rodando=True, tarefas=tarefas, feitas=0, tarefa=None, fracao=0.0, iniciada_em=_agora())
 
 
 def tarefa(nome: str, feitas: int) -> None:

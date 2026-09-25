@@ -2,6 +2,7 @@
 
 import logging
 import os
+import threading
 import time
 from datetime import datetime
 from zoneinfo import ZoneInfo
@@ -100,7 +101,19 @@ TAREFAS = {
 estado: dict[str, dict] = {}
 
 
+_trava = threading.Lock()  # uma leitura por vez: rodada automática ou releitura de mês
+
+
 def rodar() -> None:
+    if not _trava.acquire(blocking=False):
+        return  # releitura de mês em andamento: esta rodada é pulada, a próxima vem em 10 min
+    try:
+        _rodar_rodada()
+    finally:
+        _trava.release()
+
+
+def _rodar_rodada() -> None:
     _varredura["agora"] = _varredura_pendente()
     progresso.iniciar(list(TAREFAS), varredura=_varredura["agora"])
     try:
@@ -120,3 +133,41 @@ def _rodar() -> None:
         except Exception as e:  # noqa: BLE001 — registrar e seguir para a próxima tarefa
             estado[nome] = {"ok": False, "erro": str(e)[:300]}
             log.warning("sincronização %s falhou: %s", nome, e)
+
+
+def refazer_mes(chave: str) -> None:
+    """Releitura pesada de um ciclo fechado da fatura: relê do ML e da Shopee as devoluções desde o início do ciclo,
+    baixa de novo a fatura, completa Full x orgânica e mediações, e grava o fechamento de novo. Roda em thread."""
+    from app.central.bi import servico
+    from app.central.conferencia.servico import Travada
+
+    ini, fim = fatura_ml.ciclo(chave)
+    if fim >= datetime.now(ZoneInfo("America/Sao_Paulo")).date():
+        raise ValueError("Esse ciclo da fatura ainda está aberto: ele já é lido ao vivo.")
+    if not _trava.acquire(blocking=False):
+        raise Travada("Já tem uma leitura rodando. Espere a barra chegar a 100% e tente de novo.")
+    dias = (datetime.now(ZoneInfo("America/Sao_Paulo")).date() - ini).days + 1
+    etapas = {
+        "refazer_ml": lambda: sincronizar_ml(dias=dias),
+        "refazer_shopee": lambda: sincronizar_shopee(dias=dias),
+        "refazer_fatura": lambda: fatura_ml.refazer(chave),
+        "logistica_venda": lambda: logistica.completar(limite=5000),
+        "mediacao_origem": lambda: mediacao_origem.completar(limite=5000),
+        "fechamento": lambda: servico.fechar_mes(chave),
+    }
+
+    def trabalhar():
+        progresso.iniciar(list(etapas), refazendo=chave)
+        try:
+            for i, (nome, etapa) in enumerate(etapas.items()):
+                progresso.tarefa(nome, i)
+                try:
+                    estado[nome] = {"ok": True, "resultado": etapa()}
+                except Exception as e:  # noqa: BLE001 — registra e segue: o fechamento sai com o que deu
+                    estado[nome] = {"ok": False, "erro": str(e)[:300]}
+                    log.warning("releitura %s: %s falhou: %s", chave, nome, e)
+        finally:
+            progresso.terminar()
+            _trava.release()
+
+    threading.Thread(target=trabalhar, name=f"refazer-{chave}", daemon=True).start()

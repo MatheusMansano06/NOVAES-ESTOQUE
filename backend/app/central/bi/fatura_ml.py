@@ -89,6 +89,17 @@ def sincronizar(meses: int = 3) -> dict:
     return feitas
 
 
+def refazer(chave: str) -> int:
+    """Apaga e baixa de novo os lançamentos de devolução de uma fatura (releitura pesada do fechamento)."""
+    linhas = _baixar(chave)
+    with Sessao.begin() as s:
+        s.query(TarifaDevolucaoML).filter(TarifaDevolucaoML.fatura == chave).delete()
+        for l in linhas:
+            s.merge(l)
+    _lida_em[chave] = time.time()
+    return len(linhas)
+
+
 def por_fatura() -> dict[str, dict]:
     """chave → {cobrado, estornado, liquido, por_tipo}."""
     saida: dict[str, dict] = {}

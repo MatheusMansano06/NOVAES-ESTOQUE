@@ -1,6 +1,7 @@
 import { useState } from "react";
 
 import type { Navegacao } from "../../CentralDevolucoes";
+import { api } from "../../shared/api";
 import { MOTIVO, PLATAFORMA, type Plataforma } from "../../shared/devolucao";
 import { reais } from "../../shared/formato";
 import { BarrasPorDia, Legenda, LinhasNoTempo, Rosca, type Serie } from "../../shared/graficos";
@@ -33,7 +34,7 @@ interface Resumo {
 }
 
 interface Mes {
-  fatura: string; inicio: string; fim: string; aberto: boolean; fatura_lida: boolean;
+  fatura: string; inicio: string; fim: string; aberto: boolean; fatura_lida: boolean; fechado?: boolean; fechado_em?: string;
   frete_ml: { cobrado: number; estornado: number; liquido: number };
   frete_shopee: number; quebrado_bancada: number; quebrado_motivo: number; sem_custo: number; total: number;
   devolucoes: Record<Plataforma, number>;
@@ -86,6 +87,17 @@ export function BiPage({ nav }: { nav: Navegacao }) {
   const { dados: r, erro } = usarDados<Resumo>(`/bi/resumo?${periodo.includes("-") ? `fatura=${periodo}` : `dias=${periodo}`}`, nav.versao);
   const dias = r?.dias ?? 30;
   const { dados: mensal } = usarDados<{ meses: Mes[] }>("/bi/mensal", nav.versao);
+  const [avisoMes, setAvisoMes] = useState<string | null>(null);
+  async function refazer(fatura: string) {
+    const nome = `${NOME_MES[Number(fatura.slice(5, 7)) - 1]}/${fatura.slice(2, 4)}`;
+    if (!window.confirm(`Refazer a leitura da fatura ${nome}? Relê ML, Shopee e a fatura desde o início do ciclo: pode levar vários minutos.`)) return;
+    try {
+      await api.post(`/bi/mensal/${fatura}/refazer`);
+      setAvisoMes(`Releitura da fatura ${nome} começou: acompanhe a barra no topo. Os números se atualizam quando chegar a 100%.`);
+    } catch (e) {
+      setAvisoMes((e as Error).message);
+    }
+  }
   const d = r?.dinheiro, a = r?.dinheiro_anterior;
   const perdido = (x?: Dinheiro) => (x?.perda_bancada ?? 0) + (x?.perda_motivo ?? 0);
   const q = r?.quebrados;
@@ -123,13 +135,20 @@ export function BiPage({ nav }: { nav: Navegacao }) {
 
       <section className="cartao financeiro-detalhe">
         <header><h2>Custo das devoluções por mês</h2>
-          <span className="sub">ciclo da fatura do ML: dia 13 ao dia 12 · frete do ML vem da fatura; o resto, das devoluções importadas na Central</span></header>
+          <span className="sub">ciclo da fatura do ML: dia 13 ao dia 12 · frete do ML vem da fatura; o resto, das devoluções importadas na Central · mês fechado fica gravado</span></header>
+        {avisoMes && <p className="aviso" role="status">{avisoMes}</p>}
         <table className="tabela compacta">
           <thead><tr><th scope="col">Custo</th>
             {mensal?.meses.map((m) => (
               <th key={m.fatura} scope="col" className="num">
                 Fatura {NOME_MES[Number(m.fatura.slice(5, 7)) - 1]}/{m.fatura.slice(2, 4)}{m.aberto && " (aberta)"}
                 <span className="sub" style={{ display: "block", fontWeight: 400 }}>{diaMes(m.inicio)} a {diaMes(m.fim)}</span>
+                {m.fechado && (
+                  <span className="sub" style={{ display: "block", fontWeight: 400 }}>
+                    fechado{m.fechado_em && ` em ${diaMes(m.fechado_em)}`} ·{" "}
+                    <button type="button" className="link-botao" onClick={() => void refazer(m.fatura)}>refazer leitura</button>
+                  </span>
+                )}
               </th>
             ))}</tr></thead>
           <tbody>

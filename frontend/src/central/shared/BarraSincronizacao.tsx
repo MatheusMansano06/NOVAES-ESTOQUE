@@ -3,14 +3,15 @@ import { useEffect, useRef, useState } from "react";
 import { api } from "./api";
 
 interface Progresso {
-  varredura?: boolean; rodando: boolean; tarefa: string | null; percentual: number;
+  refazendo?: string | null; varredura?: boolean; rodando: boolean; tarefa: string | null; percentual: number;
   iniciada_em: string | null; terminada_em: string | null; pendentes: Record<string, number>;
 }
 
 const NOME_TAREFA: Record<string, string> = {
   mercado_livre: "reclamações do Mercado Livre", shopee: "devoluções da Shopee", shopee_rastreio: "rastreio da Shopee",
   olist_notas_devolucao: "notas de devolução da Olist", olist_cache_pedidos: "pedidos da Olist",
-  logistica_venda: "Full x orgânica", fatura_ml: "fatura do Mercado Livre", mediacao_origem: "quem abriu as mediações",
+  refazer_ml: "relendo o Mercado Livre", refazer_shopee: "relendo a Shopee", refazer_fatura: "baixando a fatura do ML",
+  fechamento: "gravando o fechamento", logistica_venda: "Full x orgânica", fatura_ml: "fatura do Mercado Livre", mediacao_origem: "quem abriu as mediações",
 };
 const hora = (iso: string) => new Date(iso).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
 
@@ -39,7 +40,7 @@ export function BarraSincronizacao({ onTerminou }: { onTerminou: () => void }) {
   const pendentes = Object.values(p.pendentes ?? {}).reduce((a, b) => a + b, 0);
   // Selo curto (o cabeçalho não tem espaço sobrando); o detalhe vai na dica do mouse.
   const texto = p.rodando
-    ? `${p.varredura ? "Varredura do dia" : "Sincronizando"} ${Math.floor(p.percentual)}%`
+    ? `${p.refazendo ? `Relendo fatura ${p.refazendo.slice(5, 7)}/${p.refazendo.slice(2, 4)}` : p.varredura ? "Varredura do dia" : "Sincronizando"} ${Math.floor(p.percentual)}%`
     : pendentes > 0 ? `Sincronizado ${hora(p.terminada_em!)} · faltam ${pendentes}` : `✓ Sincronizado ${hora(p.terminada_em!)}`;
   const dica = p.rodando
     ? `Agora: ${NOME_TAREFA[p.tarefa ?? ""] ?? p.tarefa ?? "iniciando"}`

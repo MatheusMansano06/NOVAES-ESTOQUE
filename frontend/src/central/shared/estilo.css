@@ -454,3 +454,4 @@
 .central-dev .sinc-selo.ok { color: #0f7a52; background: rgba(27, 175, 122, 0.12); }
 .central-dev .sinc-barra { position: absolute; left: 0; right: 0; bottom: -1px; height: 4px; background: rgba(42, 120, 214, 0.12); }
 .central-dev .sinc-barra span { display: block; height: 100%; background: #2a78d6; transition: width 0.6s ease; }
+.central-dev .link-botao { background: none; border: 0; padding: 0; color: #2a78d6; font: inherit; text-decoration: underline; cursor: pointer; }

@@ -262,6 +262,15 @@ async def bi_mensal(request: Request):
     return await run_in_threadpool(bi.mensal, _q(request, "meses", 3, int, 1, 12))
 
 
+async def bi_refazer_mes(request: Request):
+    """Botão "Refazer leitura" de um mês fechado: começa em segundo plano; a barra de progresso acompanha."""
+    fatura = request.path_params["fatura"]
+    if not re.fullmatch(r"\d{4}-\d{2}-01", fatura):
+        raise ValueError(f"Fatura inválida: {fatura!r}")
+    await run_in_threadpool(agenda.refazer_mes, fatura)
+    return {"iniciado": True, "fatura": fatura}
+
+
 async def full_identificar(request: Request):
     """Bipou etiqueta do Full: anúncio, SKU e produto na Olist."""
     return await run_in_threadpool(retirada_full.identificar, request.path_params["codigo"])
@@ -310,6 +319,7 @@ rotas = [
     _rota("/operacao/ultimas", operacao_ultimas),
     _rota("/bi/resumo", bi_resumo),
     _rota("/bi/mensal", bi_mensal),
+    _rota("/bi/mensal/{fatura}/refazer", bi_refazer_mes, "POST"),
     _rota("/sincronizacao", sincronizacao),
     _rota("/sincronizacao/progresso", sincronizacao_progresso),
     _rota("/retirada-full/{codigo}", full_identificar),

@@ -3,7 +3,7 @@
 from collections import Counter, defaultdict
 from datetime import date, datetime, timedelta, timezone
 
-from app.central.bi import fatura_ml, logistica, mediacao_origem
+from app.central.bi import fatura_ml, fechamento, logistica, mediacao_origem
 from app.central.financeiro.custos import custo_do_sku
 from app.central.mercado_livre import catalogo
 from app.central.operacao.servico import a_caminho_por_plataforma, linhas
@@ -252,37 +252,60 @@ def resumo(dias: int = 30, fatura: str | None = None) -> dict:
 
 
 
+CARENCIA_FECHAMENTO_DIAS = 7  # depois do dia 12 ainda chegam estornos e conferências daquele ciclo
+
+
+def _calcular_mes(chave: str, todas: list[dict], faturas: dict) -> dict:
+    ini, fim = fatura_ml.ciclo(chave)
+    do_ciclo = [l for l in todas if ini <= l["aberta_em"].date() <= fim]
+    valores = defaultdict(float)
+    sem_custo = 0
+    for l in do_ciclo:
+        if l["plataforma"] == "shopee":
+            valores["frete_shopee"] += l["custo_plataforma"] or 0
+        origem, valor = perda(l)
+        if origem and valor is None:
+            sem_custo += 1
+        elif origem:
+            valores[f"quebrado_{origem}"] += valor
+    ml = faturas.get(chave, {"cobrado": 0.0, "estornado": 0.0, "liquido": 0.0, "por_tipo": []})
+    total = ml["liquido"] + valores["frete_shopee"] + valores["quebrado_bancada"] + valores["quebrado_motivo"]
+    return {
+        "fatura": chave, "inicio": ini.isoformat(), "fim": fim.isoformat(), "aberto": fim >= _agora().date(),
+        "frete_ml": ml, "fatura_lida": chave in faturas,
+        **{k: round(valores[k], 2) for k in ("frete_shopee", "quebrado_bancada", "quebrado_motivo")},
+        "sem_custo": sem_custo, "total": round(total, 2),
+        "devolucoes": {p: sum(1 for l in do_ciclo if l["plataforma"] == p) for p in PLATAFORMAS},
+    }
+
+
+def fechar_mes(chave: str) -> dict:
+    """Recalcula o ciclo com o que está na base agora e regrava o fechamento (fim da releitura pesada)."""
+    mes = _calcular_mes(chave, linhas(), fatura_ml.por_fatura())
+    fechamento.gravar(chave, mes)
+    return {"total": mes["total"], "frete_ml": mes["frete_ml"]["liquido"]}
+
+
 def mensal(meses: int = 3) -> dict:
     """Quanto as devoluções custaram por ciclo da fatura do ML (dia 13 ao 12). Frete do ML = o que está na fatura;
     frete da Shopee = o que a plataforma informa na devolução; quebrado = conferência da bancada quando houve,
-    senão estimado pelo motivo (custo do produto). Devolução entra no ciclo pela data de abertura."""
-    chaves, d = [], _agora().date()
+    senão estimado pelo motivo (custo do produto). Devolução entra no ciclo pela data de abertura.
+    Ciclo fechado há mais de CARENCIA_FECHAMENTO_DIAS vira fechamento gravado e é lido de lá (não recalcula)."""
+    hoje = _agora().date()
+    chaves, d = [], hoje
     for _ in range(meses):
         chaves.append(fatura_ml.chave_do_dia(d))
         d = fatura_ml.ciclo(chaves[-1])[0].replace(day=1)
-    faturas = fatura_ml.por_fatura()
-    todas = linhas()
-    saida = []
+    saida, todas, faturas = [], None, None
     for chave in reversed(chaves):
-        ini, fim = fatura_ml.ciclo(chave)
-        do_ciclo = [l for l in todas if ini <= l["aberta_em"].date() <= fim]
-        valores = defaultdict(float)
-        sem_custo = 0
-        for l in do_ciclo:
-            if l["plataforma"] == "shopee":
-                valores["frete_shopee"] += l["custo_plataforma"] or 0
-            origem, valor = perda(l)
-            if origem and valor is None:
-                sem_custo += 1
-            elif origem:
-                valores[f"quebrado_{origem}"] += valor
-        ml = faturas.get(chave, {"cobrado": 0.0, "estornado": 0.0, "liquido": 0.0, "por_tipo": []})
-        total = ml["liquido"] + valores["frete_shopee"] + valores["quebrado_bancada"] + valores["quebrado_motivo"]
-        saida.append({
-            "fatura": chave, "inicio": ini.isoformat(), "fim": fim.isoformat(), "aberto": fim >= _agora().date(),
-            "frete_ml": ml, "fatura_lida": chave in faturas,
-            **{k: round(valores[k], 2) for k in ("frete_shopee", "quebrado_bancada", "quebrado_motivo")},
-            "sem_custo": sem_custo, "total": round(total, 2),
-            "devolucoes": {p: sum(1 for l in do_ciclo if l["plataforma"] == p) for p in PLATAFORMAS},
-        })
+        if gravado := fechamento.ler(chave):
+            saida.append({**gravado, "fechado": True})
+            continue
+        if todas is None:  # só lê a base se algum mês precisar ser calculado
+            todas, faturas = linhas(), fatura_ml.por_fatura()
+        mes = _calcular_mes(chave, todas, faturas)
+        pode_fechar = mes["fatura_lida"] and (hoje - fatura_ml.ciclo(chave)[1]).days > CARENCIA_FECHAMENTO_DIAS
+        if pode_fechar:
+            fechamento.gravar(chave, mes)
+        saida.append({**mes, "fechado": pode_fechar})
     return {"meses": saida}
