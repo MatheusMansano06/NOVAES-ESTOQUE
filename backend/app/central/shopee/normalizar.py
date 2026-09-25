@@ -24,6 +24,25 @@ MOTIVO = {
 }
 
 
+def resultado_disputa(dev: dict) -> str | None:
+    """A Returns API não diz "houve disputa" depois que ela acaba; o que sobra são as marcas dela:
+    - status SELLER_DISPUTE / JUDGING: disputa em andamento;
+    - reassessed_request_reason: a Shopee julgou e reclassificou o motivo do comprador;
+    - seller_compensation_status: fluxo de compensação ao vendedor, que só existe depois de contestar.
+    Resultado: reclassificou para culpa do comprador (ex.: "item errado" → "mudou de ideia") ou a devolução foi
+    cancelada/encerrada = ganha; compensação pendente = em andamento; o resto (reembolso com culpa da loja) = perdida.
+    ponytail: regra montada pelos campos da Returns API; se o painel da Shopee mostrar outro desfecho, ajustar aqui."""
+    reavaliado = dev.get("reassessed_request_reason") or "NONE"
+    compensacao = dev.get("seller_compensation_status") or ""
+    if dev["status"] not in DISPUTA and reavaliado == "NONE" and not compensacao:
+        return None
+    if dev["status"] in DISPUTA or dev["status"] in ("REQUESTED", "PROCESSING") or compensacao == "PENDING_REQUEST":
+        return "em_andamento"
+    if dev["status"] in ("CANCELLED", "CLOSED") or MOTIVO.get(reavaliado, ("", ""))[1] == "comprador":
+        return "ganha"
+    return "perdida"
+
+
 def _data(epoch: int | None) -> datetime | None:
     return datetime.fromtimestamp(epoch, timezone.utc) if epoch else None
 
@@ -67,8 +86,7 @@ def normalizar(dev: dict, financeiro: dict | None) -> dict:
         "afeta_reputacao": None,
         "prazo_vendedor": _data(dev.get("return_seller_due_date")),
         "condicao_produto": None,  # a Shopee não devolve revisão de condição pela API
-        # ponytail: disputa encerrada na Shopee não diz quem ganhou pela Returns API; só "em andamento" por ora.
-        "resultado_mediacao": "em_andamento" if dev["status"] in DISPUTA else None,
+        "resultado_mediacao": resultado_disputa(dev),
         "cobertura_aplicada": None,
         "itens": [{"item_id": i.get("item_id"), "model_id": i.get("model_id"),
                    "sku": i.get("variation_sku") or i.get("item_sku"), "quantidade": i.get("amount"),

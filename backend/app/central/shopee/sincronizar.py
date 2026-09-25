@@ -57,3 +57,11 @@ def atualizar_abertas() -> dict:
     registros = [normalizar({**b["devolucao"], "rastreio_reverso": rastreio_reverso(b["devolucao"])}, b.get("financeiro"))
                  for b in abertas if b.get("devolucao")]
     return {"relidas": devolucoes.salvar(registros)}
+
+
+def reprocessar_salvas() -> dict:
+    """Recalcula o formato único das devoluções já salvas a partir do bruto guardado (sem chamar a Shopee).
+    Usado uma vez quando a regra de normalização muda (ex.: marcas de disputa)."""
+    with Sessao() as s:
+        brutos = [d.bruto for d in s.scalars(select(Devolucao).where(Devolucao.plataforma == "shopee")) if (d.bruto or {}).get("devolucao")]
+    return {"reprocessadas": devolucoes.salvar([normalizar(b["devolucao"], b.get("financeiro")) for b in brutos])}

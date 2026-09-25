@@ -14,6 +14,7 @@ from app.central.mercado_livre.sincronizar import sincronizar as sincronizar_ml
 from app.central.olist import servico as olist_servico
 from app.central.db import UPLOADS
 from app.central.shopee.sincronizar import atualizar_abertas as atualizar_shopee
+from app.central.shopee.sincronizar import reprocessar_salvas as reprocessar_shopee
 from app.central.shopee.sincronizar import sincronizar as sincronizar_shopee
 
 log = logging.getLogger("central.agenda")
@@ -79,6 +80,15 @@ def _ml():
         return _ml_uma_vez()
 
 
+def _shopee_reprocessar():
+    """Uma vez só (marca em disco): aplica a regra nova de disputa da Shopee às devoluções já salvas."""
+    if _marca("shopee_disputas_v1").exists():
+        return None
+    resultado = reprocessar_shopee()
+    _marca("shopee_disputas_v1").write_text("ok", encoding="utf-8")
+    return resultado
+
+
 def _shopee_rastreio():
     if time.time() - _ultima_releitura_shopee["em"] < RELEITURA_SHOPEE_S:
         return estado.get("shopee_rastreio", {}).get("resultado")
@@ -92,6 +102,7 @@ TAREFAS = {
     "mercado_livre": _ml,
     "shopee": lambda: _com_carga("shopee", lambda dias: sincronizar_shopee(dias=dias)),
     "shopee_rastreio": _shopee_rastreio,
+    "shopee_reprocessar": _shopee_reprocessar,
     "olist_notas_devolucao": lambda: _com_carga("olist", lambda dias: olist_servico.sincronizar_notas_devolucao(dias=CARGA_INICIAL_DIAS if dias > 1 else 1)),
     "olist_cache_pedidos": conferencia_servico.aquecer_cache,
     "logistica_venda": logistica.completar,  # Full x orgânica das devoluções novas (BI)

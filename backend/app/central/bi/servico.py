@@ -145,15 +145,13 @@ SHOPEE_GANHA = {"CANCELLED", "CLOSED"}  # devolução encerrada sem reembolso
 
 
 def resultado_mediacao(l: dict, quem_abriu: dict) -> str | None:
-    """ML: vem da reclamação. Shopee: o status só diz "em disputa" enquanto ela dura; depois disso o resultado sai
-    do status final, para as devoluções que sabemos que foram disputadas (mediacao_origem ou contestadas pela Central)."""
-    if l["plataforma"] != "shopee":
+    """ML: vem da reclamação. Shopee: vem das marcas da disputa (shopee.normalizar.resultado_disputa); devolução
+    contestada pela Central sem marca ainda conta, pelo status."""
+    if l.get("resultado_mediacao") or l["plataforma"] != "shopee":
         return l.get("resultado_mediacao")
-    status = l.get("status_plataforma")
-    if status in SHOPEE_DISPUTA:
-        return "em_andamento"
-    if ("shopee", l["id_externo"]) not in quem_abriu and not l.get("contestada"):
+    if not l.get("contestada"):
         return None
+    status = l.get("status_plataforma")
     return "perdida" if status in SHOPEE_PERDIDA else "ganha" if status in SHOPEE_GANHA else "em_andamento"
 
 
