@@ -64,7 +64,10 @@ def _dinheiro(ls: list[dict]) -> dict:
     d = defaultdict(float)
     sem_custo = 0
     for l in ls:
-        d["frete_reverso"] += l["custo_plataforma"] or 0
+        frete = l["custo_plataforma"] or 0
+        d["frete_reverso"] += frete
+        # em mediação = ainda pode cair; ganha = estornado; o resto já está sendo cobrado
+        d[{"em_andamento": "frete_em_mediacao", "ganha": "frete_estornado"}.get(l.get("resultado_mediacao"), "frete_cobrado")] += frete
         origem, valor = perda(l)
         if origem and valor is None:
             sem_custo += 1
