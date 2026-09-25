@@ -13,7 +13,7 @@ from starlette.requests import Request
 from starlette.responses import FileResponse, Response
 from starlette.routing import Route
 
-from app.central import agenda
+from app.central import agenda, progresso
 from app.central.bi import servico as bi
 from app.central.conferencia import servico as conferencia
 from app.central.db import Base, Sessao, engine
@@ -278,6 +278,13 @@ async def sincronizacao(request: Request):
     return agenda.estado
 
 
+async def sincronizacao_progresso(request: Request):
+    """Barra da tela: % da rodada em andamento e o que ainda falta consultar para o BI ficar completo."""
+    return {**progresso.estado, "percentual": progresso.percentual(),
+            "pendentes": {nome: (agenda.estado.get(nome, {}).get("resultado") or {}).get("faltam", 0)
+                          for nome in ("mediacao_origem",)}}
+
+
 rotas = [
     _rota("/devolucoes", listar_devolucoes),
     _rota("/devolucoes/rastreio/{codigo}", por_rastreio),
@@ -304,6 +311,7 @@ rotas = [
     _rota("/bi/resumo", bi_resumo),
     _rota("/bi/mensal", bi_mensal),
     _rota("/sincronizacao", sincronizacao),
+    _rota("/sincronizacao/progresso", sincronizacao_progresso),
     _rota("/retirada-full/{codigo}", full_identificar),
     _rota("/retirada-full/{codigo}/entrada", full_entrada, "POST"),
 ]

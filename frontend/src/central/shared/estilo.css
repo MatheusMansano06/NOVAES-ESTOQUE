@@ -35,7 +35,7 @@
 
 /* ---------- Estrutura: o app ocupa a janela, sem rolagem ---------- */
 .central-dev .cd-app { height: 100vh; display: grid; grid-template-rows: 60px minmax(0, 1fr); overflow: hidden; }
-.central-dev .topo { display: flex; align-items: center; gap: 2.5rem; padding: 0 1.75rem; background: var(--papel); border-bottom: 1px solid var(--linha); }
+.central-dev .topo { position: relative; display: flex; align-items: center; gap: 2.5rem; padding: 0 1.75rem; background: var(--papel); border-bottom: 1px solid var(--linha); }
 .central-dev .voltar { width: 34px; height: 34px; margin-right: -1.5rem; border: 1px solid var(--linha); border-radius: 8px; background: var(--papel); color: var(--suave); font-size: 1.1rem; }
 .central-dev .voltar:hover { color: var(--tinta); border-color: var(--linha-forte); }
 .central-dev .marca-logo { width: 96px; height: 42px; object-fit: cover; object-position: center 50%; flex-shrink: 0; }
@@ -220,6 +220,7 @@
 .central-dev .tabela { width: 100%; border-collapse: collapse; font-size: 0.86rem; }
 .central-dev .tabela th { text-align: left; font-size: 0.75rem; color: var(--suave); font-weight: 500; padding: 0.5rem 0.6rem; border-bottom: 1px solid var(--linha);
   position: sticky; top: 0; background: var(--papel); }
+.central-dev .tabela th.num { text-align: right; }  /* título da coluna em cima do número */
 .central-dev .tabela td { padding: 0.6rem 0.6rem; border-bottom: 1px solid var(--linha); vertical-align: middle; white-space: nowrap; }
 .central-dev .tabela tbody tr { cursor: pointer; }
 .central-dev .tabela tbody tr:hover td { background: #fafbfc; }
@@ -444,3 +445,12 @@
 .central-dev .quebrado-total strong { font-size: 1.25rem; font-weight: 800; }
 .central-dev .quebrado-total.geral { background: var(--fundo); }
 @media (max-width: 1100px) { .central-dev .quebrados-totais { grid-template-columns: 1fr; } }
+
+/* Progresso da sincronização: selo no topo + faixa na borda de baixo do cabeçalho */
+.central-dev .sinc-selo { font-size: 0.78rem; font-weight: 600; padding: 0.25rem 0.6rem; border-radius: 99px; white-space: nowrap;
+  flex-shrink: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; cursor: help; }
+.central-dev .sinc-selo.rodando { color: #1d5fb0; background: rgba(42, 120, 214, 0.1); }
+.central-dev .sinc-selo.pendente { color: #9a6700; background: rgba(250, 178, 25, 0.14); }
+.central-dev .sinc-selo.ok { color: #0f7a52; background: rgba(27, 175, 122, 0.12); }
+.central-dev .sinc-barra { position: absolute; left: 0; right: 0; bottom: -1px; height: 4px; background: rgba(42, 120, 214, 0.12); }
+.central-dev .sinc-barra span { display: block; height: 100%; background: #2a78d6; transition: width 0.6s ease; }

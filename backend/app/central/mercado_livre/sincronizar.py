@@ -1,5 +1,6 @@
 from datetime import datetime, timedelta, timezone
 
+from app.central import progresso
 from app.central.devolucoes import servico as devolucoes
 
 from . import client
@@ -22,7 +23,7 @@ def sincronizar(dias: float = 30, todas_abertas: bool = False):
     desde = (datetime.now(timezone.utc) - timedelta(days=dias)).strftime("%Y-%m-%dT%H:%M:%S.000+00:00")
     salvas, falhas, reclamacoes = 0, [], 0
     # O ML não aceita só vendedor+data: exige um filtro "de verdade", então busca por status.
-    for status in ("opened", "closed"):
+    for parte, status in enumerate(("opened", "closed")):
         filtro_data = {} if status == "opened" and todas_abertas else {"range": f"last_updated:after:{desde}"}
         offset, total = 0, 1
         # ponytail: sequencial, ~4 chamadas por reclamação; paralelizar ou usar webhook quando o volume pesar.
@@ -34,7 +35,8 @@ def sincronizar(dias: float = 30, todas_abertas: bool = False):
             total = busca["paging"]["total"]
             offset += 100
             registros = []  # grava a cada página: uma carga longa que cair no meio não perde o que já veio
-            for claim in busca["data"]:
+            for n, claim in enumerate(busca["data"]):
+                progresso.parcial((parte + min(offset - 100 + n, total) / max(total, 1)) / 2)
                 try:
                     dev = client.get(f"/post-purchase/v2/claims/{claim['id']}/returns")
                     if not dev:
@@ -52,6 +54,7 @@ def sincronizar(dias: float = 30, todas_abertas: bool = False):
                     # Uma reclamação inacessível ou fora do padrão não pode travar as outras; fica registrada.
                     falhas.append({"claim_id": claim["id"], "tipo": claim["type"], "erro": f"{type(e).__name__}: {e}"[:200]})
             salvas += devolucoes.salvar(registros)
+            progresso.parcial((parte + min(offset, total) / max(total, 1)) / 2)
         reclamacoes += total
     salvas += _nao_entregues()
     return {"reclamacoes": reclamacoes, "devolucoes_salvas": salvas, "falhas": falhas}

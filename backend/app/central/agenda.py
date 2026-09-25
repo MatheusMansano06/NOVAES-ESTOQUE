@@ -1,8 +1,12 @@
 """Sincronização automática da Central (roda no scheduler do estoque, ver jobs.py)."""
 
 import logging
+import os
 import time
+from datetime import datetime
+from zoneinfo import ZoneInfo
 
+from app.central import progresso
 from app.central.bi import fatura_ml, logistica, mediacao_origem
 from app.central.conferencia import servico as conferencia_servico
 from app.central.mercado_livre.sincronizar import sincronizar as sincronizar_ml
@@ -13,10 +17,14 @@ from app.central.shopee.sincronizar import sincronizar as sincronizar_shopee
 
 log = logging.getLogger("central.agenda")
 
-VARREDURA_COMPLETA_S = 6 * 3600  # de 6 em 6 h relê toda reclamação aberta do ML, de qualquer data
+# Varredura do dia: 1x por dia, a partir desta hora (Brasília), relê toda reclamação aberta do ML (qualquer data) e os
+# últimos 2 dias inteiros de ML e Shopee, para o dia fechar 100% apurado. Fora dela só o incremental leve (3 h).
+# Antes era de 6 em 6 h e também a cada deploy (a memória zerava): a primeira rodada depois de subir travava.
+VARREDURA_HORA = int(os.getenv("CENTRAL_VARREDURA_HORA", "23"))
+VARREDURA_DIAS = 2
 RELEITURA_SHOPEE_S = 30 * 60  # rastreio das devoluções abertas da Shopee (postado ou não)
 CARGA_INICIAL_DIAS = 30
-_ultima_varredura = {"em": 0.0}
+_varredura = {"agora": False}
 _ultima_releitura_shopee = {"em": 0.0}
 
 
@@ -36,19 +44,28 @@ def _concluida(nome: str, dias: float) -> None:
         _marca(nome).write_text("ok", encoding="utf-8")
 
 
+def _hoje() -> str:
+    return datetime.now(ZoneInfo("America/Sao_Paulo")).date().isoformat()
+
+
+def _varredura_pendente() -> bool:
+    """Passou da hora e a varredura de hoje ainda não foi feita (marca em disco: sobrevive a deploy)."""
+    marca = _marca("varredura_dia")
+    feita = marca.read_text(encoding="utf-8") if marca.exists() else ""
+    return datetime.now(ZoneInfo("America/Sao_Paulo")).hour >= VARREDURA_HORA and feita != _hoje()
+
+
 def _com_carga(nome: str, sincronizar):
     dias = _dias(nome)
+    if _varredura["agora"] and dias < VARREDURA_DIAS:
+        dias = VARREDURA_DIAS
     resultado = sincronizar(dias)
     _concluida(nome, dias)
     return resultado
 
 
 def _ml_uma_vez():
-    completa = time.time() - _ultima_varredura["em"] > VARREDURA_COMPLETA_S
-    resultado = _com_carga("mercado_livre", lambda dias: sincronizar_ml(dias=dias, todas_abertas=completa or dias > 1))
-    if completa:
-        _ultima_varredura["em"] = time.time()
-    return resultado
+    return _com_carga("mercado_livre", lambda dias: sincronizar_ml(dias=dias, todas_abertas=_varredura["agora"] or dias > VARREDURA_DIAS))
 
 
 def _ml():
@@ -84,7 +101,20 @@ estado: dict[str, dict] = {}
 
 
 def rodar() -> None:
-    for nome, tarefa in TAREFAS.items():
+    _varredura["agora"] = _varredura_pendente()
+    progresso.iniciar(list(TAREFAS), varredura=_varredura["agora"])
+    try:
+        _rodar()
+        if _varredura["agora"] and estado.get("mercado_livre", {}).get("ok") and estado.get("shopee", {}).get("ok"):
+            _marca("varredura_dia").write_text(_hoje(), encoding="utf-8")  # falhou? a próxima rodada tenta de novo
+    finally:
+        _varredura["agora"] = False
+        progresso.terminar()
+
+
+def _rodar() -> None:
+    for i, (nome, tarefa) in enumerate(TAREFAS.items()):
+        progresso.tarefa(nome, i)
         try:
             estado[nome] = {"ok": True, "resultado": tarefa()}
         except Exception as e:  # noqa: BLE001 — registrar e seguir para a próxima tarefa

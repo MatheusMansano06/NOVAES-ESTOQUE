@@ -3,6 +3,7 @@ guarda aqui (o tipo de envio de uma venda não muda). Preenchido em segundo plan
 
 from sqlalchemy import Column, String, select
 
+from app.central import progresso
 from app.central.db import Base, Sessao
 from app.central.devolucoes.modelo import Devolucao
 
@@ -27,7 +28,8 @@ def mapa() -> dict[tuple[str, str], bool]:
 def _ml(devs: list[Devolucao]) -> dict[str, str]:
     from app.central.mercado_livre import client
     tipos = {}
-    for d in devs:
+    for n, d in enumerate(devs):
+        progresso.parcial(n / len(devs) / 2)  # ML é a primeira metade da tarefa; a Shopee é um lote só
         envio = (((d.bruto or {}).get("pedido") or {}).get("shipping") or {}).get("id")
         if envio:
             e = client.get(f"/shipments/{envio}", headers={"x-format-new": "true"}) or {}

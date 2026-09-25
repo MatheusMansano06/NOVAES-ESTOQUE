@@ -28,7 +28,8 @@ interface Resumo {
   por_logistica: { motivo: string; quantidade: number; pct: number;
     por_plataforma: Record<Plataforma, { full: number; organica: number; sem_info: number }> }[];
   mediacoes: { ganha: number; perdida: number; parcial: number; em_andamento: number; recuperado: number;
-    abertas_por?: Record<"vendedor" | "comprador" | "plataforma" | "desconhecido" | "sem_info", number> };
+    abertas_por?: Record<"vendedor" | "comprador" | "plataforma" | "desconhecido" | "sem_info", number>;
+    por_plataforma?: Record<Plataforma, Record<"ganha" | "perdida" | "parcial" | "em_andamento", number>> };
 }
 
 interface Mes {
@@ -222,9 +223,25 @@ export function BiPage({ nav }: { nav: Navegacao }) {
             <li><span className="legenda-marca" style={{ background: "#98a2b3" }} />Em andamento<strong>{r?.mediacoes.em_andamento ?? 0}</strong></li>
           </ul>
         </div>
+        {r?.mediacoes.por_plataforma && (
+          <table className="tabela compacta">
+            <thead><tr><th scope="col">Marketplace</th><th scope="col" className="num">Abertas</th><th scope="col" className="num">Ganhas</th>
+              <th scope="col" className="num">Parciais</th><th scope="col" className="num">Perdidas</th><th scope="col" className="num">Em andamento</th></tr></thead>
+            <tbody>
+              {PLATAFORMAS.map((p) => {
+                const v = r.mediacoes.por_plataforma![p];
+                return (
+                  <tr key={p}><td><LogoPlataforma plataforma={p} tamanho={16} comNome /></td>
+                    <td className="num"><strong>{v.ganha + v.parcial + v.perdida + v.em_andamento}</strong></td>
+                    <td className="num">{v.ganha}</td><td className="num">{v.parcial}</td><td className="num">{v.perdida}</td><td className="num">{v.em_andamento}</td></tr>
+                );
+              })}
+            </tbody>
+          </table>
+        )}
         <p className="recuperado">{reais(r?.mediacoes.recuperado)} <span className="sub">recuperados nas mediações ganhas (estimado)</span></p>
         {r?.mediacoes.abertas_por && (
-          <p className="sub">Todas as reclamações que foram para mediação: {Object.values(r.mediacoes.abertas_por).reduce((a, b) => a + b, 0)}
+          <p className="sub">Na Shopee só o vendedor abre disputa. No ML, todas as reclamações que foram para mediação: {Object.values(r.mediacoes.abertas_por).reduce((a, b) => a + b, 0)}
             {" "}· abertas pela Novaes {r.mediacoes.abertas_por.vendedor} · pelo comprador {r.mediacoes.abertas_por.comprador}
             {" "}· pela plataforma {r.mediacoes.abertas_por.plataforma}
             {r.mediacoes.abertas_por.sem_info + r.mediacoes.abertas_por.desconhecido > 0 &&

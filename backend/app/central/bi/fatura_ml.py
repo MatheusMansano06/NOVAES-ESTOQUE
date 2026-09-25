@@ -62,7 +62,7 @@ def _baixar(chave: str) -> list[TarifaDevolucaoML]:
         time.sleep(1.5)  # a API de faturamento corta rajadas com 429
 
 
-def sincronizar(meses: int = 4) -> dict:
+def sincronizar(meses: int = 3) -> dict:
     """Fatura fechada é lida uma vez; a aberta é relida de 3 em 3 h."""
     hoje = date.today()
     chaves, d = [], hoje
@@ -76,7 +76,11 @@ def sincronizar(meses: int = 4) -> dict:
         aberta = ciclo(chave)[1] >= hoje
         if (chave in ja_tem and not aberta) or time.time() - _lida_em.get(chave, 0) < RELEITURA_ABERTA_S:
             continue
-        linhas = _baixar(chave)
+        try:
+            linhas = _baixar(chave)
+        except RuntimeError as e:  # 429 da API de faturamento: este mês fica para a próxima rodada, os outros seguem
+            feitas[chave] = f"erro: {e}"[:120]
+            continue
         with Sessao.begin() as s:
             for l in linhas:
                 s.merge(l)

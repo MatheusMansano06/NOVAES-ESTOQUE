@@ -1,9 +1,11 @@
 """Quem levou a devolução para a mediação: a Novaes (vendedor), o comprador ou a própria plataforma.
 No ML vem do histórico de status da reclamação (a primeira entrada na etapa "dispute"); não muda depois, então
-é consultado uma vez e guardado aqui. Na Shopee, SELLER_DISPUTE = a Novaes contestou."""
+é consultado uma vez e guardado aqui. Na Shopee só o vendedor abre disputa; guardar aqui também é o que lembra
+que houve disputa depois que ela termina (a devolução sai de SELLER_DISPUTE/JUDGING e o status volta ao normal)."""
 
 from sqlalchemy import Column, String, select
 
+from app.central import progresso
 from app.central.db import Base, Sessao
 from app.central.devolucoes.modelo import Devolucao
 
@@ -38,10 +40,11 @@ def completar(limite: int = 300) -> dict:
                   s.scalars(select(Devolucao).where(Devolucao.em_mediacao.is_(True)))
                   if (d.plataforma, d.id_externo) not in conhecidas]
     feitas, erro = {}, None
-    for plataforma, id_externo, status in faltam[:limite]:
+    lote = faltam[:limite]
+    for n, (plataforma, id_externo, status) in enumerate(lote):
+        progresso.parcial(n / len(lote))
         if plataforma == "shopee":
-            # ponytail: só vê o status atual; disputa da Novaes que já virou JUDGING cai como "plataforma"
-            quem = "vendedor" if status == "SELLER_DISPUTE" else "plataforma"
+            quem = "vendedor"  # na Shopee só o vendedor abre disputa (dispute_return → SELLER_DISPUTE → JUDGING)
         elif erro:
             continue  # ML já falhou nesta rodada: não martela a API
         else:

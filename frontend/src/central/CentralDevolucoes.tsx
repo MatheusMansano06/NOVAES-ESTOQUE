@@ -6,6 +6,7 @@ import { HistoricoPage } from "./modules/historico/HistoricoPage";
 import { OperacaoPage } from "./modules/operacao/OperacaoPage";
 import { ResumoPage } from "./modules/resumo/ResumoPage";
 import { ehEtiquetaFull, RetiradaFullModal } from "./modules/retirada-full/RetiradaFullModal";
+import { BarraSincronizacao } from "./shared/BarraSincronizacao";
 import type { Plataforma } from "./shared/devolucao";
 import { Icone } from "./shared/Icone";
 import type { Envio } from "./shared/operacao";
@@ -43,6 +44,7 @@ function Central({ onVoltar }: { onVoltar: () => void }) {
   const abrir = useCallback((c: string) => setCodigo(c.trim()), []);
   const irPara = useCallback((t: IdTela, s?: string, f?: FiltroOperacao) => { setStatusInicial(s); setFiltroInicial(f); setTela(t); }, []);
   const fechar = useCallback(() => { setCodigo(null); setVersao((v) => v + 1); }, []);
+  const recarregar = useCallback(() => setVersao((v) => v + 1), []);
 
   // Painel vivo: a sincronização roda no servidor a cada 10 min; a tela busca os números a cada minuto.
   // Com o modal aberto não recarrega, para não mexer na conferência em andamento.
@@ -90,6 +92,7 @@ function Central({ onVoltar }: { onVoltar: () => void }) {
                  placeholder="Bipar ou buscar rastreio, pedido…" autoComplete="off" />
           <kbd>Ctrl K</kbd>
         </form>
+        <BarraSincronizacao onTerminou={recarregar} />
       </header>
 
       <main className="conteudo">

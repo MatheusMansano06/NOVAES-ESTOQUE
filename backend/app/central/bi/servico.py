@@ -139,6 +139,24 @@ def contar_logistica(ls: list[dict], full: dict[tuple[str, str], bool]) -> dict:
     return por
 
 
+SHOPEE_DISPUTA = {"SELLER_DISPUTE", "JUDGING"}
+SHOPEE_PERDIDA = {"ACCEPTED", "REFUND_PAID"}  # a Shopee decidiu pelo reembolso ao comprador
+SHOPEE_GANHA = {"CANCELLED", "CLOSED"}  # devolução encerrada sem reembolso
+
+
+def resultado_mediacao(l: dict, quem_abriu: dict) -> str | None:
+    """ML: vem da reclamação. Shopee: o status só diz "em disputa" enquanto ela dura; depois disso o resultado sai
+    do status final, para as devoluções que sabemos que foram disputadas (mediacao_origem ou contestadas pela Central)."""
+    if l["plataforma"] != "shopee":
+        return l.get("resultado_mediacao")
+    status = l.get("status_plataforma")
+    if status in SHOPEE_DISPUTA:
+        return "em_andamento"
+    if ("shopee", l["id_externo"]) not in quem_abriu and not l.get("contestada"):
+        return None
+    return "perdida" if status in SHOPEE_PERDIDA else "ganha" if status in SHOPEE_GANHA else "em_andamento"
+
+
 def _imagens(skus: list[dict]) -> None:
     """Completa a foto dos produtos do ML (a Shopee já manda no próprio item)."""
     fotos = catalogo.imagens(p["item_id"] for p in skus if not p["imagem"] and p["plataforma"] == "mercado_livre")
@@ -172,15 +190,18 @@ def resumo(dias: int = 30, fatura: str | None = None) -> dict:
              for n in range(dias_serie - 1, -1, -1)}
     por_plataforma = defaultdict(list)
     motivos, produtos, mediacoes, origens = Counter(), {}, Counter(), Counter()
+    mediacoes_plataforma = {p: Counter() for p in PLATAFORMAS}
     quem_abriu = mediacao_origem.mapa()
     for l in atual:
         por_plataforma[l["plataforma"]].append(l)
         motivos[l["motivo"]] += 1
-        if l.get("resultado_mediacao"):
-            quem = quem_abriu.get((l["plataforma"], l["id_externo"]), "sem_info")
+        resultado = resultado_mediacao(l, quem_abriu)
+        if resultado:
+            quem = "vendedor" if l["plataforma"] == "shopee" else quem_abriu.get((l["plataforma"], l["id_externo"]), "sem_info")
             origens[quem] += 1
             if quem == "vendedor":  # o gráfico é só das disputas que a Novaes abriu
-                mediacoes[l["resultado_mediacao"]] += 1
+                mediacoes[resultado] += 1
+                mediacoes_plataforma[l["plataforma"]][resultado] += 1
         dia = l["aberta_em"].date()
         if dia in serie:
             p = serie[dia]
@@ -223,7 +244,9 @@ def resumo(dias: int = 30, fatura: str | None = None) -> dict:
         "produtos": {p: [{**x, "pct": round(100 * x["quantidade"] / (len(por_plataforma[p]) or 1), 1)} for x in t] for p, t in top.items()},
         "mediacoes": {**{k: mediacoes.get(k, 0) for k in ("ganha", "perdida", "parcial", "em_andamento")},
                       "recuperado": _dinheiro(atual)["recuperado"],
-                      "abertas_por": {k: origens.get(k, 0) for k in ("vendedor", "comprador", "plataforma", "desconhecido", "sem_info")}},
+                      "abertas_por": {k: origens.get(k, 0) for k in ("vendedor", "comprador", "plataforma", "desconhecido", "sem_info")},
+                      "por_plataforma": {p: {k: n.get(k, 0) for k in ("ganha", "perdida", "parcial", "em_andamento")}
+                                         for p, n in mediacoes_plataforma.items()}},
     }
 
 
