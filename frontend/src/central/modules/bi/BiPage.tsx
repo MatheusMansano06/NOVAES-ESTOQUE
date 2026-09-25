@@ -23,6 +23,8 @@ interface Resumo {
   por_plataforma: Partial<Record<Plataforma, Dinheiro & { devolucoes: number }>>;
   motivos: { motivo: string; quantidade: number; pct: number }[];
   produtos: Partial<Record<Plataforma, { sku: string | null; nome: string | null; imagem: string | null; plataforma: Plataforma; quantidade: number; pct: number; prejuizo: number }[]>>;
+  por_logistica: { motivo: string; quantidade: number; pct: number;
+    por_plataforma: Record<Plataforma, { full: number; organica: number; sem_info: number }> }[];
   mediacoes: { ganha: number; perdida: number; parcial: number; em_andamento: number; recuperado: number };
 }
 
@@ -53,6 +55,7 @@ export function BiPage({ nav }: { nav: Navegacao }) {
   const perdido = (x?: Dinheiro) => (x?.perda_bancada ?? 0) + (x?.perda_motivo ?? 0);
   const q = r?.quebrados;
   const maiorMotivo = Math.max(1, ...(r?.motivos.map((m) => m.quantidade) ?? [1]));
+  const semInfo = r?.por_logistica.reduce((t, m) => t + PLATAFORMAS.reduce((s, p) => s + m.por_plataforma[p].sem_info, 0), 0) ?? 0;
   const mediacoesTotal = r ? r.mediacoes.ganha + r.mediacoes.perdida + r.mediacoes.parcial + r.mediacoes.em_andamento : 0;
 
   return (
@@ -153,6 +156,29 @@ export function BiPage({ nav }: { nav: Navegacao }) {
           </ul>
         </div>
         <p className="recuperado">{reais(r?.mediacoes.recuperado)} <span className="sub">recuperados nas mediações ganhas (estimado)</span></p>
+      </section>
+
+      <section className="cartao financeiro-detalhe">
+        <header><h2>Motivos do produto: venda Full x orgânica</h2>
+          <span className="sub">% = parte de todas as devoluções do período{semInfo > 0 && ` · ${semInfo} ainda sem consulta de Full na plataforma`}</span></header>
+        <table className="tabela compacta">
+          <thead>
+            <tr><th scope="col" rowSpan={2}>Motivo</th>
+              {PLATAFORMAS.map((p) => <th key={p} scope="colgroup" colSpan={2} className="num"><LogoPlataforma plataforma={p} tamanho={16} comNome /></th>)}
+              <th scope="col" rowSpan={2} className="num">Total</th><th scope="col" rowSpan={2} className="num">% das devoluções</th></tr>
+            <tr>{PLATAFORMAS.map((p) => [<th key={`${p}-f`} scope="col" className="num">Full</th>, <th key={`${p}-o`} scope="col" className="num">Orgânica</th>])}</tr>
+          </thead>
+          <tbody>
+            {r?.por_logistica.map((m) => (
+              <tr key={m.motivo} className={m.motivo === "diferente" ? "total-linha" : ""}>
+                <td>{MOTIVO[m.motivo] ?? m.motivo}</td>
+                {PLATAFORMAS.map((p) => [<td key={`${p}-f`} className="num">{m.por_plataforma[p].full}</td>,
+                                         <td key={`${p}-o`} className="num">{m.por_plataforma[p].organica}</td>])}
+                <td className="num">{m.quantidade}</td><td className="num">{m.pct.toLocaleString("pt-BR")}%</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
       </section>
 
       <section className="cartao financeiro-detalhe quebrados">

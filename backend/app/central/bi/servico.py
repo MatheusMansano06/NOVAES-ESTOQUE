@@ -3,6 +3,7 @@
 from collections import Counter, defaultdict
 from datetime import datetime, timedelta, timezone
 
+from app.central.bi import logistica
 from app.central.financeiro.custos import custo_do_sku
 from app.central.mercado_livre import catalogo
 from app.central.operacao.servico import a_caminho_por_plataforma, linhas
@@ -115,6 +116,25 @@ def quebrados(ls: list[dict]) -> dict:
     }
 
 
+MOTIVOS_LOGISTICA = ("diferente", "defeito", "nao_serviu")
+
+
+def por_logistica(ls: list[dict], full: dict[tuple[str, str], bool]) -> list[dict]:
+    """Motivos que apontam o produto: quantos por marketplace vieram de venda Full x orgânica.
+    sem_info = pedido ainda não consultado na plataforma (a agenda completa em segundo plano)."""
+    total = len(ls) or 1
+    saida = []
+    for m in MOTIVOS_LOGISTICA:
+        do_motivo = [l for l in ls if l["motivo"] == m]
+        por = {p: dict.fromkeys(("full", "organica", "sem_info"), 0) for p in PLATAFORMAS}
+        for l in do_motivo:
+            chave = (l["plataforma"], l["pedido"])
+            por[l["plataforma"]]["sem_info" if chave not in full else "full" if full[chave] else "organica"] += 1
+        saida.append({"motivo": m, "quantidade": len(do_motivo), "pct": round(100 * len(do_motivo) / total, 1),
+                      "por_plataforma": por})
+    return saida
+
+
 def _imagens(skus: list[dict]) -> None:
     """Completa a foto dos produtos do ML (a Shopee já manda no próprio item)."""
     fotos = catalogo.imagens(p["item_id"] for p in skus if not p["imagem"] and p["plataforma"] == "mercado_livre")
@@ -168,6 +188,7 @@ def resumo(dias: int = 30) -> dict:
         "dinheiro": _dinheiro(atual),
         "dinheiro_anterior": _dinheiro(anterior),
         "quebrados": quebrados(atual),
+        "por_logistica": por_logistica(atual, logistica.mapa()),
         "a_caminho": a_caminho_por_plataforma(atual),
         "serie": [{"dia": d.isoformat(), **{k: round(v, 2) for k, v in p.items()}} for d, p in serie.items()],
         "por_plataforma": {k: {"devolucoes": len(v), **_dinheiro(v)} for k, v in por_plataforma.items()},
