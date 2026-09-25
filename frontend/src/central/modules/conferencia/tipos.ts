@@ -35,6 +35,7 @@ export interface Lancamento {
   ok?: boolean;
   erro?: string;
   sku_olist?: string;
+  pela_olist?: boolean; // entrada feita pelo "devolver produtos" da Olist
 }
 
 export interface Conferencia {

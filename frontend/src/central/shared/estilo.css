@@ -298,6 +298,8 @@
 .central-dev .midia-comprador { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0.4rem; }
 .central-dev .midia-comprador img { width: 100%; aspect-ratio: 1; object-fit: cover; border-radius: 6px; border: 1px solid var(--linha); }
 .central-dev .midia-link { display: block; text-align: center; margin-top: 0.75rem; text-decoration: none; }
+.central-dev .passos-olist { margin: 0.4rem 0 0; padding-left: 1.2rem; display: grid; gap: 0.7rem; font-size: 0.86rem; }
+.central-dev .passos-olist .botao { display: inline-block; margin-top: 0.4rem; }
 @keyframes subir { from { transform: translateY(10px); opacity: 0.6; } }
 .central-dev .modal-topo { display: flex; align-items: center; gap: 1rem; padding: 0.9rem 1.25rem; background: var(--papel); border-bottom: 1px solid var(--linha); }
 .central-dev .modal-topo > div:first-child { margin-right: auto; }

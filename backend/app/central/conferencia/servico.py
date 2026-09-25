@@ -236,74 +236,17 @@ def _pedido_com_nota(d: Devolucao) -> dict:
     return pedidos[0]
 
 
-def gerar_nota_devolucao(devolucao_id: int) -> dict:
-    """Clique do operador: cria na Olist a NF de devolução do que voltou (fica Pendente até emitir)."""
-    with Sessao() as s:
-        d = s.get(Devolucao, devolucao_id)
-        conf = d and s.scalar(select(Conferencia).filter_by(devolucao_id=d.id))
-        if not conf:
-            raise LookupError("Confira o produto antes de gerar a NF de devolução.")
-        if conf.classe == "C" and not conf.erro_nosso:
-            raise ValueError("O produto vendido não voltou (divergente): não há o que devolver na nota.")
-        pedido = _pedido_com_nota(d)
-        skus_nota = {i["sku"] for i in pedido["itens"]}
-        voltou = {i["sku"]: i.get("quantidade") or 1 for i in d.itens if i.get("sku") in skus_nota}
-        # Plataforma sem SKU (ou SKU diferente do da nota): com um item só na nota, é ele; com vários, não chuto.
-        if not voltou and len(skus_nota) > 1:
-            raise ValueError("Não consegui ligar os itens devolvidos aos itens da NF: gere pela Olist.")
-        return olist.criar_nota_devolucao(pedido["nota"]["id"], voltou or None, d.pacote or d.pedido)
+def _movimentos(lanc: dict, via_olist: bool) -> list[tuple[str, str]]:
+    """(depósito, tipo) de um lançamento. O "devolver produtos" da Olist já deu entrada do vendido no Geral:
+    se ele era vendável, não falta nada; se era avaria, falta tirar do Geral e pôr na avaria."""
+    if via_olist and lanc["sku"] == "vendido" and lanc["tipo"] == "E":
+        return [] if lanc["deposito"] == "vendavel" else [("vendavel", "S"), (lanc["deposito"], "E")]
+    return [(lanc["deposito"], lanc["tipo"])]
 
 
-def emitir_nota_devolucao(devolucao_id: int) -> dict:
-    with Sessao() as s:
-        d = s.get(Devolucao, devolucao_id)
-        if not d:
-            raise LookupError(f"Devolução {devolucao_id} não existe")
-        nota = _pedido_com_nota(d).get("nota_devolucao")
-    if not nota:
-        raise LookupError("Esta venda ainda não tem NF de devolução para emitir.")
-    if nota["situacao"] != "Pendente":
-        raise Travada(f"A NF de devolução {nota['numero']} já está {nota['situacao'].lower()}.")
-    return olist.emitir_nota_devolucao(nota["id"])
-
-
-def devolver_produto(devolucao_id: int) -> dict:
-    """Um clique, como o "Devolver" da Olist: estoque no depósito que a conferência decidiu + NF de devolução
-    criada e emitida. A NF vai pela API, que não relança estoque. Passo já feito é pulado: repetir continua."""
-    with Sessao() as s:
-        d = s.get(Devolucao, devolucao_id)
-        conf = d and s.scalar(select(Conferencia).filter_by(devolucao_id=d.id))
-        if not conf:
-            raise LookupError("Confira o produto antes de devolver.")
-        precisa_estoque = bool(conf.lancamentos) and not conf.estoque_lancado_em
-        sem_nota = conf.classe == "C" and not conf.erro_nosso
-    if precisa_estoque:
-        falha = next((r for r in lancar_estoque(devolucao_id) if not r["ok"]), None)
-        if falha:
-            raise RuntimeError(f"Estoque não lançado: {falha['erro']}. Nenhuma nota foi gerada.")
-    if sem_nota:
-        return {"nota": "O produto vendido não voltou: não há nota de devolução."}
-    with Sessao() as s:
-        try:
-            pedido = _pedido_com_nota(s.get(Devolucao, devolucao_id))
-        except ValueError as e:
-            raise ValueError(f"Estoque lançado, mas a NF de devolução não: {e}")
-    if pedido["nota"]["situacao"] == "Cancelada":
-        return {"nota": "A NF de venda foi cancelada: não precisa de nota de devolução."}
-    nota = pedido.get("nota_devolucao")
-    if nota and nota["situacao"] != "Pendente":
-        return {"nota": f"NF de devolução {nota['numero']}: {nota['situacao'].lower()}."}
-    try:
-        if not nota:
-            nota = gerar_nota_devolucao(devolucao_id)
-        emitir_nota_devolucao(devolucao_id)
-    except (ValueError, RuntimeError) as e:
-        raise type(e)(f"Estoque lançado, mas a NF de devolução parou: {e}. Clique de novo para terminar.")
-    return {"nota": f"NF de devolução {nota['numero']} enviada para a SEFAZ."}
-
-
-def lancar_estoque(devolucao_id: int) -> list[dict]:
-    """Executa na Olist os lançamentos decididos na conferência. Só roda por clique do operador."""
+def lancar_estoque(devolucao_id: int, via_olist: bool = False) -> list[dict]:
+    """Executa na Olist os lançamentos decididos na conferência. Só roda por clique do operador.
+    via_olist: o operador já fez o "devolver produtos" da Olist (que devolve ao Geral e gera a NF)."""
     with Sessao.begin() as s:
         d = s.get(Devolucao, devolucao_id)
         conf = d and s.scalar(select(Conferencia).filter_by(devolucao_id=d.id))
@@ -311,6 +254,11 @@ def lancar_estoque(devolucao_id: int) -> list[dict]:
             raise LookupError(f"Devolução {devolucao_id} ainda não foi conferida")
         if conf.estoque_lancado_em:
             raise Travada(f"Estoque já lançado em {conf.estoque_lancado_em:%d/%m/%Y %H:%M}.")
+        if via_olist and not _pedido_com_nota(d).get("nota_devolucao"):
+            olist.sincronizar_notas_devolucao(dias=2)  # o índice atualiza a cada 10 min; pode ter acabado de devolver
+            if not _pedido_com_nota(d).get("nota_devolucao"):
+                raise ValueError("A Olist ainda não mostra a NF de devolução desta venda. "
+                                 "Faça o \"devolver produtos\" na nota de venda e tente de novo.")
         anteriores = conf.estoque_resultado or []
         quantidade = sum(i.get("quantidade") or 0 for i in d.itens) or 1
         vendido = _produto_vendido(d) if any(l["sku"] == "vendido" for l in conf.lancamentos) else None
@@ -327,17 +275,19 @@ def lancar_estoque(devolucao_id: int) -> list[dict]:
                 resultado.append(anteriores[n])  # já feito numa tentativa anterior: não repetir
                 continue
             produto_id, sku = vendido if lanc["sku"] == "vendido" else recebido
-            item = {**lanc, "sku_olist": sku, "produto_id": produto_id, "quantidade": quantidade}
-            # Kit lança por componente; os já lançados numa tentativa anterior não repetem.
+            item = {**lanc, "sku_olist": sku, "produto_id": produto_id, "quantidade": quantidade,
+                    "pela_olist": via_olist and lanc["sku"] == "vendido" and lanc["tipo"] == "E"}
+            # Kit lança por componente; o que já foi feito numa tentativa anterior não repete.
             feitos = list(anteriores[n].get("feitos") or []) if n < len(anteriores) else []
             try:
                 for pid, sku_peca, qtd in olist.pecas(produto_id, sku, quantidade):
-                    if pid in feitos:
-                        continue
-                    olist.movimentar(pid, olist.deposito_id(lanc["deposito"], d.plataforma), lanc["tipo"],
-                                     qtd, custo_do_sku(sku_peca),
-                                     f"Central de Devoluções: {d.plataforma} {d.id_externo} (classe {conf.classe})")
-                    feitos.append(pid)
+                    for deposito, tipo in _movimentos(lanc, via_olist):
+                        chave = f"{pid}:{deposito}:{tipo}"
+                        if chave in feitos or pid in feitos:  # pid solto = registro de antes da transferência
+                            continue
+                        olist.movimentar(pid, olist.deposito_id(deposito, d.plataforma), tipo, qtd, custo_do_sku(sku_peca),
+                                         f"Central de Devoluções: {d.plataforma} {d.id_externo} (classe {conf.classe})")
+                        feitos.append(chave)
                 resultado.append({**item, "ok": True, "feitos": feitos})
             except RuntimeError as e:
                 resultado.append({**item, "ok": False, "erro": str(e), "feitos": feitos})

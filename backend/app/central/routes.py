@@ -149,9 +149,10 @@ async def conferencia_registrar(request: Request):
     return await run_in_threadpool(conferencia.registrar, _id(request), _constatacao(await _corpo(request)))
 
 
-async def conferencia_devolver(request: Request):
-    """Clique do operador: estoque + NF de devolução criada e emitida, como o "Devolver" da Olist."""
-    return await run_in_threadpool(conferencia.devolver_produto, _id(request))
+async def conferencia_lancar_estoque(request: Request):
+    """Clique do operador. via_olist: já fez o "devolver produtos" na Olist (estoque no Geral + NF)."""
+    via_olist = (await _corpo(request)).get("via_olist") is True
+    return await run_in_threadpool(conferencia.lancar_estoque, _id(request), via_olist)
 
 
 async def conferencia_chamado_manual(request: Request):
@@ -275,7 +276,7 @@ rotas = [
     _rota("/conferencia/evidencias/{id:int}", conferencia_ver_evidencia),
     _rota("/conferencia/{codigo}", conferencia_buscar),
     _rota("/conferencia/{id:int}", conferencia_registrar, "POST"),
-    _rota("/conferencia/{id:int}/devolver", conferencia_devolver, "POST"),
+    _rota("/conferencia/{id:int}/lancar-estoque", conferencia_lancar_estoque, "POST"),
     _rota("/conferencia/{id:int}/chamado-manual", conferencia_chamado_manual, "POST"),
     _rota("/conferencia/{id:int}/chamado-manual/aberto", conferencia_chamado_aberto, "POST"),
     _rota("/conferencia/{id:int}/evidencias", conferencia_evidencia, "POST"),

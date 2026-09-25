@@ -48,15 +48,13 @@ export function Veredito({ tela, onAtualizar, onIrParaProvas }: Props) {
                   <li key={`${l.sku}-${l.deposito}-${l.tipo}`} className={feito ? (feito.ok ? "ok" : "falhou") : ""}>
                     <strong>{l.tipo === "E" ? "Entrada" : "Saída"}</strong> do {l.sku === "vendido" ? "produto vendido" : "produto que chegou"}
                     {" "}em {DEPOSITO[l.deposito]}{l.deposito === "avaria" ? ` ${PLATAFORMA[d.plataforma]}` : ""}
-                    {feito && <small>{feito.ok ? `Feito (${feito.sku_olist})` : `Falhou: ${feito.erro}`}</small>}
+                    {feito && <small>{feito.ok ? `Feito${feito.pela_olist ? " pela Olist" : ""} (${feito.sku_olist})` : `Falhou: ${feito.erro}`}</small>}
                   </li>
                 );
               })}
             </ul>
           )}
-          {c.estoque_lancado_em && <p className="aviso ok">Estoque lançado em {quando(c.estoque_lancado_em)}.</p>}
-          <NotaDevolucao tela={tela} />
-          <DevolverProduto tela={tela} onFeito={onAtualizar} />
+          <Devolucao tela={tela} onFeito={onAtualizar} />
         </section>
 
         <section aria-labelledby="t-contestar">
@@ -79,31 +77,29 @@ export function Veredito({ tela, onAtualizar, onIrParaProvas }: Props) {
   );
 }
 
-/** A NF de devolução ainda precisa ser criada ou emitida? Mesmas regras do backend (devolver_produto). */
-function notaPendente(tela: Tela): boolean {
-  const pedido = tela.olist.pedidos.find((p) => p.nota);
-  const c = tela.conferencia!;
-  if (!pedido?.nota || pedido.nota.situacao === "Cancelada" || (c.classe === "C" && !c.erro_nosso)) return false;
-  return !pedido.nota_devolucao || pedido.nota_devolucao.situacao === "Pendente";
-}
-
-/** Um clique, como o "Devolver" da Olist: lança o estoque no depósito certo e cria + emite a NF de devolução. */
-function DevolverProduto({ tela, onFeito }: { tela: Tela; onFeito: () => void }) {
+/** Com NF de venda autorizada, a devolução é pelo "devolver produtos" da Olist (devolve ao Geral e gera a NF);
+ *  a Central só completa o que falta (avaria: tira do Geral e põe na avaria). Sem NF, a Central lança tudo. */
+function Devolucao({ tela, onFeito }: { tela: Tela; onFeito: () => void }) {
   const [enviando, setEnviando] = useState(false);
   const [erro, setErro] = useState<string | null>(null);
   const c = tela.conferencia!;
-  const falta_estoque = c.lancamentos.length > 0 && !c.estoque_lancado_em;
-  const falta_nota = notaPendente(tela);
-  if (!falta_estoque && !falta_nota) return null;
+  const pedido = tela.olist.pedidos.find((p) => p.nota);
+  const nota = pedido?.nota;
+  const devolucaoNota = pedido?.nota_devolucao;
+  const pelaOlist = !!nota && nota.situacao !== "Cancelada" && !(c.classe === "C" && !c.erro_nosso);
+  const avaria = c.lancamentos.some((l) => l.deposito === "avaria");
 
-  async function devolver() {
-    const passos = [falta_estoque && "lança o estoque na Olist", falta_nota && "cria e emite a NF de devolução na SEFAZ"]
-      .filter(Boolean).join(" e ");
-    if (!window.confirm(`Devolver o produto agora? Isso ${passos}. Nota autorizada só se desfaz com cancelamento fiscal.`)) return;
+  async function lancar(viaOlist: boolean) {
+    const pergunta = viaOlist
+      ? avaria
+        ? `Confirma que já fez o "devolver produtos" na Olist? Agora a Central tira do Geral e põe na Avaria ${PLATAFORMA[tela.devolucao.plataforma]}.`
+        : `Confirma que já fez o "devolver produtos" na Olist? O estoque já voltou ao Geral por lá; a Central só registra.`
+      : "Lançar estes movimentos no estoque da Olist agora? Isso altera o saldo real.";
+    if (!window.confirm(pergunta)) return;
     setErro(null);
     setEnviando(true);
     try {
-      await api.post(`/conferencia/${tela.devolucao.id}/devolver`);
+      await api.post(`/conferencia/${tela.devolucao.id}/lancar-estoque`, { via_olist: viaOlist });
     } catch (e) {
       setErro((e as Error).message);
     } finally {
@@ -112,52 +108,55 @@ function DevolverProduto({ tela, onFeito }: { tela: Tela; onFeito: () => void })
     }
   }
 
-  const parcial = (c.estoque_resultado ?? []).length > 0 || (!falta_estoque && falta_nota);
-  return (
-    <>
-      <button type="button" className="botao principal" onClick={devolver} disabled={enviando}>
-        {enviando ? "Devolvendo…" : parcial ? "Terminar devolução" : "Devolver produto"}
+  let acao;
+  if (c.estoque_lancado_em) {
+    acao = <p className="aviso ok">Estoque lançado em {quando(c.estoque_lancado_em)}.</p>;
+  } else if (pelaOlist) {
+    acao = (
+      <ol className="passos-olist">
+        <li>
+          Na Olist, abra a NF de venda {nota!.numero}, vá em <strong>mais ações → devolver produtos</strong> e confirme.
+          Ela devolve o estoque ao Geral e gera a NF de devolução.
+          <a className="botao" href={`https://erp.olist.com/notas_fiscais#edit/${nota!.id}`} target="_blank" rel="noopener noreferrer">
+            Abrir NF de venda na Olist ↗</a>
+        </li>
+        <li>
+          Volte aqui e confirme.{avaria && " Como é avaria, a Central move o produto do Geral para a avaria."}
+          <button type="button" className="botao principal" onClick={() => lancar(true)} disabled={enviando}>
+            {enviando ? "Conferindo…" : "Já devolvi na Olist"}</button>
+        </li>
+      </ol>
+    );
+  } else if (c.lancamentos.length > 0) {
+    acao = (
+      <button type="button" className="botao principal" onClick={() => lancar(false)} disabled={enviando}>
+        {enviando ? "Lançando…" : (c.estoque_resultado ?? []).length > 0 ? "Terminar lançamento na Olist" : "Lançar estoque na Olist"}
       </button>
-      {erro && <p className="aviso erro" role="alert">{erro}</p>}
-    </>
-  );
-}
-
-function NotaDevolucao({ tela }: { tela: Tela }) {
-  const pedido = tela.olist.pedidos.find((p) => p.nota);
-  const c = tela.conferencia!;
-
-  let conteudo;
-  if (!pedido?.nota) {
-    conteudo = <p className="aviso">{tela.olist.erro ? "Olist indisponível agora." : "Sem NF de venda na Olist para este pedido."}</p>;
-  } else if (pedido.nota.situacao === "Cancelada") {
-    conteudo = <p className="aviso">A NF de venda foi cancelada: não precisa de nota de devolução.</p>;
-  } else if (c.classe === "C" && !c.erro_nosso) {
-    conteudo = <p className="aviso">O produto vendido não voltou: não há nota de devolução a fazer.</p>;
-  } else if (!pedido.nota_devolucao) {
-    conteudo = <p className="sub">Será criada e emitida junto com a devolução do produto.</p>;
-  } else if (pedido.nota_devolucao.situacao === "Pendente") {
-    conteudo = <p className="sub">NF de devolução {pedido.nota_devolucao.numero} criada, falta emitir.</p>;
-  } else {
-    conteudo = <p className="aviso ok">NF de devolução {pedido.nota_devolucao.numero}: {pedido.nota_devolucao.situacao.toLowerCase()}.</p>;
+    );
   }
 
   return (
-    <div className="bloco-nota">
-      <h4>NF de devolução</h4>
-      {conteudo}
-      <div className="linha-botoes">
-        {/* A NF de devolução é documento próprio: não aparece dentro do pedido de venda, só em Notas Fiscais. */}
-        {pedido?.nota_devolucao && (
-          <a className="botao" href={`https://erp.olist.com/notas_fiscais#edit/${pedido.nota_devolucao.id}`}
-             target="_blank" rel="noopener noreferrer">Ver NF de devolução na Olist ↗</a>
-        )}
-        {pedido && (
-          <a className="botao" href={`https://erp.olist.com/vendas#edit/${pedido.id}`} target="_blank" rel="noopener noreferrer">
-            Ver pedido na Olist ↗</a>
+    <>
+      {acao}
+      {erro && <p className="aviso erro" role="alert">{erro}</p>}
+      <div className="bloco-nota">
+        <h4>NF de devolução</h4>
+        {!nota ? (
+          <p className="aviso">{tela.olist.erro ? "Olist indisponível agora." : "Sem NF de venda na Olist para este pedido."}</p>
+        ) : nota.situacao === "Cancelada" ? (
+          <p className="aviso">A NF de venda foi cancelada: não precisa de nota de devolução.</p>
+        ) : !pelaOlist ? (
+          <p className="aviso">O produto vendido não voltou: não há nota de devolução a fazer.</p>
+        ) : devolucaoNota ? (
+          <p className={devolucaoNota.situacao === "Pendente" ? "aviso" : "aviso ok"}>
+            NF de devolução {devolucaoNota.numero} (série {devolucaoNota.serie}): {devolucaoNota.situacao.toLowerCase()}.
+            {devolucaoNota.situacao === "Pendente" && " Emita pela Olist (Notas Fiscais, filtro Entrada)."}
+          </p>
+        ) : (
+          <p className="sub">Sai junto com o "devolver produtos" da Olist.</p>
         )}
       </div>
-    </div>
+    </>
   );
 }
 

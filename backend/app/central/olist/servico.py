@@ -1,6 +1,5 @@
 """O que a conferência precisa saber da Olist sobre um pedido de marketplace."""
 
-import json
 import os
 import re
 from concurrent.futures import ThreadPoolExecutor
@@ -12,7 +11,6 @@ from app.central.db import Sessao
 
 from . import client
 from .modelo import NotaDevolucao, PedidoCache
-from .nota_devolucao import montar
 
 VALIDADE_CACHE = timedelta(hours=6)
 
@@ -127,38 +125,6 @@ def nota_devolucao_da_venda(chave_venda: str | None) -> dict | None:
         n = s.scalar(select(NotaDevolucao).where(NotaDevolucao.chave_venda == chave_venda).order_by(NotaDevolucao.id.desc()))
         return n and {"id": n.id, "numero": n.numero, "serie": n.serie, "situacao": n.situacao,
                       "emitida_em": n.emitida_em, "itens": n.itens}
-
-
-def criar_nota_devolucao(id_nota_venda: int, devolvidos: dict[str, float] | None, pedido_marketplace: str | None) -> dict:
-    """Cria a NF de devolução (fica Pendente na Olist; emitir é outro clique). Trava a segunda nota para a
-    mesma venda, inclusive se a equipe já tiver feito a devolução pelo próprio recurso da Olist."""
-    venda = client.get(f"/notas/{id_nota_venda}") or {}
-    situacao = SITUACAO_NOTA.get(int(venda.get("situacao") or 0))
-    if situacao != "Autorizada":
-        raise ValueError(f"A NF de venda está {situacao or 'indisponível'}: só nota autorizada recebe devolução.")
-    # O índice atualiza a cada 10 min; alguém pode ter feito a devolução pela Olist agora há pouco.
-    sincronizar_notas_devolucao(dias=2)
-    if existente := nota_devolucao_da_venda(venda["chaveAcesso"]):
-        raise ValueError(f"Esta venda já tem NF de devolução {existente['numero']} ({existente['situacao']}).")
-    payload = montar(venda, devolvidos, date.today(), pedido_marketplace)
-    registro = client.v2("nota.fiscal.incluir", nota=json.dumps(payload))["registros"][0]["registro"]
-    nota = NotaDevolucao(id=int(registro["id"]), numero=str(registro.get("numero") or ""), serie=registro.get("serie"),
-                         situacao=SITUACAO_NOTA[1], emitida_em=date.today(), chave_venda=venda["chaveAcesso"],
-                         itens=[{"codigo": i["item"]["codigo"], "quantidade": i["item"]["quantidade"]}
-                                for i in payload["nota_fiscal"]["itens"]])
-    with Sessao.begin() as s:
-        s.merge(nota)  # entra no índice na hora: é isso que trava uma segunda criação
-    return {"id": nota.id, "numero": nota.numero, "serie": nota.serie, "situacao": nota.situacao}
-
-
-def emitir_nota_devolucao(id_nota: int) -> dict:
-    """Manda a nota para a SEFAZ. A situação real volta na próxima atualização do índice."""
-    retorno = client.v2("nota.fiscal.emitir", id=str(id_nota), enviarEmail="N")
-    nota = retorno.get("nota_fiscal") or {}
-    with Sessao.begin() as s:
-        if indexada := s.get(NotaDevolucao, id_nota):
-            indexada.situacao = nota.get("descricao_situacao") or "Enviada para emissão"
-    return {"id": id_nota, "situacao": nota.get("descricao_situacao"), "chave": nota.get("chave_acesso")}
 
 
 def descricao_em_cache(numero: str) -> str | None:
