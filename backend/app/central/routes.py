@@ -291,7 +291,7 @@ async def sincronizacao_progresso(request: Request):
     """Barra da tela: % da rodada em andamento e o que ainda falta consultar para o BI ficar completo."""
     return {**progresso.estado, "percentual": progresso.percentual(),
             "pendentes": {nome: (agenda.estado.get(nome, {}).get("resultado") or {}).get("faltam", 0)
-                          for nome in ("mediacao_origem",)}}
+                          for nome in ("mediacao_origem", "mediacao_atuacao")}}
 
 
 rotas = [

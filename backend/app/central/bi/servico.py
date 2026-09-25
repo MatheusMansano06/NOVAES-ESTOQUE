@@ -191,15 +191,22 @@ def resumo(dias: int = 30, fatura: str | None = None) -> dict:
     por_plataforma = defaultdict(list)
     motivos, produtos, mediacoes, origens = Counter(), {}, Counter(), Counter()
     mediacoes_plataforma = {p: Counter() for p in PLATAFORMAS}
-    quem_abriu = mediacao_origem.mapa()
+    quem_abriu, atuacao, atuacoes = mediacao_origem.mapa(), mediacao_origem.atuou(), Counter()
     for l in atual:
         por_plataforma[l["plataforma"]].append(l)
         motivos[l["motivo"]] += 1
         resultado = resultado_mediacao(l, quem_abriu)
         if resultado:
-            quem = "vendedor" if l["plataforma"] == "shopee" else quem_abriu.get((l["plataforma"], l["id_externo"]), "sem_info")
+            chave = (l["plataforma"], l["id_externo"])
+            quem = "vendedor" if l["plataforma"] == "shopee" else quem_abriu.get(chave, "sem_info")
             origens[quem] += 1
-            if quem == "vendedor":  # o gráfico é só das disputas que a Novaes abriu
+            # O gráfico é das mediações em que a Novaes ATUOU (abriu, mandou prova ao mediador ou contestou a revisão):
+            # no ML quem abre é quase sempre o comprador, e "abertas pela Novaes" ficava perto de zero.
+            conf = l["conferencia"] or {}
+            novaes = (l["plataforma"] == "shopee" or quem == "vendedor" or atuacao.get(chave)
+                      or l.get("contestada") or conf.get("chamado_aberto_em"))  # contestou pela Central ou por chamado
+            atuacoes["atuou" if novaes else "sem_info" if chave not in atuacao else "nao_atuou"] += 1
+            if novaes:
                 mediacoes[resultado] += 1
                 mediacoes_plataforma[l["plataforma"]][resultado] += 1
         dia = l["aberta_em"].date()
@@ -245,6 +252,7 @@ def resumo(dias: int = 30, fatura: str | None = None) -> dict:
         "mediacoes": {**{k: mediacoes.get(k, 0) for k in ("ganha", "perdida", "parcial", "em_andamento")},
                       "recuperado": _dinheiro(atual)["recuperado"],
                       "abertas_por": {k: origens.get(k, 0) for k in ("vendedor", "comprador", "plataforma", "desconhecido", "sem_info")},
+                      "atuacao": {k: atuacoes.get(k, 0) for k in ("atuou", "nao_atuou", "sem_info")},
                       "por_plataforma": {p: {k: n.get(k, 0) for k in ("ganha", "perdida", "parcial", "em_andamento")}
                                          for p, n in mediacoes_plataforma.items()}},
     }

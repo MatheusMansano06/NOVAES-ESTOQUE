@@ -97,6 +97,7 @@ TAREFAS = {
     "logistica_venda": logistica.completar,  # Full x orgânica das devoluções novas (BI)
     "fatura_ml": fatura_ml.sincronizar,  # tarifas de devolução da fatura do ML (BI mensal)
     "mediacao_origem": mediacao_origem.completar,  # quem abriu cada mediação (BI)
+    "mediacao_atuacao": mediacao_origem.completar_atuacao,  # o que a Novaes fez em cada mediação (BI)
 }
 estado: dict[str, dict] = {}
 
@@ -153,6 +154,7 @@ def refazer_mes(chave: str) -> None:
         "refazer_fatura": lambda: fatura_ml.refazer(chave),
         "logistica_venda": lambda: logistica.completar(limite=5000),
         "mediacao_origem": lambda: mediacao_origem.completar(limite=5000),
+        "mediacao_atuacao": lambda: mediacao_origem.completar_atuacao(limite=5000),
         "fechamento": lambda: servico.fechar_mes(chave),
     }
 

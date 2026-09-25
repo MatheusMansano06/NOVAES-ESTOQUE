@@ -30,7 +30,8 @@ interface Resumo {
     por_plataforma: Record<Plataforma, { full: number; organica: number; sem_info: number }> }[];
   mediacoes: { ganha: number; perdida: number; parcial: number; em_andamento: number; recuperado: number;
     abertas_por?: Record<"vendedor" | "comprador" | "plataforma" | "desconhecido" | "sem_info", number>;
-    por_plataforma?: Record<Plataforma, Record<"ganha" | "perdida" | "parcial" | "em_andamento", number>> };
+    por_plataforma?: Record<Plataforma, Record<"ganha" | "perdida" | "parcial" | "em_andamento", number>>;
+    atuacao?: Record<"atuou" | "nao_atuou" | "sem_info", number> };
 }
 
 interface Mes {
@@ -226,7 +227,7 @@ export function BiPage({ nav }: { nav: Navegacao }) {
       </section>
       ))}
       <section className="cartao">
-        <header><h2>Mediações que a Novaes abriu</h2>
+        <header><h2>Mediações que a Novaes contestou</h2>
           <span className="sub">{mediacoesTotal} em {dias} dias · {(mediacoesTotal / dias).toLocaleString("pt-BR", { maximumFractionDigits: 1 })} por dia</span></header>
         <div className="rosca-e-legenda">
           <Rosca centro={String(mediacoesTotal)} rotulo="mediações" fatias={[
@@ -244,7 +245,7 @@ export function BiPage({ nav }: { nav: Navegacao }) {
         </div>
         {r?.mediacoes.por_plataforma && (
           <table className="tabela compacta">
-            <thead><tr><th scope="col">Marketplace</th><th scope="col" className="num">Abertas</th><th scope="col" className="num">Ganhas</th>
+            <thead><tr><th scope="col">Marketplace</th><th scope="col" className="num">Contestadas</th><th scope="col" className="num">Ganhas</th>
               <th scope="col" className="num">Parciais</th><th scope="col" className="num">Perdidas</th><th scope="col" className="num">Em andamento</th></tr></thead>
             <tbody>
               {PLATAFORMAS.map((p) => {
@@ -259,12 +260,14 @@ export function BiPage({ nav }: { nav: Navegacao }) {
           </table>
         )}
         <p className="recuperado">{reais(r?.mediacoes.recuperado)} <span className="sub">recuperados nas mediações ganhas (estimado)</span></p>
-        {r?.mediacoes.abertas_por && (
-          <p className="sub">Na Shopee só o vendedor abre disputa. No ML, todas as reclamações que foram para mediação: {Object.values(r.mediacoes.abertas_por).reduce((a, b) => a + b, 0)}
-            {" "}· abertas pela Novaes {r.mediacoes.abertas_por.vendedor} · pelo comprador {r.mediacoes.abertas_por.comprador}
-            {" "}· pela plataforma {r.mediacoes.abertas_por.plataforma}
-            {r.mediacoes.abertas_por.sem_info + r.mediacoes.abertas_por.desconhecido > 0 &&
-              ` · ainda sem consulta ${r.mediacoes.abertas_por.sem_info + r.mediacoes.abertas_por.desconhecido}`}</p>
+        {r?.mediacoes.abertas_por && r.mediacoes.atuacao && (
+          <p className="sub">
+            Contestou = entrou na mediação e se defendeu (mandou prova ao mediador, contestou a revisão da devolução ou abriu
+            chamado pela Central). Mediações no período: {Object.values(r.mediacoes.abertas_por).reduce((a, b) => a + b, 0)}
+            {" "}· a Novaes contestou {r.mediacoes.atuacao.atuou} · não contestou {r.mediacoes.atuacao.nao_atuou}
+            {r.mediacoes.atuacao.sem_info > 0 && ` · ainda sem consulta ${r.mediacoes.atuacao.sem_info}`}.
+            {" "}Quem pede a mediação no ML é quase sempre o comprador ({r.mediacoes.abertas_por.comprador}); na Shopee, só o vendedor abre disputa.
+          </p>
         )}
       </section>
 
