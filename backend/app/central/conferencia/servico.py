@@ -129,9 +129,14 @@ def _midia(d: Devolucao) -> dict:
     return {"anuncio": anuncio, "comprador": comprador, "link": link(d) if link else None}
 
 
-def buscar(codigo: str) -> list[dict]:
-    """O que o leitor de código de barras chama: etiqueta, QR, DANFE, rastreio, pedido — o que vier."""
+def buscar(codigo: str, etiqueta: str | None = None) -> list[dict]:
+    """O que o leitor de código de barras chama: etiqueta, QR, DANFE, rastreio, pedido — o que vier.
+    `etiqueta`: código bipado que não foi achado (ex.: etiqueta de retorno do ML, que a API não expõe) e que o
+    operador identificou digitando a venda — fica vinculado para o próximo bipe."""
     ids = resolver(codigo)
+    if etiqueta and ids:
+        for i in ids:
+            devolucoes.adicionar_codigos(i, extrair(etiqueta), "bipe", substituir=False)
     with Sessao() as s:
         devs = s.scalars(select(Devolucao).where(Devolucao.id.in_(ids))).all() if ids else []
         resultado = []

@@ -3,7 +3,7 @@ from datetime import datetime, timedelta, timezone
 from app.central.devolucoes import servico as devolucoes
 
 from . import client
-from .normalizar import normalizar
+from .normalizar import normalizar, normalizar_nao_entregue
 
 _triagem: dict[str, str | None] = {}
 
@@ -53,4 +53,15 @@ def sincronizar(dias: float = 30, todas_abertas: bool = False):
                     falhas.append({"claim_id": claim["id"], "tipo": claim["type"], "erro": f"{type(e).__name__}: {e}"[:200]})
             salvas += devolucoes.salvar(registros)
         reclamacoes += total
+    salvas += _nao_entregues()
     return {"reclamacoes": reclamacoes, "devolucoes_salvas": salvas, "falhas": falhas}
+
+
+def _nao_entregues() -> int:
+    """Pacote não entregue que voltou para a Novaes: não abre reclamação, então a busca acima não vê.
+    ponytail: janela fixa de 60 dias numa página (~30 pedidos/mês); paginar se passar de 50."""
+    desde = (datetime.now(timezone.utc) - timedelta(days=60)).strftime("%Y-%m-%dT%H:%M:%S.000+00:00")
+    busca = client.get("/orders/search", {"seller": client.USER_ID, "shipping.substatus": "returned",
+                                          "order.date_created.from": desde, "sort": "date_desc", "limit": 50})
+    return devolucoes.salvar([normalizar_nao_entregue(p) for p in (busca or {}).get("results") or []
+                              if (p.get("shipping") or {}).get("id")])

@@ -142,7 +142,7 @@ def _constatacao(dados: dict) -> dict:
 
 async def conferencia_buscar(request: Request):
     """Bipou a etiqueta: devolução + pedido/NF/custo na Olist + conferência e evidências já registradas."""
-    return await run_in_threadpool(conferencia.buscar, request.path_params["codigo"])
+    return await run_in_threadpool(conferencia.buscar, request.path_params["codigo"], _q(request, "etiqueta"))
 
 
 async def conferencia_registrar(request: Request):

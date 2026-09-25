@@ -46,6 +46,40 @@ def _mediacao(claim: dict) -> str | None:
     return "parcial" if "respondent" in beneficiados else "perdida"
 
 
+def normalizar_nao_entregue(pedido: dict) -> dict:
+    """Pacote que não chegou ao comprador e voltou para a Novaes: não tem reclamação, só o pedido cancelado."""
+    envio = str(pedido["shipping"]["id"])
+    return {
+        "plataforma": "mercado_livre",
+        "id_externo": f"envio-{envio}",
+        "pedido": str(pedido["id"]),
+        "pacote": str(pedido.get("pack_id") or "") or None,
+        "rastreio": None,
+        "etapa": "entregue",
+        "status_plataforma": "not_delivered/returned",
+        "em_mediacao": False,
+        "pode_contestar": False,
+        "motivo": "nao_recebido",
+        "motivo_plataforma": "pacote_nao_entregue",
+        "responsavel": "a_definir",
+        "destino": "vendedor",
+        "valor_reembolso": None,
+        "custo_plataforma": None,
+        "afeta_reputacao": False,
+        "prazo_vendedor": None,
+        "condicao_produto": None,
+        "resultado_mediacao": None,
+        "cobertura_aplicada": None,
+        "itens": [{"item_id": i["item"]["id"], "variation_id": i["item"].get("variation_id"),
+                   "sku": i["item"].get("seller_sku"), "nome": i["item"].get("title"),
+                   "quantidade": float(i["quantity"])} for i in pedido.get("order_items") or []],
+        "aberta_em": _data(pedido["date_created"]),
+        "atualizada_em": _data(pedido["last_updated"]),
+        "codigos": [pedido["id"], pedido.get("pack_id"), envio],
+        "bruto": {"pedido": pedido},
+    }
+
+
 def normalizar(claim: dict, dev: dict, custo: dict | None, reputacao: dict | None, triagem: str | None,
                pedido: dict | None, revisao: dict | None = None) -> dict:
     envio = (dev.get("shipments") or [{}])[0]

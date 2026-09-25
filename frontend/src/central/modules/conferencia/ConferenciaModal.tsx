@@ -39,6 +39,18 @@ export function ConferenciaModal({ codigo, onFechar, onMudou }: Props) {
 
   useEffect(() => { void carregar(true); }, [carregar]);
 
+  const [venda, setVenda] = useState("");
+  async function vincular() {
+    setErro(null);
+    try {
+      const r = await api.get<Tela[]>(`/conferencia/${encodeURIComponent(venda.trim())}?etiqueta=${encodeURIComponent(codigo)}`);
+      if (!r.length) setErro(`Nada encontrado para ${venda.trim()} também. Aguarde a próxima sincronização.`);
+      else { setTelas(r); setPasso(r[0].conferencia ? 2 : 0); onMudou(); }
+    } catch (e) {
+      setErro((e as Error).message);
+    }
+  }
+
   useEffect(() => {
     caixa.current?.focus();
     const esc = (e: KeyboardEvent) => e.key === "Escape" && onFechar();
@@ -92,9 +104,14 @@ export function ConferenciaModal({ codigo, onFechar, onMudou }: Props) {
         {erro && <p className="aviso erro" role="alert">{erro}</p>}
         {!telas && !erro && <div className="carregando">Buscando a devolução, o pedido na Olist e o custo…</div>}
         {telas?.length === 0 && (
-          <div className="carregando">
-            Nenhuma devolução com o código <strong>{codigo}</strong>. Confira a etiqueta ou aguarde a próxima sincronização.
-          </div>
+          <form className="carregando" onSubmit={(e) => { e.preventDefault(); void vincular(); }}>
+            <p>Nenhuma devolução com o código <strong>{codigo}</strong>.</p>
+            <p className="sub">Etiqueta de retorno do ML (pacote não entregue) não vem pela API: digite o nº da venda
+              ou bipe a etiqueta de ida. Esta etiqueta fica vinculada para o próximo bipe.</p>
+            <input value={venda} onChange={(e) => setVenda(e.target.value)} placeholder="Nº da venda, pacote ou envio"
+                   aria-label="Número da venda" autoFocus />
+            <button type="submit" className="primario" disabled={!venda.trim()}>Buscar</button>
+          </form>
         )}
 
         {tela && (
