@@ -11,6 +11,7 @@ interface Dinheiro {
   frete_reverso: number; frete_cobrado?: number; frete_em_mediacao?: number; perda_bancada?: number; perda_motivo?: number; recuperado: number;
   custo_total: number; prejuizo_liquido: number; taxa_recuperacao: number; sem_custo: number;
 }
+interface Contagem { full: number; organica: number; sem_info: number }
 interface Celula { quantidade: number; valor: number; sem_custo: number }
 interface Quebrados {
   segmentos: (Celula & { origem: "bancada" | "motivo"; tipo: string; nome: string; por_plataforma: Record<Plataforma, Celula> })[];
@@ -18,15 +19,45 @@ interface Quebrados {
   total: Celula;
 }
 interface Resumo {
-  total: number; total_anterior: number; dinheiro: Dinheiro; dinheiro_anterior: Dinheiro; quebrados: Quebrados;
+  total: number; total_anterior: number; dias: number; inicio: string; fim: string; dinheiro: Dinheiro; dinheiro_anterior: Dinheiro; quebrados: Quebrados;
   serie: { dia: string; total: number; resolvidas: number; em_aberto: number; custo: number; recuperado: number }[];
   por_plataforma: Partial<Record<Plataforma, Dinheiro & { devolucoes: number }>>;
   motivos: { motivo: string; quantidade: number; pct: number }[];
   produtos: Partial<Record<Plataforma, { sku: string | null; nome: string | null; imagem: string | null; plataforma: Plataforma; quantidade: number; pct: number; prejuizo: number }[]>>;
+  logistica_total: Record<Plataforma, Contagem>;
   por_logistica: { motivo: string; quantidade: number; pct: number;
     por_plataforma: Record<Plataforma, { full: number; organica: number; sem_info: number }> }[];
-  mediacoes: { ganha: number; perdida: number; parcial: number; em_andamento: number; recuperado: number };
+  mediacoes: { ganha: number; perdida: number; parcial: number; em_andamento: number; recuperado: number;
+    abertas_por?: Record<"vendedor" | "comprador" | "plataforma" | "desconhecido" | "sem_info", number> };
 }
+
+interface Mes {
+  fatura: string; inicio: string; fim: string; aberto: boolean; fatura_lida: boolean;
+  frete_ml: { cobrado: number; estornado: number; liquido: number };
+  frete_shopee: number; quebrado_bancada: number; quebrado_motivo: number; sem_custo: number; total: number;
+  devolucoes: Record<Plataforma, number>;
+}
+const NOME_MES = ["jan", "fev", "mar", "abr", "mai", "jun", "jul", "ago", "set", "out", "nov", "dez"];
+/** Chave da fatura do ML que contém o dia (fecha no dia 12): 13/set → "2026-10-01". */
+function faturaDoDia(d: Date): string {
+  const m = d.getDate() <= 12 ? d.getMonth() : d.getMonth() + 1;
+  const ano = d.getFullYear() + Math.floor(m / 12);
+  return `${ano}-${String((m % 12) + 1).padStart(2, "0")}-01`;
+}
+function ultimasFaturas(n: number): string[] {
+  const hoje = new Date();
+  return Array.from({ length: n }, (_, i) => faturaDoDia(new Date(hoje.getFullYear(), hoje.getMonth() - i, hoje.getDate() <= 12 ? 1 : 20)));
+}
+const diaMes = (iso: string) => `${iso.slice(8, 10)}/${NOME_MES[Number(iso.slice(5, 7)) - 1]}`;
+const LINHAS_MES: [string, (m: Mes) => number, string?][] = [
+  ["Frete reverso ML cobrado (fatura)", (m) => m.frete_ml.cobrado],
+  ["Estornos do ML (fatura)", (m) => -m.frete_ml.estornado, "bom"],
+  ["Frete reverso ML líquido", (m) => m.frete_ml.liquido, "sub-total"],
+  ["Frete reverso Shopee", (m) => m.frete_shopee],
+  ["Quebrado, conferido na bancada", (m) => m.quebrado_bancada],
+  ["Quebrado, estimado pelo motivo", (m) => m.quebrado_motivo],
+  ["Total do mês", (m) => m.total, "total-linha"],
+];
 
 // Cores validadas (scripts/validate_palette.js da skill de dataviz): categóricas por série, status para mediação.
 const EVOLUCAO: Serie[] = [
@@ -49,8 +80,11 @@ function variacao(atual: number, anterior: number, bomQuandoSobe = false) {
 }
 
 export function BiPage({ nav }: { nav: Navegacao }) {
-  const [dias, setDias] = useState(30);
-  const { dados: r, erro } = usarDados<Resumo>(`/bi/resumo?dias=${dias}`, nav.versao);
+  // Período: ciclo da fatura do ML (13 ao 12), padrão a fatura aberta; ou os últimos N dias. Conta pela data de abertura.
+  const [periodo, setPeriodo] = useState(faturaDoDia(new Date()));
+  const { dados: r, erro } = usarDados<Resumo>(`/bi/resumo?${periodo.includes("-") ? `fatura=${periodo}` : `dias=${periodo}`}`, nav.versao);
+  const dias = r?.dias ?? 30;
+  const { dados: mensal } = usarDados<{ meses: Mes[] }>("/bi/mensal", nav.versao);
   const d = r?.dinheiro, a = r?.dinheiro_anterior;
   const perdido = (x?: Dinheiro) => (x?.perda_bancada ?? 0) + (x?.perda_motivo ?? 0);
   const q = r?.quebrados;
@@ -63,12 +97,15 @@ export function BiPage({ nav }: { nav: Navegacao }) {
       <header className="cabecalho">
         <div>
           <h1>Inteligência</h1>
-          <p className="sub">{r ? `${r.total} devoluções nos últimos ${dias} dias, ${r.total_anterior} no período anterior` : "Carregando…"}</p>
+          <p className="sub">{r ? `${r.total} devoluções abertas de ${diaMes(r.inicio)} a ${diaMes(r.fim)}, ${r.total_anterior} no período anterior` : "Carregando…"}</p>
         </div>
-        <select className="seletor" value={dias} onChange={(e) => setDias(Number(e.target.value))} aria-label="Período">
-          <option value={7}>Últimos 7 dias</option>
-          <option value={30}>Últimos 30 dias</option>
-          <option value={90}>Últimos 90 dias</option>
+        <select className="seletor" value={periodo} onChange={(e) => setPeriodo(e.target.value)} aria-label="Período">
+          {ultimasFaturas(3).map((f) => (
+            <option key={f} value={f}>Fatura {NOME_MES[Number(f.slice(5, 7)) - 1]}/{f.slice(2, 4)}{f === faturaDoDia(new Date()) ? " (aberta)" : ""}</option>
+          ))}
+          <option value="7">Últimos 7 dias</option>
+          <option value="30">Últimos 30 dias</option>
+          <option value="90">Últimos 90 dias</option>
         </select>
       </header>
       {erro && <p className="aviso erro">{erro}</p>}
@@ -81,6 +118,35 @@ export function BiPage({ nav }: { nav: Navegacao }) {
         <Metrica rotulo="Mercadoria quebrada" valor={reais(perdido(d))} v={d && a && variacao(perdido(d), perdido(a))}
                  nota="Da bancada + do motivo da devolução" />
         <Metrica rotulo="Taxa de recuperação" valor={`${(d?.taxa_recuperacao ?? 0).toLocaleString("pt-BR")}%`} />
+      </section>
+
+      <section className="cartao financeiro-detalhe">
+        <header><h2>Custo das devoluções por mês</h2>
+          <span className="sub">ciclo da fatura do ML: dia 13 ao dia 12 · frete do ML vem da fatura; o resto, das devoluções importadas na Central</span></header>
+        <table className="tabela compacta">
+          <thead><tr><th scope="col">Custo</th>
+            {mensal?.meses.map((m) => (
+              <th key={m.fatura} scope="col" className="num">
+                Fatura {NOME_MES[Number(m.fatura.slice(5, 7)) - 1]}/{m.fatura.slice(2, 4)}{m.aberto && " (aberta)"}
+                <span className="sub" style={{ display: "block", fontWeight: 400 }}>{diaMes(m.inicio)} a {diaMes(m.fim)}</span>
+              </th>
+            ))}</tr></thead>
+          <tbody>
+            {LINHAS_MES.map(([rotulo, valor, classe]) => (
+              <tr key={rotulo} className={classe === "total-linha" ? "total-linha" : ""}>
+                <td>{classe === "sub-total" ? <strong>{rotulo}</strong> : rotulo}</td>
+                {mensal?.meses.map((m) => (
+                  <td key={m.fatura} className="num" style={classe === "bom" ? { color: "#1baf7a" } : undefined}>
+                    {!m.fatura_lida && rotulo.includes("ML") ? "—" : classe === "sub-total" ? <strong>{reais(valor(m))}</strong> : reais(valor(m))}
+                  </td>
+                ))}
+              </tr>
+            ))}
+            <tr><td className="sub">Devoluções na Central (ML / Shopee)</td>
+              {mensal?.meses.map((m) => <td key={m.fatura} className="num sub">{m.devolucoes.mercado_livre} / {m.devolucoes.shopee}
+                {m.sem_custo > 0 && ` · ${m.sem_custo} sem custo`}</td>)}</tr>
+          </tbody>
+        </table>
       </section>
 
       <section className="cartao">
@@ -140,7 +206,8 @@ export function BiPage({ nav }: { nav: Navegacao }) {
       </section>
       ))}
       <section className="cartao">
-        <header><h2>Resultado das mediações</h2></header>
+        <header><h2>Mediações que a Novaes abriu</h2>
+          <span className="sub">{mediacoesTotal} em {dias} dias · {(mediacoesTotal / dias).toLocaleString("pt-BR", { maximumFractionDigits: 1 })} por dia</span></header>
         <div className="rosca-e-legenda">
           <Rosca centro={String(mediacoesTotal)} rotulo="mediações" fatias={[
             { nome: "Ganhas", valor: r?.mediacoes.ganha ?? 0, cor: "#0ca30c" },
@@ -156,6 +223,24 @@ export function BiPage({ nav }: { nav: Navegacao }) {
           </ul>
         </div>
         <p className="recuperado">{reais(r?.mediacoes.recuperado)} <span className="sub">recuperados nas mediações ganhas (estimado)</span></p>
+        {r?.mediacoes.abertas_por && (
+          <p className="sub">Todas as reclamações que foram para mediação: {Object.values(r.mediacoes.abertas_por).reduce((a, b) => a + b, 0)}
+            {" "}· abertas pela Novaes {r.mediacoes.abertas_por.vendedor} · pelo comprador {r.mediacoes.abertas_por.comprador}
+            {" "}· pela plataforma {r.mediacoes.abertas_por.plataforma}
+            {r.mediacoes.abertas_por.sem_info + r.mediacoes.abertas_por.desconhecido > 0 &&
+              ` · ainda sem consulta ${r.mediacoes.abertas_por.sem_info + r.mediacoes.abertas_por.desconhecido}`}</p>
+        )}
+      </section>
+
+      <section className="cartao financeiro-detalhe">
+        <header><h2>Todas as devoluções: venda Full x orgânica</h2>
+          <span className="sub">% sobre as devoluções já consultadas na plataforma</span></header>
+        <div className="motivos-logistica">
+          {r?.logistica_total && [...PLATAFORMAS.map((p) => [PLATAFORMA[p], r.logistica_total[p]] as const),
+                 ["Total geral", somarContagem(PLATAFORMAS.map((p) => r.logistica_total[p]))] as const].map(([titulo, v]) => (
+            <BlocoLogistica key={titulo} titulo={titulo} v={v} />
+          ))}
+        </div>
       </section>
 
       <section className="cartao financeiro-detalhe">
@@ -178,6 +263,7 @@ export function BiPage({ nav }: { nav: Navegacao }) {
                     <div className="numeros">
                       <span><span className="ponto" style={{ background: "#2a78d6" }} />Full <strong>{v.full}</strong>{soma > 0 && ` (${Math.round((v.full / soma) * 100)}%)`}</span>
                       <span><span className="ponto" style={{ background: "#1baf7a" }} />Orgânica <strong>{v.organica}</strong>{soma > 0 && ` (${Math.round((v.organica / soma) * 100)}%)`}</span>
+                      {v.sem_info > 0 && <span className="sub">sem consulta <strong>{v.sem_info}</strong></span>}
                     </div>
                   </div>
                 );
@@ -266,5 +352,29 @@ function Metrica({ rotulo, valor, v, nota }: { rotulo: string; valor: string; v?
         {v ? <span className={v.bom ? "bom" : "ruim"}>{v.texto} vs. período anterior</span> : nota && <span className="sub">{nota}</span>}
       </span>
     </div>
+  );
+}
+
+function somarContagem(cs: Contagem[]): Contagem {
+  return cs.reduce((t, c) => ({ full: t.full + c.full, organica: t.organica + c.organica, sem_info: t.sem_info + c.sem_info }),
+                   { full: 0, organica: 0, sem_info: 0 });
+}
+
+function BlocoLogistica({ titulo, v }: { titulo: string; v: Contagem }) {
+  const soma = v.full + v.organica;
+  const pct = (n: number) => (soma ? `${Math.round((n / soma) * 100)}%` : "—");
+  return (
+    <article className="motivo-bloco">
+      <header><h3>{titulo}</h3>
+        <span><span className="motivo-total">{soma + v.sem_info}</span> <span className="sub">devoluções</span></span></header>
+      <div className="barra-full" role="img" aria-label={`${v.full} Full, ${v.organica} orgânica`}>
+        {soma > 0 && <><span className="full" style={{ width: pct(v.full) }} /><span className="organica" style={{ width: pct(v.organica) }} /></>}
+      </div>
+      <div className="numeros-total">
+        <span><span className="ponto" style={{ background: "#2a78d6" }} />Full <strong>{pct(v.full)}</strong> <span className="sub">({v.full})</span></span>
+        <span><span className="ponto" style={{ background: "#1baf7a" }} />Orgânica <strong>{pct(v.organica)}</strong> <span className="sub">({v.organica})</span></span>
+      </div>
+      {v.sem_info > 0 && <span className="sub">{v.sem_info} ainda sem consulta</span>}
+    </article>
   );
 }

@@ -1,9 +1,9 @@
 """Indicadores do período: volume, andamento e quanto as devoluções custaram. Só leitura."""
 
 from collections import Counter, defaultdict
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 
-from app.central.bi import logistica
+from app.central.bi import fatura_ml, logistica, mediacao_origem
 from app.central.financeiro.custos import custo_do_sku
 from app.central.mercado_livre import catalogo
 from app.central.operacao.servico import a_caminho_por_plataforma, linhas
@@ -126,13 +126,17 @@ def por_logistica(ls: list[dict], full: dict[tuple[str, str], bool]) -> list[dic
     saida = []
     for m in MOTIVOS_LOGISTICA:
         do_motivo = [l for l in ls if l["motivo"] == m]
-        por = {p: dict.fromkeys(("full", "organica", "sem_info"), 0) for p in PLATAFORMAS}
-        for l in do_motivo:
-            chave = (l["plataforma"], l["pedido"])
-            por[l["plataforma"]]["sem_info" if chave not in full else "full" if full[chave] else "organica"] += 1
         saida.append({"motivo": m, "quantidade": len(do_motivo), "pct": round(100 * len(do_motivo) / total, 1),
-                      "por_plataforma": por})
+                      "por_plataforma": contar_logistica(do_motivo, full)})
     return saida
+
+
+def contar_logistica(ls: list[dict], full: dict[tuple[str, str], bool]) -> dict:
+    por = {p: dict.fromkeys(("full", "organica", "sem_info"), 0) for p in PLATAFORMAS}
+    for l in ls:
+        chave = (l["plataforma"], l["pedido"])
+        por[l["plataforma"]]["sem_info" if chave not in full else "full" if full[chave] else "organica"] += 1
+    return por
 
 
 def _imagens(skus: list[dict]) -> None:
@@ -142,20 +146,41 @@ def _imagens(skus: list[dict]) -> None:
         p["imagem"] = p["imagem"] or fotos.get(p["item_id"])
 
 
-def resumo(dias: int = 30) -> dict:
-    fim = _agora()
-    atual = linhas(fim - timedelta(days=dias))
-    anterior = [l for l in linhas(fim - timedelta(days=2 * dias)) if l["atualizada_em"] < fim - timedelta(days=dias)]
+def _periodo(dias: int, fatura: str | None) -> tuple[date, date, date, date]:
+    """(início, fim, início anterior, fim anterior) em datas. Fatura = ciclo do ML (13 ao 12)."""
+    if fatura:
+        ini, fim = fatura_ml.ciclo(fatura)
+        ini_ant, fim_ant = fatura_ml.ciclo(fatura_ml.chave_do_dia(ini - timedelta(days=1)))
+        return ini, fim, ini_ant, fim_ant
+    fim = _agora().date()
+    ini = fim - timedelta(days=dias - 1)
+    return ini, fim, ini - timedelta(days=dias), ini - timedelta(days=1)
+
+
+def resumo(dias: int = 30, fatura: str | None = None) -> dict:
+    """Devoluções ABERTAS no período (antes era por atualização: a varredura de 6 em 6 h atualiza toda reclamação
+    aberta, e reclamação antiga entrava de novo na conta)."""
+    ini, fim_dia, ini_ant, fim_ant = _periodo(dias, fatura)
+    todas = linhas()
+    atual = [l for l in todas if ini <= l["aberta_em"].date() <= fim_dia]
+    anterior = [l for l in todas if ini_ant <= l["aberta_em"].date() <= fim_ant]
+    dias = (fim_dia - ini).days + 1
+    fim = datetime.combine(min(fim_dia, _agora().date()), datetime.min.time())
+    dias_serie = (fim.date() - ini).days + 1
 
     serie = {(fim.date() - timedelta(days=n)): dict.fromkeys(("total", "resolvidas", "em_aberto", "custo", "recuperado"), 0.0)
-             for n in range(dias - 1, -1, -1)}
+             for n in range(dias_serie - 1, -1, -1)}
     por_plataforma = defaultdict(list)
-    motivos, produtos, mediacoes = Counter(), {}, Counter()
+    motivos, produtos, mediacoes, origens = Counter(), {}, Counter(), Counter()
+    quem_abriu = mediacao_origem.mapa()
     for l in atual:
         por_plataforma[l["plataforma"]].append(l)
         motivos[l["motivo"]] += 1
         if l.get("resultado_mediacao"):
-            mediacoes[l["resultado_mediacao"]] += 1
+            quem = quem_abriu.get((l["plataforma"], l["id_externo"]), "sem_info")
+            origens[quem] += 1
+            if quem == "vendedor":  # o gráfico é só das disputas que a Novaes abriu
+                mediacoes[l["resultado_mediacao"]] += 1
         dia = l["aberta_em"].date()
         if dia in serie:
             p = serie[dia]
@@ -182,13 +207,14 @@ def resumo(dias: int = 30) -> dict:
            for p in PLATAFORMAS}
     _imagens([x for t in top.values() for x in t])
     return {
-        "dias": dias,
+        "dias": dias, "inicio": ini.isoformat(), "fim": fim_dia.isoformat(),
         "total": len(atual),
         "total_anterior": len(anterior),
         "dinheiro": _dinheiro(atual),
         "dinheiro_anterior": _dinheiro(anterior),
         "quebrados": quebrados(atual),
-        "por_logistica": por_logistica(atual, logistica.mapa()),
+        "por_logistica": por_logistica(atual, full := logistica.mapa()),
+        "logistica_total": contar_logistica(atual, full),
         "a_caminho": a_caminho_por_plataforma(atual),
         "serie": [{"dia": d.isoformat(), **{k: round(v, 2) for k, v in p.items()}} for d, p in serie.items()],
         "por_plataforma": {k: {"devolucoes": len(v), **_dinheiro(v)} for k, v in por_plataforma.items()},
@@ -196,7 +222,44 @@ def resumo(dias: int = 30) -> dict:
         "motivos": [{"motivo": m, "quantidade": q, "pct": round(100 * q / total, 1)} for m, q in motivos.most_common()],
         "produtos": {p: [{**x, "pct": round(100 * x["quantidade"] / (len(por_plataforma[p]) or 1), 1)} for x in t] for p, t in top.items()},
         "mediacoes": {**{k: mediacoes.get(k, 0) for k in ("ganha", "perdida", "parcial", "em_andamento")},
-                      "recuperado": _dinheiro(atual)["recuperado"]},
+                      "recuperado": _dinheiro(atual)["recuperado"],
+                      "abertas_por": {k: origens.get(k, 0) for k in ("vendedor", "comprador", "plataforma", "desconhecido", "sem_info")}},
     }
 
 
+
+
+def mensal(meses: int = 3) -> dict:
+    """Quanto as devoluções custaram por ciclo da fatura do ML (dia 13 ao 12). Frete do ML = o que está na fatura;
+    frete da Shopee = o que a plataforma informa na devolução; quebrado = conferência da bancada quando houve,
+    senão estimado pelo motivo (custo do produto). Devolução entra no ciclo pela data de abertura."""
+    chaves, d = [], _agora().date()
+    for _ in range(meses):
+        chaves.append(fatura_ml.chave_do_dia(d))
+        d = fatura_ml.ciclo(chaves[-1])[0].replace(day=1)
+    faturas = fatura_ml.por_fatura()
+    todas = linhas()
+    saida = []
+    for chave in reversed(chaves):
+        ini, fim = fatura_ml.ciclo(chave)
+        do_ciclo = [l for l in todas if ini <= l["aberta_em"].date() <= fim]
+        valores = defaultdict(float)
+        sem_custo = 0
+        for l in do_ciclo:
+            if l["plataforma"] == "shopee":
+                valores["frete_shopee"] += l["custo_plataforma"] or 0
+            origem, valor = perda(l)
+            if origem and valor is None:
+                sem_custo += 1
+            elif origem:
+                valores[f"quebrado_{origem}"] += valor
+        ml = faturas.get(chave, {"cobrado": 0.0, "estornado": 0.0, "liquido": 0.0, "por_tipo": []})
+        total = ml["liquido"] + valores["frete_shopee"] + valores["quebrado_bancada"] + valores["quebrado_motivo"]
+        saida.append({
+            "fatura": chave, "inicio": ini.isoformat(), "fim": fim.isoformat(), "aberto": fim >= _agora().date(),
+            "frete_ml": ml, "fatura_lida": chave in faturas,
+            **{k: round(valores[k], 2) for k in ("frete_shopee", "quebrado_bancada", "quebrado_motivo")},
+            "sem_custo": sem_custo, "total": round(total, 2),
+            "devolucoes": {p: sum(1 for l in do_ciclo if l["plataforma"] == p) for p in PLATAFORMAS},
+        })
+    return {"meses": saida}

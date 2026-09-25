@@ -3,7 +3,7 @@
 import logging
 import time
 
-from app.central.bi import logistica
+from app.central.bi import fatura_ml, logistica, mediacao_origem
 from app.central.conferencia import servico as conferencia_servico
 from app.central.mercado_livre.sincronizar import sincronizar as sincronizar_ml
 from app.central.olist import servico as olist_servico
@@ -77,6 +77,8 @@ TAREFAS = {
     "olist_notas_devolucao": lambda: _com_carga("olist", lambda dias: olist_servico.sincronizar_notas_devolucao(dias=CARGA_INICIAL_DIAS if dias > 1 else 1)),
     "olist_cache_pedidos": conferencia_servico.aquecer_cache,
     "logistica_venda": logistica.completar,  # Full x orgânica das devoluções novas (BI)
+    "fatura_ml": fatura_ml.sincronizar,  # tarifas de devolução da fatura do ML (BI mensal)
+    "mediacao_origem": mediacao_origem.completar,  # quem abriu cada mediação (BI)
 }
 estado: dict[str, dict] = {}
 

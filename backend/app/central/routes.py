@@ -4,6 +4,7 @@ Erro vira JSON que a tela entende: {"detail": ...} (404 não existe, 409 já fei
 {"erro": ...} com 502 quando a falha é da plataforma (ML/Shopee/Olist fora do ar ou recusando)."""
 
 import json
+import re
 from datetime import date, datetime
 
 from sqlalchemy import select
@@ -251,7 +252,14 @@ async def operacao_ultimas(request: Request):
 
 
 async def bi_resumo(request: Request):
-    return await run_in_threadpool(bi.resumo, _q(request, "dias", 30, int, 1, 365))
+    fatura = _q(request, "fatura")
+    if fatura and not re.fullmatch(r"\d{4}-\d{2}-01", fatura):
+        raise ValueError(f"Parâmetro fatura inválido: {fatura!r}")
+    return await run_in_threadpool(bi.resumo, _q(request, "dias", 30, int, 1, 365), fatura)
+
+
+async def bi_mensal(request: Request):
+    return await run_in_threadpool(bi.mensal, _q(request, "meses", 3, int, 1, 12))
 
 
 async def full_identificar(request: Request):
@@ -294,6 +302,7 @@ rotas = [
     _rota("/operacao/atencao", operacao_atencao),
     _rota("/operacao/ultimas", operacao_ultimas),
     _rota("/bi/resumo", bi_resumo),
+    _rota("/bi/mensal", bi_mensal),
     _rota("/sincronizacao", sincronizacao),
     _rota("/retirada-full/{codigo}", full_identificar),
     _rota("/retirada-full/{codigo}/entrada", full_entrada, "POST"),
