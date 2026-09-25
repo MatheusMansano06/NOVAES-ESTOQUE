@@ -48,6 +48,11 @@ def mapa() -> dict[tuple[str, str], str]:
         return {(m.plataforma, m.id_externo): m.aberta_por for m in s.scalars(select(MediacaoOrigem))}
 
 
+def _sem_acesso(e: Exception) -> bool:
+    """O ML nega algumas reclamações (403 "User does not have access to claim"): é da reclamação, não da conexão."""
+    return "HTTP 403" in str(e)
+
+
 def _ml(claim_id: str) -> str:
     from app.central.mercado_livre import client
     entradas = [h for h in client.get(f"/post-purchase/v1/claims/{claim_id}/status-history") or []
@@ -73,9 +78,12 @@ def completar(limite: int = 300) -> dict:
         else:
             try:
                 quem = _ml(id_externo)
-            except RuntimeError as e:  # ML desconectado: tenta na próxima rodada, a Shopee segue
-                erro = str(e)[:200]
-                continue
+            except RuntimeError as e:
+                if _sem_acesso(e):
+                    quem = "desconhecido"  # 403 nessa reclamação: marca e segue, senão ela trava a fila toda rodada
+                else:  # ML desconectado: tenta na próxima rodada, a Shopee segue
+                    erro = str(e)[:200]
+                    continue
         feitas[(plataforma, id_externo)] = quem
     with Sessao.begin() as s:
         for (plataforma, id_externo), quem in feitas.items():
@@ -101,8 +109,11 @@ def completar_atuacao(limite: int = 300) -> dict:
         try:
             historico = client.get(f"/post-purchase/v1/claims/{claim_id}/actions-history") or []
         except RuntimeError as e:
-            erro = str(e)[:200]
-            break
+            if not _sem_acesso(e):
+                erro = str(e)[:200]
+                break
+            historico = []  # 403 nessa reclamação: grava sem ações (encerrada) para não travar a fila
+            encerrada = True
         acoes = sorted({h["action_name"] for h in historico if h.get("player_role") == "respondent"})
         feitas.append(MediacaoAtuacao(plataforma="mercado_livre", id_externo=claim_id, acoes=",".join(acoes)[:200],
                                       encerrada=encerrada, consultada_em=agora))

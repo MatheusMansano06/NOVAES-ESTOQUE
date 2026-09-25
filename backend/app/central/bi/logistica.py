@@ -32,7 +32,12 @@ def _ml(devs: list[Devolucao]) -> dict[str, str]:
         progresso.parcial(n / len(devs) / 2)  # ML é a primeira metade da tarefa; a Shopee é um lote só
         envio = (((d.bruto or {}).get("pedido") or {}).get("shipping") or {}).get("id")
         if envio:
-            e = client.get(f"/shipments/{envio}", headers={"x-format-new": "true"}) or {}
+            try:
+                e = client.get(f"/shipments/{envio}", headers={"x-format-new": "true"}) or {}
+            except RuntimeError as erro:
+                if "HTTP 403" not in str(erro):
+                    raise  # conexão: para a rodada; 403 é só deste envio e não pode travar a fila
+                e = {}
             tipos[d.pedido] = (e.get("logistic") or {}).get("type") or "desconhecido"
     return tipos
 
