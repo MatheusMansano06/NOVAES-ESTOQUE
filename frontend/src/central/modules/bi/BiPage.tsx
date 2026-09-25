@@ -161,24 +161,30 @@ export function BiPage({ nav }: { nav: Navegacao }) {
       <section className="cartao financeiro-detalhe">
         <header><h2>Motivos do produto: venda Full x orgânica</h2>
           <span className="sub">% = parte de todas as devoluções do período{semInfo > 0 && ` · ${semInfo} ainda sem consulta de Full na plataforma`}</span></header>
-        <table className="tabela compacta">
-          <thead>
-            <tr><th scope="col" rowSpan={2}>Motivo</th>
-              {PLATAFORMAS.map((p) => <th key={p} scope="colgroup" colSpan={2} className="num"><LogoPlataforma plataforma={p} tamanho={16} comNome /></th>)}
-              <th scope="col" rowSpan={2} className="num">Total</th><th scope="col" rowSpan={2} className="num">% das devoluções</th></tr>
-            <tr>{PLATAFORMAS.map((p) => [<th key={`${p}-f`} scope="col" className="num">Full</th>, <th key={`${p}-o`} scope="col" className="num">Orgânica</th>])}</tr>
-          </thead>
-          <tbody>
-            {r?.por_logistica.map((m) => (
-              <tr key={m.motivo} className={m.motivo === "diferente" ? "total-linha" : ""}>
-                <td>{MOTIVO[m.motivo] ?? m.motivo}</td>
-                {PLATAFORMAS.map((p) => [<td key={`${p}-f`} className="num">{m.por_plataforma[p].full}</td>,
-                                         <td key={`${p}-o`} className="num">{m.por_plataforma[p].organica}</td>])}
-                <td className="num">{m.quantidade}</td><td className="num">{m.pct.toLocaleString("pt-BR")}%</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+        <div className="motivos-logistica">
+          {r?.por_logistica.map((m) => (
+            <article key={m.motivo} className={m.motivo === "diferente" ? "motivo-bloco destaque" : "motivo-bloco"}>
+              <header><h3>{MOTIVO[m.motivo] ?? m.motivo}</h3>
+                <span><span className="motivo-total">{m.quantidade}</span> <span className="sub">{m.pct.toLocaleString("pt-BR")}% das devoluções</span></span></header>
+              {PLATAFORMAS.map((p) => {
+                const v = m.por_plataforma[p], soma = v.full + v.organica;
+                return (
+                  <div key={p} className="motivo-plataforma">
+                    <LogoPlataforma plataforma={p} tamanho={16} comNome />
+                    <div className="barra-full" role="img" aria-label={`${v.full} Full, ${v.organica} orgânica`}>
+                      {soma > 0 && <><span className="full" style={{ width: `${(v.full / soma) * 100}%` }} />
+                        <span className="organica" style={{ width: `${(v.organica / soma) * 100}%` }} /></>}
+                    </div>
+                    <div className="numeros">
+                      <span><span className="ponto" style={{ background: "#2a78d6" }} />Full <strong>{v.full}</strong>{soma > 0 && ` (${Math.round((v.full / soma) * 100)}%)`}</span>
+                      <span><span className="ponto" style={{ background: "#1baf7a" }} />Orgânica <strong>{v.organica}</strong>{soma > 0 && ` (${Math.round((v.organica / soma) * 100)}%)`}</span>
+                    </div>
+                  </div>
+                );
+              })}
+            </article>
+          ))}
+        </div>
       </section>
 
       <section className="cartao financeiro-detalhe quebrados">

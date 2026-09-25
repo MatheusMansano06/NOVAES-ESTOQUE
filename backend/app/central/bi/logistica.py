@@ -54,7 +54,11 @@ def completar(limite: int = 300) -> dict:
     feitos = {}
     for plataforma, buscar in (("mercado_livre", _ml), ("shopee", _shopee)):
         devs = list({d.pedido: d for d in faltam if d.plataforma == plataforma}.values())[:limite]
-        tipos = buscar(devs) if devs else {}
+        try:
+            tipos = buscar(devs) if devs else {}
+        except RuntimeError as e:  # uma plataforma desconectada não segura a outra
+            feitos[plataforma] = f"erro: {e}"[:200]
+            continue
         with Sessao.begin() as s:
             for pedido, tipo in tipos.items():
                 s.merge(LogisticaVenda(plataforma=plataforma, pedido=pedido, tipo=tipo[:40]))
