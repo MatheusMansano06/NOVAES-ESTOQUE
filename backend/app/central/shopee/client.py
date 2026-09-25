@@ -24,9 +24,13 @@ def _assinatura_loja(path: str) -> dict:
             "sign": assinar(_shopee.partner_key, f"{_shopee.partner_id}{path}{ts}{t}{shop_id}")}
 
 
-def post(path: str, corpo: dict) -> dict:
-    """POST assinado em endpoint de loja. Sem retentativa: repetir uma escrita pode duplicá-la."""
-    resp = _http.post(path, params=_assinatura_loja(path), json=corpo).json()
+def post(path: str, corpo: dict | None = None, files: list | None = None) -> dict:
+    """POST assinado em endpoint de loja. Sem retentativa: repetir uma escrita pode duplicá-la.
+    `files` manda multipart/form-data (upload de imagem) em vez de JSON."""
+    if files:
+        resp = _http.post(path, params=_assinatura_loja(path), files=files, timeout=60).json()
+    else:
+        resp = _http.post(path, params=_assinatura_loja(path), json=corpo).json()
     if resp.get("error"):
         raise RuntimeError(f"Shopee {path}: {resp.get('error')} {resp.get('message')}")
     return resp.get("response", resp)

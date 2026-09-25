@@ -1,7 +1,7 @@
 """Contestação na Shopee. Mesma interface do ML. Na Shopee toda disputa tem motivo da lista oficial,
 com ou sem problema no produto, então produto_perfeito não muda o caminho."""
 
-import base64
+import mimetypes
 import os
 from pathlib import Path
 
@@ -67,8 +67,9 @@ def campos_disputa(return_sn: str) -> dict:
 def _urls(fotos: list[Path]) -> list[str]:
     if not fotos:
         return []
+    # A Shopee só aceita multipart/form-data aqui, com o campo "image" repetido por arquivo.
     r = client.post("/api/v2/returns/convert_image",
-                    {"images": [{"image": base64.b64encode(f.read_bytes()).decode()} for f in fotos]})
+                    files=[("image", (f.name, f.read_bytes(), mimetypes.guess_type(f.name)[0] or "image/jpeg")) for f in fotos])
     return [i["url"] for i in r.get("images") or []]
 
 
