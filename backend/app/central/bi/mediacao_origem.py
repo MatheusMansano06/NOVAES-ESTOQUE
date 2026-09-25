@@ -60,64 +60,76 @@ def _ml(claim_id: str) -> str:
     return QUEM_ML.get(min(entradas, key=lambda h: h["date"])["change_by"], "desconhecido") if entradas else "desconhecido"
 
 
-def completar(limite: int = 300) -> dict:
+PARALELO = 8  # consultas ao ML ao mesmo tempo (~0,3 s cada): o backlog inteiro sai em uma rodada
+
+
+def em_paralelo(fn, itens: list) -> list[tuple]:
+    """[(item, resultado ou RuntimeError)] consultando o ML em paralelo e alimentando a barra de progresso.
+    Reclamação com 403 volta como erro e quem chamou decide; conexão caída também (e aí para)."""
+    from concurrent.futures import ThreadPoolExecutor
+
+    def seguro(item):
+        try:
+            return item, fn(item)
+        except RuntimeError as e:
+            return item, e
+
+    saida = []
+    with ThreadPoolExecutor(PARALELO) as ex:
+        for n, r in enumerate(ex.map(seguro, itens), 1):
+            progresso.parcial(n / len(itens))
+            saida.append(r)
+    return saida
+
+
+def _erro_de_conexao(resultados: list[tuple]) -> str | None:
+    return next((str(r)[:200] for _, r in resultados if isinstance(r, RuntimeError) and not _sem_acesso(r)), None)
+
+
+def completar(limite: int | None = None) -> dict:
     """Consulta as devoluções que estão ou passaram por mediação e ainda não sabemos quem abriu."""
     with Sessao() as s:
         conhecidas = set(s.execute(select(MediacaoOrigem.plataforma, MediacaoOrigem.id_externo)).all())
-        faltam = [(d.plataforma, d.id_externo, d.status_plataforma) for d in
-                  s.scalars(select(Devolucao).where(Devolucao.em_mediacao.is_(True)))
-                  if (d.plataforma, d.id_externo) not in conhecidas]
-    feitas, erro = {}, None
-    lote = faltam[:limite]
-    for n, (plataforma, id_externo, status) in enumerate(lote):
-        progresso.parcial(n / len(lote))
-        if plataforma == "shopee":
-            quem = "vendedor"  # na Shopee só o vendedor abre disputa (dispute_return → SELLER_DISPUTE → JUDGING)
-        elif erro:
-            continue  # ML já falhou nesta rodada: não martela a API
-        else:
-            try:
-                quem = _ml(id_externo)
-            except RuntimeError as e:
-                if _sem_acesso(e):
-                    quem = "desconhecido"  # 403 nessa reclamação: marca e segue, senão ela trava a fila toda rodada
-                else:  # ML desconectado: tenta na próxima rodada, a Shopee segue
-                    erro = str(e)[:200]
-                    continue
-        feitas[(plataforma, id_externo)] = quem
+        faltam = [(d.plataforma, d.id_externo) for d in s.scalars(select(Devolucao).where(Devolucao.em_mediacao.is_(True)))
+                  if (d.plataforma, d.id_externo) not in conhecidas][:limite]
+    # Shopee: só o vendedor abre disputa (dispute_return → SELLER_DISPUTE → JUDGING), não precisa consultar.
+    feitas = {(p, i): "vendedor" for p, i in faltam if p == "shopee"}
+    resultados = em_paralelo(_ml, [i for p, i in faltam if p == "mercado_livre"])
+    for claim_id, r in resultados:
+        if not isinstance(r, RuntimeError):
+            feitas[("mercado_livre", claim_id)] = r
+        elif _sem_acesso(r):
+            feitas[("mercado_livre", claim_id)] = "desconhecido"  # 403 nessa reclamação: marca e não consulta de novo
     with Sessao.begin() as s:
         for (plataforma, id_externo), quem in feitas.items():
             s.merge(MediacaoOrigem(plataforma=plataforma, id_externo=id_externo, aberta_por=quem))
-    return {"consultadas": len(feitas), "faltam": max(0, len(faltam) - len(feitas)), **({"erro": erro} if erro else {})}
+    erro = _erro_de_conexao(resultados)
+    return {"consultadas": len(feitas), "faltam": len(faltam) - len(feitas), **({"erro": erro} if erro else {})}
 
 
-def completar_atuacao(limite: int = 300) -> dict:
+def completar_atuacao(limite: int | None = None) -> dict:
     """Lê o histórico de ações das disputas do ML: as que nunca foram lidas e as abertas lidas há mais de 6 h."""
     from app.central.mercado_livre import client
     agora = datetime.now(timezone.utc).replace(tzinfo=None)
     with Sessao() as s:
         lidas = {(a.plataforma, a.id_externo): a for a in s.scalars(select(MediacaoAtuacao))}
-        faltam = []
+        encerrada = {}
         for d in s.scalars(select(Devolucao).where(Devolucao.plataforma == "mercado_livre", Devolucao.em_mediacao.is_(True))):
             a = lidas.get((d.plataforma, d.id_externo))
             if a is None or (not a.encerrada and agora - a.consultada_em > RECONSULTA_ABERTA):
-                faltam.append((d.id_externo, d.resultado_mediacao != "em_andamento"))
-    feitas, erro = [], None
-    lote = faltam[:limite]
-    for n, (claim_id, encerrada) in enumerate(lote):
-        progresso.parcial(n / len(lote))
-        try:
-            historico = client.get(f"/post-purchase/v1/claims/{claim_id}/actions-history") or []
-        except RuntimeError as e:
-            if not _sem_acesso(e):
-                erro = str(e)[:200]
-                break
-            historico = []  # 403 nessa reclamação: grava sem ações (encerrada) para não travar a fila
-            encerrada = True
+                encerrada[d.id_externo] = d.resultado_mediacao != "em_andamento"
+    faltam = list(encerrada)[:limite]
+    resultados = em_paralelo(lambda c: client.get(f"/post-purchase/v1/claims/{c}/actions-history") or [], faltam)
+    feitas = []
+    for claim_id, r in resultados:
+        if isinstance(r, RuntimeError) and not _sem_acesso(r):
+            continue  # conexão: fica para a próxima rodada
+        historico = [] if isinstance(r, RuntimeError) else r  # 403: grava sem ações e encerrada, para não travar a fila
         acoes = sorted({h["action_name"] for h in historico if h.get("player_role") == "respondent"})
         feitas.append(MediacaoAtuacao(plataforma="mercado_livre", id_externo=claim_id, acoes=",".join(acoes)[:200],
-                                      encerrada=encerrada, consultada_em=agora))
+                                      encerrada=encerrada[claim_id] or isinstance(r, RuntimeError), consultada_em=agora))
     with Sessao.begin() as s:
         for a in feitas:
             s.merge(a)
-    return {"consultadas": len(feitas), "faltam": max(0, len(faltam) - len(feitas)), **({"erro": erro} if erro else {})}
+    erro = _erro_de_conexao(resultados)
+    return {"consultadas": len(feitas), "faltam": len(faltam) - len(feitas), **({"erro": erro} if erro else {})}

@@ -3,7 +3,6 @@ guarda aqui (o tipo de envio de uma venda não muda). Preenchido em segundo plan
 
 from sqlalchemy import Column, String, select
 
-from app.central import progresso
 from app.central.db import Base, Sessao
 from app.central.devolucoes.modelo import Devolucao
 
@@ -26,20 +25,15 @@ def mapa() -> dict[tuple[str, str], bool]:
 
 
 def _ml(devs: list[Devolucao]) -> dict[str, str]:
+    from app.central.bi.mediacao_origem import em_paralelo
     from app.central.mercado_livre import client
-    tipos = {}
-    for n, d in enumerate(devs):
-        progresso.parcial(n / len(devs) / 2)  # ML é a primeira metade da tarefa; a Shopee é um lote só
-        envio = (((d.bruto or {}).get("pedido") or {}).get("shipping") or {}).get("id")
-        if envio:
-            try:
-                e = client.get(f"/shipments/{envio}", headers={"x-format-new": "true"}) or {}
-            except RuntimeError as erro:
-                if "HTTP 403" not in str(erro):
-                    raise  # conexão: para a rodada; 403 é só deste envio e não pode travar a fila
-                e = {}
-            tipos[d.pedido] = (e.get("logistic") or {}).get("type") or "desconhecido"
-    return tipos
+    envios = {d.pedido: e for d in devs if (e := (((d.bruto or {}).get("pedido") or {}).get("shipping") or {}).get("id"))}
+    resultados = em_paralelo(lambda p: client.get(f"/shipments/{envios[p]}", headers={"x-format-new": "true"}) or {},
+                             list(envios))
+    if conexao := next((r for _, r in resultados if isinstance(r, RuntimeError) and "HTTP 403" not in str(r)), None):
+        raise conexao  # conexão caída: a rodada registra o erro; 403 é só daquele envio e não trava a fila
+    return {p: ((({} if isinstance(r, RuntimeError) else r).get("logistic")) or {}).get("type") or "desconhecido"
+            for p, r in resultados}
 
 
 def _shopee(devs: list[Devolucao]) -> dict[str, str]:
@@ -52,7 +46,7 @@ def _shopee(devs: list[Devolucao]) -> dict[str, str]:
     return tipos
 
 
-def completar(limite: int = 300) -> dict:
+def completar(limite: int | None = None) -> dict:
     """Consulta os pedidos de devolução que ainda não sabemos se são Full. `limite` por plataforma e rodada:
     a primeira carga do ML é uma chamada por pedido."""
     with Sessao() as s:
