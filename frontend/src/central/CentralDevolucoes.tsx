@@ -5,6 +5,7 @@ import { ConferenciaModal } from "./modules/conferencia/ConferenciaModal";
 import { HistoricoPage } from "./modules/historico/HistoricoPage";
 import { OperacaoPage } from "./modules/operacao/OperacaoPage";
 import { ResumoPage } from "./modules/resumo/ResumoPage";
+import { ehEtiquetaFull, RetiradaFullModal } from "./modules/retirada-full/RetiradaFullModal";
 import type { Plataforma } from "./shared/devolucao";
 import { Icone } from "./shared/Icone";
 import type { Envio } from "./shared/operacao";
@@ -98,7 +99,9 @@ function Central({ onVoltar }: { onVoltar: () => void }) {
         {tela === "historico" && <HistoricoPage nav={nav} />}
       </main>
 
-      {codigo && <ConferenciaModal codigo={codigo} onFechar={fechar} onMudou={() => setVersao((v) => v + 1)} />}
+      {codigo && (ehEtiquetaFull(codigo)
+        ? <RetiradaFullModal codigo={codigo} onFechar={fechar} />
+        : <ConferenciaModal codigo={codigo} onFechar={fechar} onMudou={() => setVersao((v) => v + 1)} />)}
     </div>
   );
 }

@@ -22,6 +22,7 @@ from app.central.mediacoes import servico as mediacoes
 from app.central.mercado_livre.sincronizar import sincronizar as sincronizar_ml
 from app.central.olist import servico as olist
 from app.central.operacao import servico as operacao
+from app.central import retirada_full
 from app.central.shopee.sincronizar import sincronizar as sincronizar_shopee
 
 # ponytail: create_all só cria tabela nova; coluna nova em tabela existente exige migração à mão.
@@ -262,6 +263,17 @@ async def bi_resumo(request: Request):
     return await run_in_threadpool(bi.resumo, _q(request, "dias", 30, int, 1, 365))
 
 
+async def full_identificar(request: Request):
+    """Bipou etiqueta do Full: anúncio, SKU e produto na Olist."""
+    return await run_in_threadpool(retirada_full.identificar, request.path_params["codigo"])
+
+
+async def full_entrada(request: Request):
+    """Clique do operador: entrada no depósito vendável da Olist do que voltou do Full."""
+    corpo = await _corpo(request)
+    return await run_in_threadpool(retirada_full.dar_entrada, request.path_params["codigo"], corpo.get("quantidade"))
+
+
 async def sincronizacao(request: Request):
     """Última rodada de cada tarefa automática (a tela mostra se alguma plataforma está falhando)."""
     return agenda.estado
@@ -294,4 +306,6 @@ rotas = [
     _rota("/operacao/ultimas", operacao_ultimas),
     _rota("/bi/resumo", bi_resumo),
     _rota("/sincronizacao", sincronizacao),
+    _rota("/retirada-full/{codigo}", full_identificar),
+    _rota("/retirada-full/{codigo}/entrada", full_entrada, "POST"),
 ]
