@@ -64,13 +64,15 @@ def campos_disputa(return_sn: str) -> dict:
     return filtra(r)
 
 
-def _urls(fotos: list[Path]) -> list[str]:
-    if not fotos:
-        return []
-    # A Shopee só aceita multipart/form-data aqui, com o campo "image" repetido por arquivo.
-    r = client.post("/api/v2/returns/convert_image",
-                    files=[("image", (f.name, f.read_bytes(), mimetypes.guess_type(f.name)[0] or "image/jpeg")) for f in fotos])
-    return [i["url"] for i in r.get("images") or []]
+def _urls(return_sn: str, fotos: list[Path]) -> list[str]:
+    # convert_image: multipart, campo "upload_image" + return_sn, UMA foto por chamada (as demais são ignoradas).
+    urls = []
+    for f in fotos:
+        r = client.post("/api/v2/returns/convert_image", {"return_sn": return_sn},
+                        files=[("upload_image", (f.name, f.read_bytes(), mimetypes.guess_type(f.name)[0] or "image/jpeg"))])
+        if r.get("url"):
+            urls.append(r["url"])
+    return urls
 
 
 def contestar(return_sn: str, motivo: str, texto: str, fotos: list[Path], videos: list[Path],
@@ -79,7 +81,7 @@ def contestar(return_sn: str, motivo: str, texto: str, fotos: list[Path], videos
         raise RuntimeError("A Shopee exige um motivo da lista oficial para abrir a disputa.")
     if not EMAIL:
         raise RuntimeError("Defina SHOPEE_EMAIL_DISPUTA no .env da trilha shopee (e-mail de contato exigido na disputa).")
-    urls = _urls(fotos)
+    urls = _urls(return_sn, fotos)
     client.post("/api/v2/returns/dispute", {
         "return_sn": return_sn, "email": EMAIL, "dispute_reason": int(motivo),
         "dispute_text_reason": texto, "images": urls,

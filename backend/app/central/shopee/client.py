@@ -26,9 +26,9 @@ def _assinatura_loja(path: str) -> dict:
 
 def post(path: str, corpo: dict | None = None, files: list | None = None) -> dict:
     """POST assinado em endpoint de loja. Sem retentativa: repetir uma escrita pode duplicá-la.
-    `files` manda multipart/form-data (upload de imagem) em vez de JSON."""
+    `files` manda multipart/form-data (upload de imagem) em vez de JSON, com `corpo` como campos do form."""
     if files:
-        resp = _http.post(path, params=_assinatura_loja(path), files=files, timeout=60).json()
+        resp = _http.post(path, params=_assinatura_loja(path), data=corpo, files=files, timeout=60).json()
     else:
         resp = _http.post(path, params=_assinatura_loja(path), json=corpo).json()
     if resp.get("error"):
