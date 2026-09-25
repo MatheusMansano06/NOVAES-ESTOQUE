@@ -95,6 +95,40 @@ def resolver(bruto: str) -> list[int]:
     return []
 
 
+# ponytail: URLs do painel do vendedor montadas à mão (as APIs não devolvem link); se a plataforma mudar, é aqui.
+LINK_PLATAFORMA = {
+    "mercado_livre": lambda d: f"https://www.mercadolivre.com.br/vendas/{d.pacote or d.pedido}/detalhe",
+    "shopee": lambda d: f"https://seller.shopee.com.br/portal/sale/return/{d.id_externo}",
+}
+
+
+def _fotos_anuncio_ml(item_ids: list[str]) -> dict[str, str]:
+    """Foto do anúncio do cache local do ML (sem chamada à API). -I.jpg é miniatura; -O.jpg é a original."""
+    from database import SessionLocal
+    from app.models import MercadoLivreItemCache
+    db = SessionLocal()
+    try:
+        linhas = db.query(MercadoLivreItemCache.item_id, MercadoLivreItemCache.thumbnail)                    .filter(MercadoLivreItemCache.item_id.in_(item_ids)).all()
+    finally:
+        db.close()
+    return {i: t.replace("-I.jpg", "-O.jpg") for i, t in linhas if t}
+
+
+def _midia(d: Devolucao) -> dict:
+    """Conferência visual: foto do anúncio vendido, link para a reclamação e o que o comprador anexou."""
+    if d.plataforma == "mercado_livre":
+        fotos = _fotos_anuncio_ml([str(i.get("item_id")) for i in d.itens if i.get("item_id")])
+        anuncio = [{"nome": i.get("nome"), "imagem": fotos.get(str(i.get("item_id")))} for i in d.itens]
+        comprador = {"fotos": [], "videos": []}  # no ML ficam na reclamação, atrás do login: vai pelo link
+    else:
+        anuncio = [{"nome": i.get("nome"), "imagem": i.get("imagem")} for i in d.itens]
+        bruto = (d.bruto or {}).get("devolucao") or {}
+        comprador = {"fotos": bruto.get("image") or [],
+                     "videos": [v["video_url"] for v in bruto.get("buyer_videos") or [] if v.get("video_url")]}
+    link = LINK_PLATAFORMA.get(d.plataforma)
+    return {"anuncio": anuncio, "comprador": comprador, "link": link(d) if link else None}
+
+
 def buscar(codigo: str) -> list[dict]:
     """O que o leitor de código de barras chama: etiqueta, QR, DANFE, rastreio, pedido — o que vier."""
     ids = resolver(codigo)
@@ -107,6 +141,7 @@ def buscar(codigo: str) -> list[dict]:
             resultado.append({
                 "devolucao": publico(d),
                 "olist": _olist(d),
+                "midia": _midia(d),
                 "conferencia": conf and {**_colunas(conf), "evidencias_exigidas":
                                          EVIDENCIAS.get(d.plataforma, ["foto"])
                                          if conf.contestar or conf.chamado_manual else []},

@@ -292,6 +292,12 @@
 .central-dev .full-produto { display: flex; gap: 0.85rem; align-items: flex-start; margin-bottom: 0.85rem; }
 .central-dev .full-produto img { border-radius: 8px; object-fit: cover; background: var(--papel); }
 .central-dev .full-produto p { margin: 0.15rem 0 0; }
+.central-dev .midia-anuncio { margin: 0.4rem 0 0; }
+.central-dev .midia-anuncio img { width: 100%; max-height: 220px; object-fit: contain; background: #fff; border: 1px solid var(--linha); border-radius: 8px; }
+.central-dev .midia-anuncio figcaption { font-size: 0.78rem; color: var(--suave); margin-top: 0.25rem; }
+.central-dev .midia-comprador { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0.4rem; }
+.central-dev .midia-comprador img { width: 100%; aspect-ratio: 1; object-fit: cover; border-radius: 6px; border: 1px solid var(--linha); }
+.central-dev .midia-link { display: block; text-align: center; margin-top: 0.75rem; text-decoration: none; }
 @keyframes subir { from { transform: translateY(10px); opacity: 0.6; } }
 .central-dev .modal-topo { display: flex; align-items: center; gap: 1rem; padding: 0.9rem 1.25rem; background: var(--papel); border-bottom: 1px solid var(--linha); }
 .central-dev .modal-topo > div:first-child { margin-right: auto; }

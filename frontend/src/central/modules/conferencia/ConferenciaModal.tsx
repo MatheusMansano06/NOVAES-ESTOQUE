@@ -7,7 +7,7 @@ import { Icone } from "../../shared/Icone";
 import { LogoPlataforma } from "../../shared/LogoPlataforma";
 import { Checklist, type Constatacao } from "./Checklist";
 import { Evidencias } from "./Evidencias";
-import { CULPA, type Tela } from "./tipos";
+import { CULPA, type Midia, type Tela } from "./tipos";
 import { Veredito } from "./Veredito";
 
 const PASSOS = ["Conferir", "Fotos e vídeo", "Resultado e ações"] as const;
@@ -137,6 +137,41 @@ export function ConferenciaModal({ codigo, onFechar, onMudou }: Props) {
   );
 }
 
+function Midias({ midia, plataforma }: { midia: Midia; plataforma: string }) {
+  const { fotos, videos } = midia.comprador;
+  return (
+    <>
+      <h3>Anúncio vendido</h3>
+      {midia.anuncio.map((a, i) => (
+        <figure key={i} className="midia-anuncio">
+          {a.imagem
+            ? <a href={a.imagem} target="_blank" rel="noreferrer"><img src={a.imagem} alt={`Foto do anúncio: ${a.nome ?? ""}`} /></a>
+            : <p className="aviso">Sem foto do anúncio no cache.</p>}
+          {a.nome && <figcaption>{a.nome}</figcaption>}
+        </figure>
+      ))}
+      {(fotos.length > 0 || videos.length > 0) && (
+        <>
+          <h3>O que o comprador enviou</h3>
+          <div className="midia-comprador">
+            {fotos.map((f, i) => (
+              <a key={f} href={f} target="_blank" rel="noreferrer"><img src={f} alt={`Foto do comprador ${i + 1}`} /></a>
+            ))}
+            {videos.map((v, i) => (
+              <a key={v} href={v} target="_blank" rel="noreferrer" className="botao">Vídeo {i + 1}</a>
+            ))}
+          </div>
+        </>
+      )}
+      {midia.link && (
+        <a className="botao midia-link" href={midia.link} target="_blank" rel="noreferrer">
+          Abrir a reclamação no {plataforma}
+        </a>
+      )}
+    </>
+  );
+}
+
 function Ficha({ tela }: { tela: Tela }) {
   const { devolucao: d, olist } = tela;
   const culpa = CULPA[d.responsavel];
@@ -160,6 +195,8 @@ function Ficha({ tela }: { tela: Tela }) {
         {d.em_mediacao && <div><dt>Mediação</dt><dd>Em mediação na plataforma</dd></div>}
         <div><dt>Pedido</dt><dd>{d.pacote ? `${d.pacote} (carrinho)` : d.pedido}</dd></div>
       </dl>
+
+      <Midias midia={tela.midia} plataforma={PLATAFORMA[d.plataforma]} />
 
       <h3>Na Olist</h3>
       {olist.erro && <p className="aviso erro">{olist.erro}</p>}

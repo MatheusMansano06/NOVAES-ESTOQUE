@@ -66,9 +66,17 @@ export interface Evidencia {
   enviada_em: string;
 }
 
+/** Conferência visual: foto do anúncio vendido, link para a reclamação e o que o comprador anexou. */
+export interface Midia {
+  anuncio: { nome: string | null; imagem: string | null }[];
+  comprador: { fotos: string[]; videos: string[] };
+  link: string | null;
+}
+
 export interface Tela {
   devolucao: Devolucao;
   olist: { erro: string | null; pedidos: PedidoOlist[] };
+  midia: Midia;
   conferencia: Conferencia | null;
   evidencias: Evidencia[];
 }
