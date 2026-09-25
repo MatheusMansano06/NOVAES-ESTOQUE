@@ -75,6 +75,18 @@ def _urls(return_sn: str, fotos: list[Path]) -> list[str]:
     return urls
 
 
+def _evidencias(return_sn: str, motivo: int, urls: list[str]) -> list[dict]:
+    """As fotos vão num dos "módulos de evidência" que a Shopee define por motivo (module_index + requirement).
+    ponytail: todas as fotos no primeiro módulo obrigatório (ou no primeiro); separar por módulo se a Shopee recusar."""
+    r = client.get("/api/v2/returns/get_return_dispute_reason", {"return_sn": return_sn})
+    lista = r.get("dispute_reason") or r.get("dispute_reason_list") or r.get("reason_list") or []
+    mods = next((m.get("evidence_module_list") or [] for m in lista if str(m.get("dispute_reason")) == str(motivo)), [])
+    if not mods:
+        raise RuntimeError(f"A Shopee não informou onde anexar as fotos do motivo {motivo}. Resposta: {str(r)[:300]}")
+    mod = next((m for m in mods if m.get("is_required")), mods[0])
+    return [{"module_index": mod.get("module_index"), "requirement": mod.get("requirement") or "", "image_url": urls}]
+
+
 def contestar(return_sn: str, motivo: str, texto: str, fotos: list[Path], videos: list[Path],
               produto_perfeito: bool) -> dict:
     if not motivo:
@@ -82,10 +94,10 @@ def contestar(return_sn: str, motivo: str, texto: str, fotos: list[Path], videos
     if not EMAIL:
         raise RuntimeError("Defina SHOPEE_EMAIL_DISPUTA no .env da trilha shopee (e-mail de contato exigido na disputa).")
     urls = _urls(return_sn, fotos)
-    client.post("/api/v2/returns/dispute", {
-        "return_sn": return_sn, "email": EMAIL, "dispute_reason": int(motivo),
-        "dispute_text_reason": texto, "images": urls,
-    })
+    corpo = {"return_sn": return_sn, "email": EMAIL, "dispute_reason_id": int(motivo), "dispute_text_reason": texto}
+    if urls:
+        corpo["image_list"] = _evidencias(return_sn, int(motivo), urls)
+    client.post("/api/v2/returns/dispute", corpo)
     # ponytail: vídeo pela API exige o upload de mídia da Shopee (não documentado de forma confiável); por ora vai pelo painel.
     aviso = "A Shopee exige vídeo nesta disputa: anexe pela Central do Vendedor." if videos else \
             "A Shopee costuma exigir vídeo: grave e anexe pela Central do Vendedor."
