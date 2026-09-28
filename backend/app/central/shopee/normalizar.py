@@ -100,7 +100,10 @@ def normalizar_falha_entrega(pedido: dict, pacote: dict, tracking_number: str | 
         "aberta_em": _data(pedido.get("create_time")),
         "atualizada_em": _data(eventos[0]["update_time"]) if eventos else _data(pedido.get("update_time")),
         "codigos": [pedido["order_sn"], pacote.get("package_number"), tracking_number],
-        "bruto": {"devolucao": {"pedido": pedido, "pacote": pacote, "rastreio_reverso": eventos}, "financeiro": None},
+        # "rastreio_eventos" (não "rastreio_reverso"): essa chave no fluxo normal da Returns API é um dict
+        # (get_reverse_tracking_info); aqui é uma lista (get_tracking_info) — nome diferente evita que
+        # envio_plataforma() em operacao/regras.py chame .get() numa lista e quebre com AttributeError.
+        "bruto": {"devolucao": {"pedido": pedido, "pacote": pacote, "rastreio_eventos": eventos}, "financeiro": None},
     }
 
 
