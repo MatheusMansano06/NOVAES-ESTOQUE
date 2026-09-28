@@ -104,13 +104,25 @@ export function ConferenciaModal({ codigo, onFechar, onMudou }: Props) {
         {erro && <p className="aviso erro" role="alert">{erro}</p>}
         {!telas && !erro && <div className="carregando">Buscando a devolução, o pedido na Olist e o custo…</div>}
         {telas?.length === 0 && (
-          <form className="carregando" onSubmit={(e) => { e.preventDefault(); void vincular(); }}>
-            <p>Nenhuma devolução com o código <strong>{codigo}</strong>.</p>
-            <p className="sub">Etiqueta de retorno do ML (pacote não entregue) não vem pela API: digite o nº da venda
-              ou bipe a etiqueta de ida. Esta etiqueta fica vinculada para o próximo bipe.</p>
-            <input value={venda} onChange={(e) => setVenda(e.target.value)} placeholder="Nº da venda, pacote ou envio"
-                   aria-label="Número da venda" autoFocus />
-            <button type="submit" className="primario" disabled={!venda.trim()}>Buscar</button>
+          <form className="vincular" onSubmit={(e) => { e.preventDefault(); void vincular(); }}>
+            <h3>Nenhuma devolução com o código <strong>{codigo}</strong></h3>
+            <p className="sub">
+              Algumas etiquetas não vêm pela API do Mercado Livre: a <strong>amarela da retirada do Full</strong> (QR com
+              número de 13 dígitos) e a de retorno de pacote não entregue. Faça uma vez e o sistema aprende:
+            </p>
+            <ol>
+              <li>
+                Copie o código e busque no <strong>Pós-venda</strong> do Mercado Livre.
+                <button type="button" className="botao" onClick={() => void navigator.clipboard?.writeText(codigo)}>Copiar código</button>
+              </li>
+              <li>Digite aqui o nº da venda que aparecer (ou bipe a etiqueta de ida).</li>
+            </ol>
+            <div className="linha-botoes">
+              <input value={venda} onChange={(e) => setVenda(e.target.value)} placeholder="Nº da venda, pacote ou envio"
+                     aria-label="Número da venda" autoFocus />
+              <button type="submit" className="botao principal" disabled={!venda.trim()}>Buscar e vincular</button>
+            </div>
+            <p className="sub">Depois disso, bipar esta etiqueta abre direto a devolução.</p>
           </form>
         )}
 

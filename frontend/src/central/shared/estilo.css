@@ -401,6 +401,12 @@
 .central-dev .segmentos button { border: 1px solid var(--linha-forte); background: var(--papel); border-radius: 7px; padding: 0.3rem 0.65rem; font-weight: 500; font-size: 0.8rem; }
 .central-dev .segmentos button[aria-selected="true"] { border-color: var(--azul); color: var(--azul); background: var(--azul-fundo); }
 .central-dev .carregando { padding: 3rem; text-align: center; color: var(--suave); }
+.central-dev .vincular { max-width: 560px; margin: 2.5rem auto; display: grid; gap: 0.7rem; }
+.central-dev .vincular h3 { font-size: 1.05rem; font-weight: 600; }
+.central-dev .vincular ol { margin: 0; padding-left: 1.2rem; display: grid; gap: 0.5rem; }
+.central-dev .vincular li .botao { margin-left: 0.6rem; min-height: 30px; padding: 0 0.7rem; font-size: 0.8rem; }
+.central-dev .vincular .linha-botoes { flex-wrap: nowrap; }
+.central-dev .vincular input { flex: 1; min-width: 0; padding: 0.6rem 0.75rem; border: 1px solid var(--linha-forte); border-radius: 8px; font-size: 0.95rem; }
 .central-dev .modal-corpo { display: grid; grid-template-columns: 310px minmax(0, 1fr); min-height: 0; grid-row: 3; }
 .central-dev .ficha { background: var(--papel); border-right: 1px solid var(--linha); padding: 1rem 1.15rem; overflow: auto; }
 .central-dev .ficha h3 { font-size: 0.85rem; font-weight: 600; margin: 1rem 0 0.4rem; color: var(--suave); }
