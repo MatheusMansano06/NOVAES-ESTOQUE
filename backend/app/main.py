@@ -5217,6 +5217,9 @@ async def custos_produto(request: Request):
             salvos += 1
 
         db.commit()
+        if salvos:
+            from app.central.financeiro.custos import custo_do_sku
+            custo_do_sku.cache_clear()
         return JSONResponse({"ok": True, "salvos": salvos, "ignorados": ignorados})
     except Exception as e:
         db.rollback()
