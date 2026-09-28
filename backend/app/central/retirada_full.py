@@ -3,14 +3,35 @@ bipou, identifica o SKU e dá entrada no orgânico (depósito vendável da Olist
 
 import json
 import re
+from datetime import datetime, timezone
+
+from sqlalchemy import Column, DateTime, Float, Integer, String, select
 
 from database import SessionLocal
+from app.central.db import Base, Sessao
 from app.central.financeiro.custos import custo_do_sku
 from app.central.olist import servico as olist
 from app.integracoes_ml import ml
 from app.models import MercadoLivreItemCache
 
 ETIQUETA = re.compile(r"^[A-Z]{4}\d{5}$")
+
+
+class RetiradaFull(Base):
+    """Cada bipe de retorno do Full que deu entrada no orgânico: o que voltou, quanto, quem e quando.
+    Custo é o do dia (fica gravado: mudar o custo depois não reescreve o retorno)."""
+    __tablename__ = "retiradas_full"
+
+    id = Column(Integer, primary_key=True)
+    codigo = Column(String(20), nullable=False, index=True)
+    item_id = Column(String(40), index=True)
+    titulo = Column(String(255))
+    thumbnail = Column(String(500))
+    sku = Column(String(150), index=True, nullable=False)
+    quantidade = Column(Integer, nullable=False)
+    custo_unitario = Column(Float)
+    operador = Column(String(120))
+    criado_em = Column(DateTime, nullable=False, index=True)
 
 
 def _custo(sku: str) -> float | None:
@@ -57,8 +78,9 @@ def identificar(codigo: str) -> dict:
             "sku": sku, "produto_id": produto_id, "custo": _custo(sku)}
 
 
-def dar_entrada(codigo: str, quantidade) -> dict:
-    """Clique do operador. Kit entra por componente (a Olist não aceita lançamento em kit)."""
+def dar_entrada(codigo: str, quantidade, operador: str | None = None) -> dict:
+    """Clique do operador. Kit entra por componente (a Olist não aceita lançamento em kit).
+    Só registra na aba Retorno do Full se tudo entrou (kit pela metade já avisa pra lançar o resto à mão)."""
     if isinstance(quantidade, bool) or not isinstance(quantidade, int) or not 1 <= quantidade <= 999:
         raise ValueError("Quantidade deve ser um número inteiro entre 1 e 999.")
     p = identificar(codigo)
@@ -73,4 +95,38 @@ def dar_entrada(codigo: str, quantidade) -> dict:
             ja = ", ".join(f"{f['quantidade']:g}x {f['sku']}" for f in feitos)
             raise RuntimeError(f"{e}" + (f" — já lançado na Olist: {ja}. Lance o resto à mão." if ja else ""))
         feitos.append({"sku": sku, "quantidade": qtd})
+    with Sessao.begin() as s:
+        s.add(RetiradaFull(codigo=p["codigo"], item_id=p["item_id"], titulo=p["titulo"], thumbnail=p["thumbnail"],
+                           sku=p["sku"], quantidade=quantidade, custo_unitario=p["custo"], operador=operador,
+                           criado_em=datetime.now(timezone.utc).replace(tzinfo=None)))
     return {**p, "quantidade": quantidade, "lancados": feitos}
+
+
+def historico(dias: int = 30, fatura: str | None = None) -> dict:
+    """Aba Retorno do Full: o que voltou no período (dia de Brasília), por produto e bipe a bipe."""
+    from zoneinfo import ZoneInfo
+    from app.central.bi.servico import _periodo
+    ini, fim, _, _ = _periodo(dias, fatura)
+    brt, utc = ZoneInfo("America/Sao_Paulo"), ZoneInfo("UTC")
+    de = datetime.combine(ini, datetime.min.time(), brt).astimezone(utc).replace(tzinfo=None)
+    ate = datetime.combine(fim, datetime.max.time(), brt).astimezone(utc).replace(tzinfo=None)
+    with Sessao() as s:
+        linhas = s.scalars(select(RetiradaFull).where(RetiradaFull.criado_em >= de, RetiradaFull.criado_em <= ate)
+                           .order_by(RetiradaFull.criado_em.desc())).all()
+        bipes = [{"codigo": r.codigo, "item_id": r.item_id, "titulo": r.titulo, "thumbnail": r.thumbnail, "sku": r.sku,
+                  "quantidade": r.quantidade, "custo_unitario": r.custo_unitario, "operador": r.operador,
+                  "criado_em": r.criado_em} for r in linhas]
+    produtos: dict = {}
+    for b in bipes:  # mais recente primeiro: o primeiro de cada SKU é o último retorno
+        p = produtos.setdefault(b["sku"], {"sku": b["sku"], "titulo": b["titulo"], "thumbnail": b["thumbnail"], "item_id": b["item_id"],
+                                           "quantidade": 0, "bipes": 0, "valor": 0.0, "sem_custo": 0, "ultimo": b["criado_em"]})
+        p["quantidade"] += b["quantidade"]
+        p["bipes"] += 1
+        if b["custo_unitario"] is None:
+            p["sem_custo"] += b["quantidade"]
+        else:
+            p["valor"] = round(p["valor"] + b["custo_unitario"] * b["quantidade"], 2)
+    lista = sorted(produtos.values(), key=lambda p: (-p["quantidade"], -p["valor"]))
+    return {"inicio": ini.isoformat(), "fim": fim.isoformat(), "produtos": lista, "bipes": bipes[:200],
+            "total": {"quantidade": sum(p["quantidade"] for p in lista), "bipes": len(bipes),
+                      "valor": round(sum(p["valor"] for p in lista), 2), "skus": len(lista)}}

@@ -6,6 +6,7 @@ Erro vira JSON que a tela entende: {"detail": ...} (404 não existe, 409 já fei
 import json
 import re
 from datetime import date, datetime, timedelta
+from zoneinfo import ZoneInfo
 
 from sqlalchemy import select
 from starlette.concurrency import run_in_threadpool
@@ -19,6 +20,7 @@ from app.central.conferencia import servico as conferencia
 from app.central.db import Base, Sessao, engine
 from app.central.devolucoes.modelo import Devolucao
 from app.central.devolucoes.servico import publico
+from app.central.financeiro import custos
 from app.central.mediacoes import servico as mediacoes
 from app.central.mercado_livre.sincronizar import sincronizar as sincronizar_ml
 from app.central.olist import servico as olist
@@ -264,15 +266,33 @@ async def operacao_ultimas(request: Request):
     return await run_in_threadpool(operacao.ultimas, _q(request, "limite", 6, int, 1, 50))
 
 
+_BRT = ZoneInfo("America/Sao_Paulo")
+
+
+def _hoje_brt() -> date:
+    return datetime.now(_BRT).date()
+
+
+def _inicio_do_dia_brt(dia: str) -> datetime:
+    """Meia-noite de Brasília do dia `YYYY-MM-DD`, em UTC sem fuso (como o banco grava)."""
+    return datetime.fromisoformat(dia).replace(tzinfo=_BRT).astimezone(ZoneInfo("UTC")).replace(tzinfo=None)
+
+
+def _dia_valido(texto: str, nome: str) -> str:
+    if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", texto or ""):
+        raise ValueError(f"Parâmetro {nome} inválido: {texto!r}")
+    if not date(2000, 1, 2) <= date.fromisoformat(texto) <= _hoje_brt():
+        raise ValueError(f"{nome} precisa ser uma data entre 2000 e hoje")
+    return texto
+
+
 def _operadores_atividade(dia: str) -> dict:
     """Log de conferências do dia: quem fez, quando, de qual plataforma. O status vem buscado ao vivo da
     central (não do log) porque o resultado muda depois — vira mediação, aceite etc."""
-    from zoneinfo import ZoneInfo
     from database import SessionLocal
     from app.models import LogOperacao
     # o log grava UTC sem fuso; "o dia" é o de Brasília (senão o que foi feito depois das 21h cai no dia seguinte)
-    inicio = (datetime.fromisoformat(dia).replace(tzinfo=ZoneInfo("America/Sao_Paulo"))
-              .astimezone(ZoneInfo("UTC")).replace(tzinfo=None))
+    inicio = _inicio_do_dia_brt(dia)
     db = SessionLocal()
     try:
         logs = db.query(LogOperacao).filter(
@@ -301,11 +321,50 @@ def _operadores_atividade(dia: str) -> dict:
 
 
 async def operadores_atividade(request: Request):
-    from zoneinfo import ZoneInfo
-    dia = _q(request, "dia") or datetime.now(ZoneInfo("America/Sao_Paulo")).date().isoformat()
-    if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", dia):
-        raise ValueError(f"Parâmetro dia inválido: {dia!r}")
+    dia = _dia_valido(_q(request, "dia") or _hoje_brt().isoformat(), "dia")
     return await run_in_threadpool(_operadores_atividade, dia)
+
+
+async def produtos_quebrados(request: Request):
+    fatura = _q(request, "fatura")
+    if fatura and not re.fullmatch(r"\d{4}-\d{2}-01", fatura):
+        raise ValueError(f"Parâmetro fatura inválido: {fatura!r}")
+    return await run_in_threadpool(bi.produtos_quebrados, _q(request, "dias", 30, int, 1, 365), fatura)
+
+
+async def custo_historico(request: Request):
+    return await run_in_threadpool(custos.historico_do_sku, request.path_params["sku"])
+
+
+def _registrar_custo(sku: str, custo: float, desde: datetime, quem: str | None) -> dict:
+    from database import SessionLocal
+    db = SessionLocal()
+    try:
+        atual = custos.registrar_custo(db, sku, custo, desde, quem)
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+    custos.limpar_cache()
+    return {"sku": sku, "custo_atual": atual, "conferencias_recalculadas": conferencia.reprecificar(sku, desde)}
+
+
+async def custo_registrar(request: Request):
+    """Custo novo do SKU valendo a partir de `desde` (dia de Brasília, padrão hoje): quebras de antes mantêm o custo
+    antigo, as de depois são recalculadas."""
+    sku = request.path_params["sku"].strip()
+    corpo = await _corpo(request)
+    try:
+        custo = float(corpo.get("custo"))
+    except (TypeError, ValueError):
+        raise ValueError("custo inválido")
+    if not 0 < custo < 1_000_000:
+        raise ValueError("custo deve ser maior que zero")
+    desde = _inicio_do_dia_brt(_dia_valido(corpo.get("desde") or _hoje_brt().isoformat(), "desde"))
+    quem = (request.headers.get("x-operator-name") or "").strip() or None
+    return await run_in_threadpool(_registrar_custo, sku, round(custo, 2), desde, quem)
 
 
 async def respostas_prontas_listar(request: Request):
@@ -353,7 +412,15 @@ async def full_identificar(request: Request):
 async def full_entrada(request: Request):
     """Clique do operador: entrada no depósito vendável da Olist do que voltou do Full."""
     corpo = await _corpo(request)
-    return await run_in_threadpool(retirada_full.dar_entrada, request.path_params["codigo"], corpo.get("quantidade"))
+    operador = (request.headers.get("x-operator-name") or "").strip() or None
+    return await run_in_threadpool(retirada_full.dar_entrada, request.path_params["codigo"], corpo.get("quantidade"), operador)
+
+
+async def full_historico(request: Request):
+    fatura = _q(request, "fatura")
+    if fatura and not re.fullmatch(r"\d{4}-\d{2}-01", fatura):
+        raise ValueError(f"Parâmetro fatura inválido: {fatura!r}")
+    return await run_in_threadpool(retirada_full.historico, _q(request, "dias", 30, int, 1, 365), fatura)
 
 
 async def sincronizacao(request: Request):
@@ -393,6 +460,9 @@ rotas = [
     _rota("/operacao/atencao", operacao_atencao),
     _rota("/operacao/ultimas", operacao_ultimas),
     _rota("/operadores/atividade", operadores_atividade),
+    _rota("/produtos-quebrados", produtos_quebrados),
+    _rota("/custos/{sku}/historico", custo_historico),
+    _rota("/custos/{sku}", custo_registrar, "POST"),
     _rota("/respostas-prontas", respostas_prontas_listar),
     _rota("/respostas-prontas", respostas_prontas_criar, "POST"),
     _rota("/respostas-prontas/{id:int}", respostas_prontas_editar, "PUT"),
@@ -402,6 +472,7 @@ rotas = [
     _rota("/bi/mensal/{fatura}/refazer", bi_refazer_mes, "POST"),
     _rota("/sincronizacao", sincronizacao),
     _rota("/sincronizacao/progresso", sincronizacao_progresso),
+    _rota("/retiradas-full", full_historico),
     _rota("/retirada-full/{codigo}", full_identificar),
     _rota("/retirada-full/{codigo}/entrada", full_entrada, "POST"),
 ]

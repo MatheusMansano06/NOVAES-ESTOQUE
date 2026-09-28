@@ -45,6 +45,7 @@ from app.integracoes_ml import ml
 from app.integracoes_shopee import shopee
 from app.jobs import iniciar_scheduler
 from app.central.routes import rotas as rotas_central
+from app.central.financeiro.custos import limpar_cache as limpar_cache_custos, registrar_custo
 
 # Carregar variáveis de ambiente do arquivo .env
 load_dotenv()
@@ -5208,7 +5209,11 @@ async def custos_produto(request: Request):
             if custo <= 0 and not row:
                 ignorados += 1
                 continue
-            if row:
+            if row and custo > 0 and custo != row.custo:
+                # mudança de custo entra no histórico com vigência a partir de agora (o passado mantém o custo antigo)
+                registrar_custo(db, sku, custo, datetime.utcnow(), _operador_contexto(request)["operador_nome"])
+                row.imposto_pct = imposto
+            elif row:
                 row.custo = custo
                 row.imposto_pct = imposto
                 row.atualizado_em = datetime.utcnow()
@@ -5218,8 +5223,7 @@ async def custos_produto(request: Request):
 
         db.commit()
         if salvos:
-            from app.central.financeiro.custos import custo_do_sku
-            custo_do_sku.cache_clear()
+            limpar_cache_custos()
         return JSONResponse({"ok": True, "salvos": salvos, "ignorados": ignorados})
     except Exception as e:
         db.rollback()

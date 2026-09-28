@@ -45,7 +45,14 @@
 .central-dev .marca-produto { display: grid; font-size: 0.72rem; color: var(--suave); line-height: 1.15; padding-left: 0.85rem; border-left: 1px solid var(--linha); }
 .central-dev .marca-produto strong { font-size: 0.95rem; font-weight: 700; color: var(--tinta); }
 .central-dev .topo nav { display: flex; gap: 0.25rem; height: 100%; }
-.central-dev .topo nav button { border: 0; background: none; padding: 0 0.9rem; font-weight: 500; color: var(--suave); box-shadow: inset 0 -2px 0 transparent; }
+.central-dev .voltar, .central-dev .marca { flex-shrink: 0; }
+/* Muitas abas: abaixo de 1280px elas descem para uma segunda linha do topo em vez de espremer marca e busca. */
+@media (max-width: 1280px) {
+  .central-dev .cd-app { grid-template-rows: auto minmax(0, 1fr); }
+  .central-dev .topo { flex-wrap: wrap; row-gap: 0; padding-top: 0.55rem; }
+  .central-dev .topo nav { order: 1; flex-basis: 100%; height: 44px; margin-left: -0.55rem; }
+}
+.central-dev .topo nav button { border: 0; background: none; padding: 0 0.9rem; font-weight: 500; color: var(--suave); box-shadow: inset 0 -2px 0 transparent; white-space: nowrap; }
 .central-dev .topo nav button:hover { color: var(--tinta); }
 .central-dev .topo nav button[aria-current="page"] { color: var(--tinta); font-weight: 600; box-shadow: inset 0 -2px 0 var(--azul); }
 .central-dev .busca-global { margin-left: auto; display: flex; align-items: center; gap: 0.5rem; width: min(340px, 30vw); min-width: 150px; padding: 0 0.75rem; height: 36px;
@@ -251,6 +258,41 @@
   background: color-mix(in srgb, var(--cor) 12%, transparent); color: var(--cor); }
 .central-dev .op-classe.classe-A { --cor: var(--classe-a); } .central-dev .op-classe.classe-B { --cor: var(--classe-b); }
 .central-dev .op-classe.classe-C { --cor: var(--classe-c); }
+/* ---------- Retorno do Full ---------- */
+.central-dev .full-pg { grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); grid-template-rows: auto auto minmax(0, 1fr); align-content: start; }
+.central-dev .full-pg > .cabecalho, .central-dev .full-pg > .op-cartoes, .central-dev .full-pg > .aviso { grid-column: 1 / -1; }
+.central-dev .full-qtd { font-size: 1.05rem; }
+@media (max-width: 1100px) { .central-dev .full-pg { grid-template-columns: 1fr; } }
+
+/* ---------- Produtos quebrados ---------- */
+.central-dev .quebrados-pg { grid-template-rows: auto auto minmax(0, 1fr); align-content: start; }
+.central-dev .qb-alerta { border-color: #f5c68b; background: #fffaf2; }
+.central-dev .qb-alerta .op-numero { color: var(--classe-b); }
+.central-dev .qb-tabela tbody tr { cursor: default; }
+.central-dev .qb-tabela td { padding: 0.55rem 0.6rem; vertical-align: middle; }
+.central-dev .qb-produto { display: flex; align-items: center; gap: 0.75rem; min-width: 0; }
+.central-dev .qb-produto img, .central-dev .qb-sem-foto { width: 52px; height: 52px; border-radius: 8px; object-fit: contain; background: #fff;
+  border: 1px solid var(--linha); flex-shrink: 0; }
+.central-dev .qb-sem-foto { background: var(--fundo); }
+.central-dev .qb-produto > div { display: grid; gap: 0.1rem; min-width: 0; }
+.central-dev .qb-nome { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; max-width: 460px; }
+.central-dev .qb-numeros { display: inline-grid; justify-items: end; gap: 0.05rem; font-variant-numeric: tabular-nums; }
+.central-dev .qb-custo { display: inline-grid; justify-items: end; gap: 0.1rem; }
+.central-dev .qb-falta { color: var(--classe-b); font-weight: 600; font-size: 0.82rem; }
+.central-dev .qb-aberta td { background: var(--azul-fundo); }
+.central-dev .qb-edicao td { background: #fafbfc; padding: 0.9rem 1rem 1.1rem; }
+.central-dev .qb-editar { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr); gap: 1.5rem; align-items: start; }
+.central-dev .qb-editar form { display: grid; grid-template-columns: 1fr 1fr auto; gap: 0 0.8rem; align-items: end; }
+.central-dev .qb-editar form .botao { min-height: 38px; }
+.central-dev .qb-ajuda { grid-column: 1 / -1; margin-top: 0.5rem; }
+.central-dev .qb-editar > .aviso { grid-column: 1; }
+.central-dev .qb-historico { grid-column: 2; grid-row: 1 / span 2; }
+.central-dev .qb-historico h3 { font-size: 0.85rem; font-weight: 600; margin-bottom: 0.4rem; }
+.central-dev .qb-historico ol { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.3rem; }
+.central-dev .qb-historico li { display: flex; gap: 0.6rem; align-items: baseline; font-size: 0.84rem; border-left: 2px solid var(--linha-forte); padding-left: 0.6rem; }
+.central-dev .qb-historico li:first-child { border-left-color: var(--azul); }
+@media (max-width: 1100px) { .central-dev .qb-editar { grid-template-columns: 1fr; } .central-dev .qb-historico { grid-column: 1; grid-row: auto; } }
+
 .central-dev .op-vazio { flex: 1; display: grid; place-content: center; justify-items: center; gap: 0.3rem; padding: 3rem 1rem; text-align: center; }
 
 .central-dev .tabela tbody tr { cursor: pointer; }

@@ -4,7 +4,7 @@ from collections import Counter, defaultdict
 from datetime import date, datetime, timedelta, timezone
 
 from app.central.bi import fatura_ml, fechamento, logistica, mediacao_origem
-from app.central.financeiro.custos import custo_do_sku
+from app.central.financeiro.custos import custo_do_sku, custo_na_data
 from app.central.mercado_livre import catalogo
 from app.central.operacao.servico import a_caminho_por_plataforma, linhas
 
@@ -29,7 +29,7 @@ def _cmv(linha: dict) -> float | None:
     total = 0.0
     for i in linha["itens"]:
         try:
-            custo = custo_do_sku(i.get("sku")) if i.get("sku") else None
+            custo = custo_na_data(i.get("sku"), linha["aberta_em"]) if i.get("sku") else None
         except RuntimeError:
             custo = None
         if custo is None:
@@ -52,23 +52,76 @@ def perda(linha: dict) -> tuple[str | None, float | None]:
 
 
 def quebrados_por_sku(ls: list[dict]) -> list[dict]:
-    """Unidades que a bancada conferiu como avariadas (classe B), por SKU e marketplace. Produto enviado por engano
-    que voltou estragado conta no SKU que chegou — é ele que vai para a avaria (conferencia/regras.lancamentos)."""
+    """Unidades que a bancada conferiu como avariadas (classe B), por SKU e marketplace, com o prejuízo pelo custo
+    vigente no dia da conferência. Produto enviado por engano que voltou estragado conta no SKU que chegou — é ele
+    que vai para a avaria (conferencia/regras.lancamentos)."""
     skus: dict = {}
     for l in ls:
         c = l["conferencia"]
         if not c or c["classe"] != "B":
             continue
+        quando = c.get("conferida_em") or l["aberta_em"]
         if c.get("erro_nosso") and c.get("sku_recebido"):
-            pecas = [(c["sku_recebido"], None, sum(i.get("quantidade") or 0 for i in l["itens"]) or 1)]
+            pecas = [(c["sku_recebido"], {}, sum(i.get("quantidade") or 0 for i in l["itens"]) or 1)]
         else:
-            pecas = [(i.get("sku") or f"anúncio {i.get('item_id')}", i.get("nome"), i.get("quantidade") or 1) for i in l["itens"]]
-        for sku, nome, qtd in pecas:
-            s = skus.setdefault(sku, {"sku": sku, "nome": nome, "total": 0, **dict.fromkeys(PLATAFORMAS, 0)})
-            s["nome"] = s["nome"] or nome
-            s[l["plataforma"]] += qtd
-            s["total"] += qtd
-    return sorted(skus.values(), key=lambda s: -s["total"])
+            pecas = [(i.get("sku") or f"anúncio {i.get('item_id')}", i, i.get("quantidade") or 1) for i in l["itens"]]
+        for sku, item, qtd in pecas:
+            s = skus.setdefault(sku, {"sku": sku, "nome": None, "imagem": None, "item_id": None, "quantidade": 0, "valor": 0.0,
+                                      "sem_custo": 0, **{p: {"quantidade": 0, "valor": 0.0} for p in PLATAFORMAS}})
+            s["nome"] = s["nome"] or item.get("nome")
+            s["imagem"] = s["imagem"] or item.get("imagem")
+            if l["plataforma"] == "mercado_livre":
+                s["item_id"] = s["item_id"] or item.get("item_id")
+            custo = custo_na_data(sku, quando)
+            p = s[l["plataforma"]]
+            p["quantidade"] += qtd
+            s["quantidade"] += qtd
+            if custo is None:
+                s["sem_custo"] += qtd
+            else:
+                p["valor"] = round(p["valor"] + custo * qtd, 2)
+                s["valor"] = round(s["valor"] + custo * qtd, 2)
+    return sorted(skus.values(), key=lambda s: (-s["quantidade"], -s["valor"]))
+
+
+def _fotos_ml(skus: list[str], item_ids: list[str]) -> tuple[dict[str, str], dict[str, str]]:
+    """Foto do anúncio do ML no cache local (sem chamar a API): por SKU — serve até para SKU que só voltou pela
+    Shopee — e por item_id, para SKU de variação, que o cache não guarda."""
+    if not skus and not item_ids:
+        return {}, {}
+    from sqlalchemy import or_
+    from database import SessionLocal
+    from app.models import MercadoLivreItemCache as C
+    db = SessionLocal()
+    try:
+        linhas = db.query(C.sku, C.item_id, C.thumbnail).filter(
+            or_(C.sku.in_(skus), C.item_id.in_(item_ids)), C.thumbnail.isnot(None)).all()
+    finally:
+        db.close()
+    grande = lambda t: t.replace("-I.jpg", "-O.jpg")  # noqa: E731 — -I é miniatura, -O a original
+    return ({s: grande(t) for s, _, t in linhas if s}, {i: grande(t) for _, i, t in linhas})
+
+
+def produtos_quebrados(dias: int = 30, fatura: str | None = None) -> dict:
+    """Aba Produtos quebrados: mesmo período do B.I (abertura da devolução), com foto e custo atual editável."""
+    ini, fim, _, _ = _periodo(dias, fatura)
+    lista = quebrados_por_sku([l for l in linhas() if ini <= l["aberta_em"].date() <= fim])
+    por_sku, por_item = _fotos_ml([s["sku"] for s in lista], [s["item_id"] for s in lista if s["item_id"]])
+    for s in lista:
+        s["imagem"] = por_sku.get(s["sku"]) or s["imagem"] or por_item.get(s["item_id"])
+        s["custo_atual"] = custo_do_sku(s["sku"])
+    # anúncio fora do cache local: busca no ML (mesmo caminho das fotos do B.I)
+    sem_foto = [s for s in lista if s["item_id"] and not s["imagem"]]
+    fotos_api = catalogo.imagens(s["item_id"] for s in sem_foto)
+    for s in sem_foto:
+        s["imagem"] = fotos_api.get(s["item_id"])
+    return {
+        "inicio": ini.isoformat(), "fim": fim.isoformat(), "produtos": lista,
+        "total": {"quantidade": sum(s["quantidade"] for s in lista), "valor": round(sum(s["valor"] for s in lista), 2),
+                  "sem_custo": sum(s["sem_custo"] for s in lista),
+                  **{p: {"quantidade": sum(s[p]["quantidade"] for s in lista),
+                         "valor": round(sum(s[p]["valor"] for s in lista), 2)} for p in PLATAFORMAS}},
+    }
 
 
 def _recuperado(linha: dict) -> float:
@@ -259,7 +312,6 @@ def resumo(dias: int = 30, fatura: str | None = None) -> dict:
         "dinheiro": _dinheiro(atual),
         "dinheiro_anterior": _dinheiro(anterior),
         "quebrados": quebrados(atual),
-        "quebrados_por_sku": quebrados_por_sku(atual),
         "por_logistica": por_logistica(atual, full := logistica.mapa()),
         "logistica_total": contar_logistica(atual, full),
         "a_caminho": a_caminho_por_plataforma(atual),

@@ -11,7 +11,7 @@ from sqlalchemy import select
 from app.central.devolucoes import servico as devolucoes
 from app.central.devolucoes.modelo import Devolucao
 from app.central.devolucoes.servico import publico
-from app.central.financeiro.custos import custo_do_sku
+from app.central.financeiro.custos import custo_do_sku, custo_na_data
 from app.central.mercado_livre import acoes as ml_acoes
 from app.central.olist import servico as olist
 from app.central.db import UPLOADS, Sessao
@@ -174,6 +174,24 @@ def _sku_vendido(d: Devolucao) -> str | None:
         return _produto_vendido(d)[1]
     except (RuntimeError, ValueError):
         return None
+
+
+def reprecificar(sku: str, desde: datetime) -> int:
+    """O custo do SKU mudou valendo a partir de `desde`: refaz o prejuízo gravado das conferências feitas desde então
+    em que esse SKU é o que se perdeu (a mesma escolha de regras.perda_produto). As anteriores mantêm o custo da época."""
+    feitas = 0
+    with Sessao.begin() as s:
+        pares = s.execute(select(Conferencia, Devolucao).join(Devolucao, Devolucao.id == Conferencia.devolucao_id)
+                          .where(Conferencia.conferida_em >= desde, Conferencia.classe.in_(("B", "C")))).all()
+        for conf, d in pares:
+            perdido = conf.sku_recebido if conf.classe == "B" and conf.erro_nosso else _sku_vendido(d)
+            if (perdido or "").strip() != sku.strip():
+                continue
+            custo = custo_na_data(sku, conf.conferida_em)
+            quantidade = sum(i.get("quantidade") or 0 for i in d.itens) or 1
+            conf.perda_produto = None if custo is None else round(custo * quantidade, 2)
+            feitas += 1
+    return feitas
 
 
 def enviar_para_chamado_manual(devolucao_id: int) -> None:
