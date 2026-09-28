@@ -42,9 +42,19 @@ NOMES_MOTIVO = {
 }
 
 
+# Status em que a Shopee recusa o confirm porque a devolução já foi aceita (pelo painel ou por prazo).
+_JA_ACEITA = {"RETURN_ACCEPTED": "aceita", "RETURN_COMPLETED": "concluída"}
+
+
 def aceitar(return_sn: str) -> dict:
     """Aceita a devolução: a Shopee reembolsa o comprador. Irreversível, só por clique do operador."""
-    client.post("/api/v2/returns/confirm", {"return_sn": return_sn})
+    try:
+        client.post("/api/v2/returns/confirm", {"return_sn": return_sn})
+    except RuntimeError as e:
+        status = next((s for s in _JA_ACEITA if f"Invalid return status: {s}" in str(e)), None)
+        if not status:
+            raise
+        return {"caminho": "aceite", "anexos": [], "aviso": f"A devolução já estava {_JA_ACEITA[status]} na Shopee."}
     return {"caminho": "aceite", "anexos": [], "aviso": None}
 
 

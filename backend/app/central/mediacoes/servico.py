@@ -82,7 +82,7 @@ def aceitar(devolucao_id: int) -> dict:
     registro = Contestacao(devolucao_id=devolucao_id, motivo="aceite", texto="Devolução aceita", anexos=[], enviada_em=_agora())
     try:
         r = modulo.aceitar(id_externo)
-        registro.ok, registro.caminho, registro.anexos = True, r["caminho"], r["anexos"]
+        registro.ok, registro.caminho, registro.anexos, registro.aviso = True, r["caminho"], r["anexos"], r.get("aviso")
     except RuntimeError as e:
         registro.ok, registro.erro = False, str(e)
     with Sessao.begin() as s:
