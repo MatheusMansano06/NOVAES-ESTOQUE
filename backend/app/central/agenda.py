@@ -24,6 +24,9 @@ log = logging.getLogger("central.agenda")
 # Antes era de 6 em 6 h e também a cada deploy (a memória zerava): a primeira rodada depois de subir travava.
 VARREDURA_HORA = int(os.getenv("CENTRAL_VARREDURA_HORA", "23"))
 VARREDURA_DIAS = 2
+# Shopee: "falha na entrega" fecha o reembolso rápido, mas o pacote físico (RTS) volta bem mais devagar —
+# 2 dias perde esse caso; 15 é o teto de uma chamada à API, e o sincronizar() já encadeia janelas maiores.
+VARREDURA_DIAS_SHOPEE = 15
 RELEITURA_SHOPEE_S = 30 * 60  # rastreio das devoluções abertas da Shopee (postado ou não)
 CARGA_INICIAL_DIAS = 30
 _varredura = {"agora": False}
@@ -57,10 +60,10 @@ def _varredura_pendente() -> bool:
     return datetime.now(ZoneInfo("America/Sao_Paulo")).hour >= VARREDURA_HORA and feita != _hoje()
 
 
-def _com_carga(nome: str, sincronizar):
+def _com_carga(nome: str, sincronizar, varredura_dias: float = VARREDURA_DIAS):
     dias = _dias(nome)
-    if _varredura["agora"] and dias < VARREDURA_DIAS:
-        dias = VARREDURA_DIAS
+    if _varredura["agora"] and dias < varredura_dias:
+        dias = varredura_dias
     resultado = sincronizar(dias)
     _concluida(nome, dias)
     return resultado
@@ -100,7 +103,7 @@ def _shopee_rastreio():
 # Cada tarefa isolada: falha de uma plataforma (ex.: token Shopee vencido) não impede as outras.
 TAREFAS = {
     "mercado_livre": _ml,
-    "shopee": lambda: _com_carga("shopee", lambda dias: sincronizar_shopee(dias=dias)),
+    "shopee": lambda: _com_carga("shopee", lambda dias: sincronizar_shopee(dias=dias), VARREDURA_DIAS_SHOPEE),
     "shopee_rastreio": _shopee_rastreio,
     "shopee_reprocessar": _shopee_reprocessar,
     "olist_notas_devolucao": lambda: _com_carga("olist", lambda dias: olist_servico.sincronizar_notas_devolucao(dias=CARGA_INICIAL_DIAS if dias > 1 else 1)),

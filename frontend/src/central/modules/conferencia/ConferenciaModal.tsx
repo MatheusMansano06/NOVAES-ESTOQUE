@@ -198,7 +198,8 @@ function Ficha({ tela }: { tela: Tela }) {
     <aside className="ficha" aria-label="Dados da venda">
       <LogoPlataforma plataforma={d.plataforma} tamanho={24} comNome />
       <dl className="dados">
-        <div><dt>Motivo do comprador</dt><dd>{MOTIVO[d.motivo] ?? d.motivo}</dd></div>
+        <div><dt>Motivo do comprador</dt>
+          <dd>{d.motivo === "outro" ? d.motivo_plataforma : (MOTIVO[d.motivo] ?? d.motivo)}</dd></div>
         <div className={d.responsavel === "vendedor" ? "alerta-linha" : ""}>
           <dt>Quem a plataforma culpa</dt><dd>{culpa.quem}<small>{culpa.efeito}</small></dd>
         </div>
