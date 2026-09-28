@@ -34,8 +34,8 @@
 @media (prefers-reduced-motion: reduce) { .central-dev, .central-dev * { transition: none !important; animation: none !important; } }
 
 /* ---------- Estrutura: o app ocupa a janela, sem rolagem ---------- */
-.central-dev .cd-app { height: 100vh; display: grid; grid-template-rows: 60px minmax(0, 1fr); overflow: hidden; }
-.central-dev .topo { position: relative; display: flex; align-items: center; gap: 2.5rem; padding: 0 1.75rem; background: var(--papel); border-bottom: 1px solid var(--linha); }
+.central-dev .cd-app { height: 100vh; display: grid; grid-template-rows: 60px minmax(0, 1fr); grid-template-columns: minmax(0, 1fr); overflow: hidden; }
+.central-dev .topo { position: relative; display: flex; align-items: center; gap: clamp(1rem, 2.5vw, 2.5rem); padding: 0 1.75rem; background: var(--papel); border-bottom: 1px solid var(--linha); }
 .central-dev .voltar { width: 34px; height: 34px; margin-right: -1.5rem; border: 1px solid var(--linha); border-radius: 8px; background: var(--papel); color: var(--suave); font-size: 1.1rem; }
 .central-dev .voltar:hover { color: var(--tinta); border-color: var(--linha-forte); }
 .central-dev .marca-logo { width: 96px; height: 42px; object-fit: cover; object-position: center 50%; flex-shrink: 0; }
@@ -48,7 +48,7 @@
 .central-dev .topo nav button { border: 0; background: none; padding: 0 0.9rem; font-weight: 500; color: var(--suave); box-shadow: inset 0 -2px 0 transparent; }
 .central-dev .topo nav button:hover { color: var(--tinta); }
 .central-dev .topo nav button[aria-current="page"] { color: var(--tinta); font-weight: 600; box-shadow: inset 0 -2px 0 var(--azul); }
-.central-dev .busca-global { margin-left: auto; display: flex; align-items: center; gap: 0.5rem; width: min(340px, 30vw); padding: 0 0.75rem; height: 36px;
+.central-dev .busca-global { margin-left: auto; display: flex; align-items: center; gap: 0.5rem; width: min(340px, 30vw); min-width: 150px; padding: 0 0.75rem; height: 36px;
   border: 1px solid var(--linha); border-radius: 8px; color: var(--fraco); background: var(--fundo); }
 .central-dev .busca-global:focus-within { border-color: var(--azul); background: var(--papel); }
 .central-dev .busca-global input { flex: 1; min-width: 0; border: 0; background: none; outline: none; color: var(--tinta); }
@@ -223,10 +223,35 @@
 .central-dev .tabela th.num { text-align: right; }  /* título da coluna em cima do número */
 .central-dev .tabela td { padding: 0.6rem 0.6rem; border-bottom: 1px solid var(--linha); vertical-align: middle; white-space: nowrap; }
 /* ---------- Operadores ---------- */
-.central-dev .resumo-operadores { display: flex; flex-wrap: wrap; gap: 0.7rem; flex: none; }
-.central-dev .linha-resumo-operador { display: flex; align-items: baseline; gap: 0.5rem; border: 1px solid var(--linha); border-radius: 8px;
-  padding: 0.4rem 0.75rem; }
-.central-dev .linha-resumo-operador .contagem { background: var(--azul-fundo); color: var(--azul); }
+.central-dev .operadores { grid-template-rows: auto auto minmax(0, 1fr); align-content: start; }
+.central-dev .op-data { padding-right: 0.7rem; background-image: none; font-family: inherit; color: inherit; }
+.central-dev .op-cartoes { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 0.85rem; }
+.central-dev .op-cartao { display: flex; flex-direction: column; gap: 0.55rem; padding: 1rem 1.1rem; }
+.central-dev .op-total { background: var(--tinta); border-color: var(--tinta); color: #fff; }
+.central-dev .op-total .op-rotulo, .central-dev .op-total .op-plataformas { color: rgba(255, 255, 255, 0.75); }
+.central-dev .op-rotulo { font-size: 0.8rem; font-weight: 500; color: var(--suave); }
+.central-dev .op-numero { font-size: 2rem; font-weight: 700; line-height: 1; letter-spacing: -0.02em; }
+.central-dev .op-pessoa { display: inline-flex; align-items: center; gap: 0.55rem; min-width: 0; }
+.central-dev .op-nome { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.central-dev .op-avatar { width: 32px; height: 32px; border-radius: 50%; background: var(--azul-fundo); color: var(--azul); font-weight: 700;
+  display: grid; place-items: center; flex-shrink: 0; font-size: 0.9rem; }
+.central-dev .op-avatar.pequeno { width: 24px; height: 24px; font-size: 0.72rem; }
+.central-dev .op-barra { display: flex; height: 6px; border-radius: 999px; overflow: hidden; background: var(--fundo); gap: 2px; }
+.central-dev .op-barra-mercado_livre { background: #d99a00; }
+.central-dev .op-barra-shopee { background: #e5482a; }
+.central-dev .op-plataformas { display: flex; gap: 1rem; font-size: 0.85rem; font-weight: 600; color: var(--suave); }
+.central-dev .op-plataformas > span { display: inline-flex; align-items: center; gap: 0.35rem; }
+.central-dev .op-lista { display: flex; flex-direction: column; min-height: 0; }
+.central-dev .op-lista > header { display: flex; align-items: baseline; justify-content: space-between; gap: 1rem; margin-bottom: 0.4rem; }
+.central-dev .op-lista h2 { font-size: 1rem; font-weight: 600; }
+.central-dev .op-lista .tabela td { padding: 0.6rem; vertical-align: middle; }
+.central-dev .op-hora { font-weight: 600; font-variant-numeric: tabular-nums; }
+.central-dev .op-pedido { font-variant-numeric: tabular-nums; color: var(--suave); }
+.central-dev .op-classe { display: inline-block; padding: 0.15rem 0.55rem; border-radius: 999px; font-size: 0.78rem; font-weight: 600;
+  background: color-mix(in srgb, var(--cor) 12%, transparent); color: var(--cor); }
+.central-dev .op-classe.classe-A { --cor: var(--classe-a); } .central-dev .op-classe.classe-B { --cor: var(--classe-b); }
+.central-dev .op-classe.classe-C { --cor: var(--classe-c); }
+.central-dev .op-vazio { flex: 1; display: grid; place-content: center; justify-items: center; gap: 0.3rem; padding: 3rem 1rem; text-align: center; }
 
 .central-dev .tabela tbody tr { cursor: pointer; }
 .central-dev .tabela tbody tr:hover td { background: #fafbfc; }
@@ -411,6 +436,8 @@
 /* ---------- Telas menores: sem espaço para tudo, a página rola ---------- */
 @media (max-width: 1100px), (max-height: 680px) {
   .central-dev .cd-app { height: auto; min-height: 100vh; overflow: visible; }
+  .central-dev .topo nav button { padding: 0 0.55rem; }
+  .central-dev .busca-global kbd { display: none; }
   .central-dev .conteudo { overflow: visible; }
   .central-dev .tela { height: auto; }
   .central-dev .resumo, .central-dev .bi, .central-dev .operacao { grid-template-columns: 1fr; grid-template-rows: none; }

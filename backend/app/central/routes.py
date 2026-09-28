@@ -267,9 +267,12 @@ async def operacao_ultimas(request: Request):
 def _operadores_atividade(dia: str) -> dict:
     """Log de conferências do dia: quem fez, quando, de qual plataforma. O status vem buscado ao vivo da
     central (não do log) porque o resultado muda depois — vira mediação, aceite etc."""
+    from zoneinfo import ZoneInfo
     from database import SessionLocal
     from app.models import LogOperacao
-    inicio = datetime.fromisoformat(dia)
+    # o log grava UTC sem fuso; "o dia" é o de Brasília (senão o que foi feito depois das 21h cai no dia seguinte)
+    inicio = (datetime.fromisoformat(dia).replace(tzinfo=ZoneInfo("America/Sao_Paulo"))
+              .astimezone(ZoneInfo("UTC")).replace(tzinfo=None))
     db = SessionLocal()
     try:
         logs = db.query(LogOperacao).filter(
@@ -298,7 +301,8 @@ def _operadores_atividade(dia: str) -> dict:
 
 
 async def operadores_atividade(request: Request):
-    dia = _q(request, "dia") or date.today().isoformat()
+    from zoneinfo import ZoneInfo
+    dia = _q(request, "dia") or datetime.now(ZoneInfo("America/Sao_Paulo")).date().isoformat()
     if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", dia):
         raise ValueError(f"Parâmetro dia inválido: {dia!r}")
     return await run_in_threadpool(_operadores_atividade, dia)
