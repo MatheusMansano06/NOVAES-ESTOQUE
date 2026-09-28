@@ -222,6 +222,14 @@ async def shopee_sincronizar(request: Request):
     return await run_in_threadpool(sincronizar_shopee, _q(request, "dias", 15.0, float, 0))
 
 
+# ponytail: diagnóstico temporário do caso "falha na entrega" que não sincroniza — remover depois de achar a causa.
+async def shopee_debug_pedido(request: Request):
+    from app.central.shopee import client
+    return await run_in_threadpool(client.get, "/api/v2/order/get_order_detail",
+                                    {"order_sn_list": request.path_params["pedido"],
+                                     "response_optional_fields": "package_list,buyer_username"})
+
+
 async def olist_pedido(request: Request):
     return await run_in_threadpool(olist.pedidos_do_marketplace, request.path_params["numero"])
 
@@ -311,6 +319,7 @@ rotas = [
     _rota("/mediacoes/{id:int}", mediacoes_historico),
     _rota("/mercado-livre/sincronizar", ml_sincronizar, "POST"),
     _rota("/shopee/sincronizar", shopee_sincronizar, "POST"),
+    _rota("/shopee/debug/pedido/{pedido}", shopee_debug_pedido),
     _rota("/olist/pedidos/{numero}", olist_pedido),
     _rota("/olist/sincronizar-notas-devolucao", olist_sincronizar_notas, "POST"),
     _rota("/olist/depositos", olist_depositos),
