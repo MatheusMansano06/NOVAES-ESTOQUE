@@ -261,8 +261,24 @@ async def ml_debug_full(request: Request):
             item = tenta(f"/items/{item_id}", {"attributes": "id,inventory_id,variations"}) or {}
             invs = {item.get("inventory_id")} | {v.get("inventory_id") for v in item.get("variations") or []}
             for inv in [i for i in invs if i][:3]:
-                saida[f"ops_{inv}"] = tenta("/stock/fulfillment/operations/search",
-                                            {"seller_id": mlc.USER_ID, "inventory_id": inv, "limit": 50})
+                raras = []  # só o que não é venda nem entrada: retiradas, ajustes, devoluções
+                for offset in range(0, 600, 50):
+                    pg = tenta("/stock/fulfillment/operations/search",
+                               {"seller_id": mlc.USER_ID, "inventory_id": inv, "limit": 50, "offset": offset}) or {}
+                    res = pg.get("results") or []
+                    raras += [o for o in res if o.get("type") not in ("SALE_CONFIRMATION", "TRANSFER_DELIVERY", "SALE_CANCELATION")]
+                    if len(res) < 50:
+                        break
+                saida[f"ops_raras_{inv}"] = raras
+        claim = request.query_params.get("claim")
+        if claim:
+            saida["claim"] = tenta(f"/post-purchase/v1/claims/{claim}", None, {"x-format-new": "true"})
+            saida["claim_returns"] = tenta(f"/post-purchase/v2/claims/{claim}/returns")
+            ret = saida["claim_returns"] if isinstance(saida["claim_returns"], dict) else {}
+            if ret.get("id"):
+                saida["return_reviews"] = tenta(f"/post-purchase/v1/returns/{ret['id']}/reviews")
+            for sh in (ret.get("shipments") or []):
+                saida[f"shipment_{sh.get('shipment_id')}"] = tenta(f"/shipments/{sh.get('shipment_id')}", None, {"x-format-new": "true"})
         for rotulo, path, h in (("shipment", f"/shipments/{codigo}", {"x-format-new": "true"}),
                                 ("order", f"/orders/{codigo}", None),
                                 ("claim", f"/post-purchase/v1/claims/{codigo}", None),
