@@ -243,9 +243,18 @@ async def ml_debug_full(request: Request):
         except RuntimeError as e:
             return {"erro": str(e)[:300]}
 
+    def arquivos():
+        import os
+        from app import integracoes_ml, integracoes_shopee
+        pastas = {"/data", integracoes_ml._DATA_DIR, os.path.dirname(integracoes_shopee.TOKEN_FILE)}
+        return {"ml_token_file": repr(integracoes_ml.TOKEN_FILE), "ml_existe": os.path.exists(integracoes_ml.TOKEN_FILE),
+                "ml_data_dir_env": repr(os.getenv("ML_DATA_DIR")), "shopee_token_file": repr(integracoes_shopee.TOKEN_FILE),
+                "pastas": {p: sorted(n for n in os.listdir(p) if not n.startswith("."))[:40] if os.path.isdir(p) else None
+                           for p in pastas}}
+
     def rodar():
         pedido, codigo = request.path_params["pedido"], request.query_params.get("codigo", "")
-        saida = {"pedido": tenta(f"/orders/{pedido}")}
+        saida = {"arquivos": arquivos(), "pedido": tenta(f"/orders/{pedido}")}
         itens = ((saida["pedido"] or {}).get("order_items") or []) if isinstance(saida["pedido"], dict) else []
         for oi in itens[:2]:
             item_id = (oi.get("item") or {}).get("id")
