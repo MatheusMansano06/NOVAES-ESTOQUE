@@ -8,7 +8,8 @@ interface Progresso {
 }
 
 const NOME_TAREFA: Record<string, string> = {
-  mercado_livre: "reclamações do Mercado Livre", shopee: "devoluções da Shopee", shopee_rastreio: "rastreio da Shopee",
+  mercado_livre: "reclamações do Mercado Livre", shopee: "devoluções da Shopee",
+  shopee_falha_entrega: "falhas de entrega da Shopee", shopee_rastreio: "rastreio da Shopee",
   olist_notas_devolucao: "notas de devolução da Olist", olist_cache_pedidos: "pedidos da Olist",
   refazer_ml: "relendo o Mercado Livre", refazer_shopee: "relendo a Shopee", refazer_fatura: "baixando a fatura do ML",
   fechamento: "gravando o fechamento", logistica_venda: "Full x orgânica", fatura_ml: "fatura do Mercado Livre", mediacao_origem: "quem abriu as mediações",

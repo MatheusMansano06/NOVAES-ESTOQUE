@@ -34,5 +34,6 @@ export const MOTIVO: Record<string, string> = {
   incompleto: "Incompleto",
   danificado: "Chegou danificado",
   nao_recebido: "Não recebeu",
+  falha_entrega: "Falha de entrega pela transportadora",
   outro: "Outro motivo",
 };

@@ -11,7 +11,8 @@ from app.central.db import Sessao
 from .modelo import CodigoDevolucao, Devolucao
 
 ETAPAS = {"solicitada", "em_transito", "entregue", "encerrada", "cancelada"}
-MOTIVOS = {"arrependimento", "nao_serviu", "diferente", "defeito", "incompleto", "danificado", "nao_recebido", "outro"}
+MOTIVOS = {"arrependimento", "nao_serviu", "diferente", "defeito", "incompleto", "danificado", "nao_recebido",
+           "falha_entrega", "outro"}
 # Quem a plataforma responsabiliza — é isso que decide quem paga o frete reverso.
 RESPONSAVEIS = {"comprador", "vendedor", "a_definir"}
 DESTINOS = {"vendedor", "cd_plataforma", "sem_retorno"}

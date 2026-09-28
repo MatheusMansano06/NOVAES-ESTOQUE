@@ -58,6 +58,52 @@ def _custo(renda: dict, responsavel: str) -> float | None:
     return round(taxa + frete, 2)
 
 
+# Pedido cancelado por falha de entrega da transportadora: não é uma "devolução" na API da Shopee (sem return_sn),
+# é o próprio pedido voltando — rastreio reverso vem de logistics/get_tracking_number e get_tracking_info.
+_ETAPA_RASTREIO = {"RETURNED": "entregue", "RETURN_STARTED": "em_transito", "RETURN_INITIATED": "em_transito"}
+
+
+def etapa_rastreio_reverso(eventos: list[dict]) -> str:
+    """`eventos` vem mais recente primeiro (get_tracking_info); o primeiro que bater diz onde o pacote está."""
+    for e in eventos or []:
+        if (s := _ETAPA_RASTREIO.get(e.get("logistics_status"))):
+            return s
+    return "solicitada"
+
+
+def normalizar_falha_entrega(pedido: dict, pacote: dict, tracking_number: str | None, eventos: list[dict]) -> dict:
+    return {
+        "plataforma": "shopee",
+        # prefixo pra nunca colidir com um return_sn de verdade: esse pedido nunca teve devolução formal na Shopee.
+        "id_externo": f"RTS-{pedido['order_sn']}",
+        "pedido": pedido["order_sn"],
+        "pacote": pacote.get("package_number"),
+        "rastreio": tracking_number,
+        "etapa": etapa_rastreio_reverso(eventos),
+        "status_plataforma": pacote.get("logistics_status") or "LOGISTICS_DELIVERY_FAILED",
+        "em_mediacao": False,
+        "pode_contestar": False,  # cancelado pelo sistema da Shopee: não existe fluxo de disputa aqui
+        "motivo": "falha_entrega",
+        "motivo_plataforma": pacote.get("logistics_status") or "LOGISTICS_DELIVERY_FAILED",
+        "responsavel": "a_definir",  # não é culpa da Novaes nem do comprador — da transportadora
+        "destino": "vendedor",
+        "valor_reembolso": None,
+        "custo_plataforma": pedido.get("reverse_shipping_fee") or 0,
+        "afeta_reputacao": None,
+        "prazo_vendedor": None,
+        "condicao_produto": None,
+        "resultado_mediacao": None,
+        "cobertura_aplicada": None,
+        "itens": [{"item_id": i.get("item_id"), "model_id": i.get("model_id"), "sku": i.get("model_sku"),
+                   "quantidade": i.get("model_quantity"), "nome": i.get("item_name"), "imagem": None}
+                  for i in pedido.get("item_list") or []],
+        "aberta_em": _data(pedido.get("create_time")),
+        "atualizada_em": _data(eventos[0]["update_time"]) if eventos else _data(pedido.get("update_time")),
+        "codigos": [pedido["order_sn"], pacote.get("package_number"), tracking_number],
+        "bruto": {"devolucao": {"pedido": pedido, "pacote": pacote, "rastreio_reverso": eventos}, "financeiro": None},
+    }
+
+
 def normalizar(dev: dict, financeiro: dict | None) -> dict:
     reavaliado = dev.get("reassessed_request_reason")
     motivo_efetivo = reavaliado if reavaliado and reavaliado != "NONE" else dev["reason"]

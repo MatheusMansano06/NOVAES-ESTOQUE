@@ -16,6 +16,7 @@ from app.central.db import UPLOADS
 from app.central.shopee.sincronizar import atualizar_abertas as atualizar_shopee
 from app.central.shopee.sincronizar import reprocessar_salvas as reprocessar_shopee
 from app.central.shopee.sincronizar import sincronizar as sincronizar_shopee
+from app.central.shopee.sincronizar import sincronizar_falha_entrega
 
 log = logging.getLogger("central.agenda")
 
@@ -104,6 +105,8 @@ def _shopee_rastreio():
 TAREFAS = {
     "mercado_livre": _ml,
     "shopee": lambda: _com_carga("shopee", lambda dias: sincronizar_shopee(dias=dias), VARREDURA_DIAS_SHOPEE),
+    "shopee_falha_entrega": lambda: _com_carga(
+        "shopee_falha_entrega", lambda dias: sincronizar_falha_entrega(dias=dias), VARREDURA_DIAS_SHOPEE),
     "shopee_rastreio": _shopee_rastreio,
     "shopee_reprocessar": _shopee_reprocessar,
     "olist_notas_devolucao": lambda: _com_carga("olist", lambda dias: olist_servico.sincronizar_notas_devolucao(dias=CARGA_INICIAL_DIAS if dias > 1 else 1)),
