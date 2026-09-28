@@ -12,6 +12,83 @@ import { Veredito } from "./Veredito";
 
 const PASSOS = ["Conferir", "Fotos e vídeo", "Resultado e ações"] as const;
 
+/** QR da etiqueta amarela do Full: id da triagem (13 dígitos), que a API do ML não expõe. */
+const ETIQUETA_TRIAGEM = /^\d{13}$/;
+
+interface Triagem {
+  id: number; pedido: string; pacote: string | null; condicao: string | null; triada_em: string | null; imagem: string | null;
+  itens: { nome: string | null; sku: string | null; quantidade: number | null }[];
+}
+const CONDICAO_TRIAGEM: Record<string, string> = { unsaleable: "não vendável", no_testable: "não testável" };
+
+/** Devoluções do Full que o CD mandou de volta e ainda não foram conferidas, filtradas pelos últimos dígitos do
+ * pedido impresso na etiqueta. O clique vincula a etiqueta: o próximo bipe abre direto. */
+function TriagemFull({ codigo, onEscolher }: { codigo: string; onEscolher: (pedido: string) => void }) {
+  const [lista, setLista] = useState<Triagem[] | null>(null);
+  const [erro, setErro] = useState<string | null>(null);
+  const [filtro, setFiltro] = useState("");
+
+  useEffect(() => {
+    let ativo = true;
+    api.get<Triagem[]>("/triagens-full").then((l) => ativo && setLista(l)).catch((e) => ativo && setErro((e as Error).message));
+    return () => { ativo = false; };
+  }, []);
+
+  const digitos = filtro.replace(/\D/g, "");
+  const achadas = lista && digitos.length >= 3
+    ? lista.filter((t) => t.pedido.endsWith(digitos) || (t.pacote ?? "").endsWith(digitos) || t.pedido.includes(digitos))
+    : [];
+
+  function pedidoMarcado(pedido: string) {
+    const i = pedido.lastIndexOf(digitos);
+    return i < 0 ? pedido : <>{pedido.slice(0, i)}<mark>{pedido.slice(i, i + digitos.length)}</mark>{pedido.slice(i + digitos.length)}</>;
+  }
+
+  return (
+    <div className="vincular">
+      <h3>Etiqueta de triagem do Full <strong>{codigo}</strong></h3>
+      <p className="sub">
+        O Mercado Livre não informa o id da triagem pela API. Digite os <strong>últimos dígitos do nº do pedido</strong> impresso
+        embaixo do QR e escolha a devolução: a etiqueta fica vinculada e o próximo bipe abre direto.
+      </p>
+      <input className="triagem-filtro" value={filtro} onChange={(e) => setFiltro(e.target.value)} inputMode="numeric"
+             placeholder="Ex.: 12148" aria-label="Últimos dígitos do pedido" autoFocus />
+      {erro && <p className="aviso erro" role="alert">{erro}</p>}
+      {lista === null ? <p className="sub">Carregando as devoluções do Full…</p>
+        : digitos.length < 3 ? <p className="sub">{lista.length} devoluções do Full reprovadas na triagem aguardam chegada. Digite ao menos 3 dígitos.</p>
+        : achadas.length === 0 ? (
+          <p className="sub">
+            Nenhuma devolução do Full pendente com esse número.{" "}
+            {digitos.length >= 10 && <button type="button" className="link-botao" onClick={() => onEscolher(digitos)}>Buscar a venda {digitos} mesmo assim</button>}
+          </p>
+        ) : (
+          <ul className="triagem-lista">
+            {achadas.slice(0, 8).map((t) => (
+              <li key={t.id}>
+                <button type="button" onClick={() => onEscolher(t.pedido)}>
+                  {t.imagem ? <img src={t.imagem} alt="" /> : <span className="qb-sem-foto" aria-hidden="true" />}
+                  <span className="triagem-produto">
+                    <strong>{t.itens.map((i) => i.sku).filter(Boolean).join(", ") || "Sem SKU"}</strong>
+                    <span className="sub">{t.itens[0]?.nome ?? "—"}</span>
+                  </span>
+                  <span className="triagem-pedido">
+                    <span>Pedido {pedidoMarcado(t.pedido)}</span>
+                    <span className="sub">
+                      {t.condicao ? CONDICAO_TRIAGEM[t.condicao] ?? t.condicao : "—"}
+                      {t.triada_em ? ` · triado em ${new Date(t.triada_em).toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" })}` : ""}
+                    </span>
+                  </span>
+                  <span className="triagem-acao">Vincular</span>
+                </button>
+              </li>
+            ))}
+            {achadas.length > 8 && <li className="sub">+{achadas.length - 8}: digite mais dígitos</li>}
+          </ul>
+        )}
+    </div>
+  );
+}
+
 interface Props {
   codigo: string;
   onFechar: () => void;
@@ -40,11 +117,11 @@ export function ConferenciaModal({ codigo, onFechar, onMudou }: Props) {
   useEffect(() => { void carregar(true); }, [carregar]);
 
   const [venda, setVenda] = useState("");
-  async function vincular() {
+  async function vincular(pedido = venda.trim()) {
     setErro(null);
     try {
-      const r = await api.get<Tela[]>(`/conferencia/${encodeURIComponent(venda.trim())}?etiqueta=${encodeURIComponent(codigo)}`);
-      if (!r.length) setErro(`Nada encontrado para ${venda.trim()} também. Aguarde a próxima sincronização.`);
+      const r = await api.get<Tela[]>(`/conferencia/${encodeURIComponent(pedido)}?etiqueta=${encodeURIComponent(codigo)}`);
+      if (!r.length) setErro(`Nada encontrado para ${pedido} também. Aguarde a próxima sincronização.`);
       else { setTelas(r); setPasso(r[0].conferencia ? 2 : 0); onMudou(); }
     } catch (e) {
       setErro((e as Error).message);
@@ -103,7 +180,10 @@ export function ConferenciaModal({ codigo, onFechar, onMudou }: Props) {
 
         {erro && <p className="aviso erro" role="alert">{erro}</p>}
         {!telas && !erro && <div className="carregando">Buscando a devolução, o pedido na Olist e o custo…</div>}
-        {telas?.length === 0 && (
+        {telas?.length === 0 && ETIQUETA_TRIAGEM.test(codigo) && (
+          <TriagemFull codigo={codigo} onEscolher={(pedido) => void vincular(pedido)} />
+        )}
+        {telas?.length === 0 && !ETIQUETA_TRIAGEM.test(codigo) && (
           <form className="vincular" onSubmit={(e) => { e.preventDefault(); void vincular(); }}>
             <h3>Nenhuma devolução com o código <strong>{codigo}</strong></h3>
             <p className="sub">

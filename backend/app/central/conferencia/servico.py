@@ -2,7 +2,7 @@
 É a única trilha que conhece as outras; nenhuma delas depende desta."""
 
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import BinaryIO
 
@@ -174,6 +174,41 @@ def _sku_vendido(d: Devolucao) -> str | None:
         return _produto_vendido(d)[1]
     except (RuntimeError, ValueError):
         return None
+
+
+def _triagem(bruto: dict | None) -> tuple[str | None, str | None, str | None]:
+    """(destino, condição, data) segundo a triagem do CD do Full (revisão da devolução no ML)."""
+    for r in ((bruto or {}).get("revisao") or {}).get("reviews") or []:
+        for rr in r.get("resource_reviews") or []:
+            if rr.get("product_destination"):
+                return rr["product_destination"], rr.get("product_condition"), r.get("date_created")
+    return None, None, None
+
+
+def triagens_full(dias: int = 120) -> list[dict]:
+    """Devoluções do Full que a triagem do ML mandou de volta para a Novaes e que ainda não foram conferidas.
+    A etiqueta amarela traz só o id da triagem, que a API não expõe: o operador escolhe nesta lista curta pelo
+    nº do pedido impresso na etiqueta, e o bipe fica vinculado."""
+    desde = _agora() - timedelta(days=dias)
+    with Sessao() as s:
+        conferidas = set(s.scalars(select(Conferencia.devolucao_id)))
+        devs = s.scalars(select(Devolucao).where(
+            Devolucao.plataforma == "mercado_livre", Devolucao.destino == "cd_plataforma", Devolucao.aberta_em >= desde,
+        ).order_by(Devolucao.aberta_em.desc())).all()
+        linhas = []
+        for d in devs:
+            destino, condicao, triada_em = _triagem(d.bruto)
+            # "seller" + vendável = volta pro estoque do Full; só o não vendável sai do CD e chega na bancada
+            if d.id in conferidas or destino != "seller" or condicao == "saleable":
+                continue
+            linhas.append({"id": d.id, "pedido": d.pedido, "pacote": d.pacote, "condicao": condicao,
+                           "triada_em": triada_em, "motivo": d.motivo,
+                           "itens": [{"nome": i.get("nome"), "sku": i.get("sku"), "item_id": i.get("item_id"),
+                                      "quantidade": i.get("quantidade")} for i in d.itens]})
+    fotos = _fotos_anuncio_ml([str(i["item_id"]) for l in linhas for i in l["itens"] if i.get("item_id")])
+    for l in linhas:
+        l["imagem"] = next((fotos[str(i["item_id"])] for i in l["itens"] if fotos.get(str(i.get("item_id")))), None)
+    return linhas
 
 
 def reprecificar(sku: str, desde: datetime) -> int:

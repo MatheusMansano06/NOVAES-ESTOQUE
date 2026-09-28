@@ -145,6 +145,10 @@ def _constatacao(dados: dict) -> dict:
     }
 
 
+async def triagens_full(request: Request):
+    return await run_in_threadpool(conferencia.triagens_full)
+
+
 async def conferencia_buscar(request: Request):
     """Bipou a etiqueta: devolução + pedido/NF/custo na Olist + conferência e evidências já registradas."""
     return await run_in_threadpool(conferencia.buscar, request.path_params["codigo"], _q(request, "etiqueta"))
@@ -438,6 +442,7 @@ async def sincronizacao_progresso(request: Request):
 rotas = [
     _rota("/devolucoes", listar_devolucoes),
     _rota("/devolucoes/rastreio/{codigo}", por_rastreio),
+    _rota("/triagens-full", triagens_full),
     _rota("/conferencia/evidencias/{id:int}", conferencia_ver_evidencia),
     _rota("/conferencia/{codigo}", conferencia_buscar),
     _rota("/conferencia/{id:int}", conferencia_registrar, "POST"),
