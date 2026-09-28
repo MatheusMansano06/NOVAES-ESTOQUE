@@ -47,7 +47,9 @@ def envio_plataforma(plataforma: str, bruto: dict | None) -> str | None:
     dev = (bruto or {}).get("devolucao") or {}
     if plataforma == "mercado_livre":
         return dev.get("status")
-    rastreio = dev.get("rastreio_reverso") or {}
+    rastreio = dev.get("rastreio_reverso")
+    # dict de verdade (get_reverse_tracking_info) só às vezes; já veio lista, erro de sync antigo etc — nunca confiar no formato.
+    rastreio = rastreio if isinstance(rastreio, dict) else {}
     return rastreio.get("reverse_logistics_status") or rastreio.get("logistics_status") or dev.get("status")
 
 
