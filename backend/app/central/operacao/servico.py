@@ -15,7 +15,7 @@ from app.central.db import Sessao
 from .regras import ENVIOS, STATUS, envio, envio_plataforma, pendencias, status
 
 COLUNAS_CONF = ("classe", "lancamentos", "estoque_lancado_em", "contestar", "chamado_manual", "chamado_aberto_em",
-                "chamado_protocolo", "perda_produto", "frete_reverso", "conferida_em")
+                "chamado_protocolo", "perda_produto", "frete_reverso", "conferida_em", "erro_nosso", "sku_recebido")
 
 
 def linhas(desde: datetime | None = None) -> list[dict]:

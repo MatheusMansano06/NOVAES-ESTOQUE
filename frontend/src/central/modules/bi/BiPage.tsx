@@ -21,6 +21,7 @@ interface Quebrados {
 }
 interface Resumo {
   total: number; total_anterior: number; dias: number; inicio: string; fim: string; dinheiro: Dinheiro; dinheiro_anterior: Dinheiro; quebrados: Quebrados;
+  quebrados_por_sku: ({ sku: string; nome: string | null; total: number } & Record<Plataforma, number>)[];
   serie: { dia: string; total: number; resolvidas: number; em_aberto: number; custo: number; recuperado: number }[];
   por_plataforma: Partial<Record<Plataforma, Dinheiro & { devolucoes: number }>>;
   motivos: { motivo: string; quantidade: number; pct: number }[];
@@ -340,6 +341,28 @@ export function BiPage({ nav }: { nav: Navegacao }) {
           </tbody>
         </table>
         {q && q.total.sem_custo > 0 && <p className="sub">* {q.total.sem_custo} devoluções sem custo cadastrado no estoque: contam na quantidade, mas não no valor</p>}
+      </section>
+
+      <section className="cartao financeiro-detalhe">
+        <header><h2>Quebrados na bancada por SKU</h2>
+          <span className="sub">unidades conferidas como avariadas (classe B) no período; enviado por engano conta no SKU que chegou</span></header>
+        {r && r.quebrados_por_sku.length === 0 ? <p className="sub">Nenhum produto conferido como quebrado no período.</p> : (
+          <table className="tabela compacta">
+            <thead><tr><th scope="col">SKU</th><th scope="col">Produto</th>
+              {PLATAFORMAS.map((p) => <th key={p} scope="col" className="num"><LogoPlataforma plataforma={p} tamanho={16} comNome /></th>)}
+              <th scope="col" className="num">Total</th></tr></thead>
+            <tbody>
+              {r?.quebrados_por_sku.map((s) => (
+                <tr key={s.sku}>
+                  <td><strong>{s.sku}</strong></td>
+                  <td className="sub">{s.nome ?? "—"}</td>
+                  {PLATAFORMAS.map((p) => <td key={p} className="num">{s[p] || "—"}</td>)}
+                  <td className="num"><strong>{s.total}</strong></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
       </section>
 
       <section className="cartao financeiro-detalhe">

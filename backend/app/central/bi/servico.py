@@ -51,6 +51,26 @@ def perda(linha: dict) -> tuple[str | None, float | None]:
     return None, 0.0
 
 
+def quebrados_por_sku(ls: list[dict]) -> list[dict]:
+    """Unidades que a bancada conferiu como avariadas (classe B), por SKU e marketplace. Produto enviado por engano
+    que voltou estragado conta no SKU que chegou — é ele que vai para a avaria (conferencia/regras.lancamentos)."""
+    skus: dict = {}
+    for l in ls:
+        c = l["conferencia"]
+        if not c or c["classe"] != "B":
+            continue
+        if c.get("erro_nosso") and c.get("sku_recebido"):
+            pecas = [(c["sku_recebido"], None, sum(i.get("quantidade") or 0 for i in l["itens"]) or 1)]
+        else:
+            pecas = [(i.get("sku") or f"anúncio {i.get('item_id')}", i.get("nome"), i.get("quantidade") or 1) for i in l["itens"]]
+        for sku, nome, qtd in pecas:
+            s = skus.setdefault(sku, {"sku": sku, "nome": nome, "total": 0, **dict.fromkeys(PLATAFORMAS, 0)})
+            s["nome"] = s["nome"] or nome
+            s[l["plataforma"]] += qtd
+            s["total"] += qtd
+    return sorted(skus.values(), key=lambda s: -s["total"])
+
+
 def _recuperado(linha: dict) -> float:
     """Estimado: mediação ganha tira a cobrança do frete; com cobertura, o ML também paga o produto."""
     if linha.get("resultado_mediacao") != "ganha":
@@ -239,6 +259,7 @@ def resumo(dias: int = 30, fatura: str | None = None) -> dict:
         "dinheiro": _dinheiro(atual),
         "dinheiro_anterior": _dinheiro(anterior),
         "quebrados": quebrados(atual),
+        "quebrados_por_sku": quebrados_por_sku(atual),
         "por_logistica": por_logistica(atual, full := logistica.mapa()),
         "logistica_total": contar_logistica(atual, full),
         "a_caminho": a_caminho_por_plataforma(atual),
