@@ -233,6 +233,38 @@ async def shopee_sincronizar(request: Request):
     return await run_in_threadpool(sincronizar_shopee, _q(request, "dias", 15.0, float, 0))
 
 
+# ponytail: diagnóstico temporário — de onde vem o código da etiqueta amarela da retirada do Full. Remover depois.
+async def ml_debug_full(request: Request):
+    from app.central.mercado_livre import client as mlc
+
+    def tenta(path, params=None, headers=None):
+        try:
+            return mlc.get(path, params, headers)
+        except RuntimeError as e:
+            return {"erro": str(e)[:300]}
+
+    def rodar():
+        pedido, codigo = request.path_params["pedido"], request.query_params.get("codigo", "")
+        saida = {"pedido": tenta(f"/orders/{pedido}")}
+        itens = ((saida["pedido"] or {}).get("order_items") or []) if isinstance(saida["pedido"], dict) else []
+        for oi in itens[:2]:
+            item_id = (oi.get("item") or {}).get("id")
+            item = tenta(f"/items/{item_id}", {"attributes": "id,inventory_id,variations"}) or {}
+            invs = {item.get("inventory_id")} | {v.get("inventory_id") for v in item.get("variations") or []}
+            for inv in [i for i in invs if i][:3]:
+                saida[f"ops_{inv}"] = tenta("/stock/fulfillment/operations/search",
+                                            {"seller_id": mlc.USER_ID, "inventory_id": inv, "limit": 50})
+        for rotulo, path, h in (("shipment", f"/shipments/{codigo}", {"x-format-new": "true"}),
+                                ("order", f"/orders/{codigo}", None),
+                                ("claim", f"/post-purchase/v1/claims/{codigo}", None),
+                                ("return", f"/post-purchase/v2/returns/{codigo}", None)):
+            if codigo:
+                saida[f"sonda_{rotulo}"] = tenta(path, None, h)
+        return saida
+
+    return await run_in_threadpool(rodar)
+
+
 async def shopee_sincronizar_falha_entrega(request: Request):
     return await run_in_threadpool(sincronizar_falha_entrega, _q(request, "dias", 15.0, float, 0))
 
@@ -453,6 +485,7 @@ rotas = [
     _rota("/mercado-livre/sincronizar", ml_sincronizar, "POST"),
     _rota("/shopee/sincronizar", shopee_sincronizar, "POST"),
     _rota("/shopee/sincronizar-falha-entrega", shopee_sincronizar_falha_entrega, "POST"),
+    _rota("/ml/debug/full/{pedido}", ml_debug_full),
     _rota("/olist/pedidos/{numero}", olist_pedido),
     _rota("/olist/sincronizar-notas-devolucao", olist_sincronizar_notas, "POST"),
     _rota("/olist/depositos", olist_depositos),
