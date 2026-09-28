@@ -230,6 +230,18 @@ async def shopee_debug_pedido(request: Request):
                                      "response_optional_fields": "package_list,buyer_username"})
 
 
+async def shopee_debug_rastreio(request: Request):
+    from app.central.shopee import client
+    pedido, pacote = request.path_params["pedido"], request.query_params.get("pacote", "")
+    saida = {}
+    for caminho in ("get_tracking_number", "get_tracking_info"):
+        try:
+            saida[caminho] = client.get(f"/api/v2/logistics/{caminho}", {"order_sn": pedido, "package_number": pacote})
+        except RuntimeError as e:
+            saida[caminho] = {"erro": str(e)}
+    return saida
+
+
 async def olist_pedido(request: Request):
     return await run_in_threadpool(olist.pedidos_do_marketplace, request.path_params["numero"])
 
@@ -320,6 +332,7 @@ rotas = [
     _rota("/mercado-livre/sincronizar", ml_sincronizar, "POST"),
     _rota("/shopee/sincronizar", shopee_sincronizar, "POST"),
     _rota("/shopee/debug/pedido/{pedido}", shopee_debug_pedido),
+    _rota("/shopee/debug/rastreio/{pedido}", shopee_debug_rastreio),
     _rota("/olist/pedidos/{numero}", olist_pedido),
     _rota("/olist/sincronizar-notas-devolucao", olist_sincronizar_notas, "POST"),
     _rota("/olist/depositos", olist_depositos),
