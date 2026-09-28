@@ -5,7 +5,7 @@ Erro vira JSON que a tela entende: {"detail": ...} (404 não existe, 409 já fei
 
 import json
 import re
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 
 from sqlalchemy import select
 from starlette.concurrency import run_in_threadpool
@@ -23,6 +23,7 @@ from app.central.mediacoes import servico as mediacoes
 from app.central.mercado_livre.sincronizar import sincronizar as sincronizar_ml
 from app.central.olist import servico as olist
 from app.central.operacao import servico as operacao
+from app.central import respostas_prontas
 from app.central import retirada_full
 from app.central.shopee.sincronizar import sincronizar as sincronizar_shopee
 from app.central.shopee.sincronizar import sincronizar_falha_entrega
@@ -148,7 +149,14 @@ async def conferencia_buscar(request: Request):
 
 
 async def conferencia_registrar(request: Request):
-    return await run_in_threadpool(conferencia.registrar, _id(request), _constatacao(await _corpo(request)))
+    resultado = await run_in_threadpool(conferencia.registrar, _id(request), _constatacao(await _corpo(request)))
+    from app.main import _registrar_log_operacao  # import tardio: main.py importa este módulo, evita ciclo
+    await run_in_threadpool(
+        _registrar_log_operacao, request, "conferencia_devolucao", "devolucao", _id(request),
+        f"{resultado['plataforma']} · classe {resultado['classe']}",
+        {"plataforma": resultado["plataforma"], "pedido": resultado["pedido"], "classe": resultado["classe"],
+         "contestar": resultado["contestar"], "chamado_manual": resultado["chamado_manual"]})
+    return resultado
 
 
 async def conferencia_lancar_estoque(request: Request):
@@ -256,6 +264,63 @@ async def operacao_ultimas(request: Request):
     return await run_in_threadpool(operacao.ultimas, _q(request, "limite", 6, int, 1, 50))
 
 
+def _operadores_atividade(dia: str) -> dict:
+    """Log de conferências do dia: quem fez, quando, de qual plataforma. O status vem buscado ao vivo da
+    central (não do log) porque o resultado muda depois — vira mediação, aceite etc."""
+    from database import SessionLocal
+    from app.models import LogOperacao
+    inicio = datetime.fromisoformat(dia)
+    db = SessionLocal()
+    try:
+        logs = db.query(LogOperacao).filter(
+            LogOperacao.acao == "conferencia_devolucao",
+            LogOperacao.criado_em >= inicio, LogOperacao.criado_em < inicio + timedelta(days=1),
+        ).order_by(LogOperacao.criado_em.desc()).all()
+        dados = [(l.operador_nome, l.criado_em, l.entidade_id, l.detalhes_json) for l in logs]
+    finally:
+        db.close()
+
+    status_atual = {l["id"]: l["status"] for l in operacao.linhas()} if dados else {}
+    itens, resumo = [], {}
+    for operador_nome, criado_em, entidade_id, detalhes_json in dados:
+        det = json.loads(detalhes_json) if detalhes_json else {}
+        devolucao_id = int(entidade_id) if entidade_id and entidade_id.isdigit() else None
+        plataforma = det.get("plataforma") or "desconhecida"
+        itens.append({
+            "operador": operador_nome, "horario": criado_em, "plataforma": plataforma, "pedido": det.get("pedido"),
+            "classe": det.get("classe"), "contestar": det.get("contestar"),
+            "status": status_atual.get(devolucao_id, det.get("classe")),
+        })
+        r = resumo.setdefault(operador_nome, {"total": 0, "por_plataforma": {}})
+        r["total"] += 1
+        r["por_plataforma"][plataforma] = r["por_plataforma"].get(plataforma, 0) + 1
+    return {"dia": dia, "total": len(itens), "por_operador": resumo, "itens": itens}
+
+
+async def operadores_atividade(request: Request):
+    dia = _q(request, "dia") or date.today().isoformat()
+    if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", dia):
+        raise ValueError(f"Parâmetro dia inválido: {dia!r}")
+    return await run_in_threadpool(_operadores_atividade, dia)
+
+
+async def respostas_prontas_listar(request: Request):
+    return await run_in_threadpool(respostas_prontas.listar)
+
+
+async def respostas_prontas_criar(request: Request):
+    return await run_in_threadpool(respostas_prontas.criar, (await _corpo(request)).get("texto", ""))
+
+
+async def respostas_prontas_editar(request: Request):
+    return await run_in_threadpool(respostas_prontas.editar, request.path_params["id"], (await _corpo(request)).get("texto", ""))
+
+
+async def respostas_prontas_excluir(request: Request):
+    await run_in_threadpool(respostas_prontas.excluir, request.path_params["id"])
+    return {"ok": True}
+
+
 async def bi_resumo(request: Request):
     fatura = _q(request, "fatura")
     if fatura and not re.fullmatch(r"\d{4}-\d{2}-01", fatura):
@@ -323,6 +388,11 @@ rotas = [
     _rota("/operacao", operacao_listar),
     _rota("/operacao/atencao", operacao_atencao),
     _rota("/operacao/ultimas", operacao_ultimas),
+    _rota("/operadores/atividade", operadores_atividade),
+    _rota("/respostas-prontas", respostas_prontas_listar),
+    _rota("/respostas-prontas", respostas_prontas_criar, "POST"),
+    _rota("/respostas-prontas/{id:int}", respostas_prontas_editar, "PUT"),
+    _rota("/respostas-prontas/{id:int}", respostas_prontas_excluir, "DELETE"),
     _rota("/bi/resumo", bi_resumo),
     _rota("/bi/mensal", bi_mensal),
     _rota("/bi/mensal/{fatura}/refazer", bi_refazer_mes, "POST"),

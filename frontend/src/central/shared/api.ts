@@ -28,6 +28,9 @@ export const api = {
       headers: corpo === undefined ? undefined : { "Content-Type": "application/json" },
       body: corpo === undefined ? undefined : JSON.stringify(corpo),
     }),
+  put: <T>(caminho: string, corpo: unknown) =>
+    pedir<T>(caminho, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(corpo) }),
+  del: <T>(caminho: string) => pedir<T>(caminho, { method: "DELETE" }),
   enviarArquivo: <T>(caminho: string, arquivo: File) => {
     const dados = new FormData();
     dados.append("arquivo", arquivo);

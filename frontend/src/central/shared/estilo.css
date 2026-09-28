@@ -222,6 +222,12 @@
   position: sticky; top: 0; background: var(--papel); }
 .central-dev .tabela th.num { text-align: right; }  /* título da coluna em cima do número */
 .central-dev .tabela td { padding: 0.6rem 0.6rem; border-bottom: 1px solid var(--linha); vertical-align: middle; white-space: nowrap; }
+/* ---------- Operadores ---------- */
+.central-dev .resumo-operadores { display: flex; flex-wrap: wrap; gap: 0.7rem; flex: none; }
+.central-dev .linha-resumo-operador { display: flex; align-items: baseline; gap: 0.5rem; border: 1px solid var(--linha); border-radius: 8px;
+  padding: 0.4rem 0.75rem; }
+.central-dev .linha-resumo-operador .contagem { background: var(--azul-fundo); color: var(--azul); }
+
 .central-dev .tabela tbody tr { cursor: pointer; }
 .central-dev .tabela tbody tr:hover td { background: #fafbfc; }
 .central-dev .tabela tbody tr:last-child td { border-bottom: 0; }
@@ -362,6 +368,15 @@
 .central-dev .sim-nao button.marcado.sim { background: var(--classe-a); color: #fff; }
 .central-dev .sim-nao button.marcado.nao { background: var(--tinta); color: #fff; }
 .central-dev .checklist textarea { resize: none; }
+.central-dev .respostas-prontas { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 0.4rem; margin-top: 0.4rem; }
+.central-dev .resposta-pronta { display: inline-flex; align-items: center; border: 1px solid var(--linha-forte); border-radius: 999px;
+  background: var(--papel); font-size: 0.78rem; overflow: hidden; }
+.central-dev .resposta-pronta > button:first-child { border: 0; background: none; padding: 0.3rem 0.7rem; font-weight: 500; color: inherit;
+  max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.central-dev .resposta-pronta .acao { border: 0; border-left: 1px solid var(--linha); background: none; width: 24px; color: var(--suave); }
+.central-dev .resposta-pronta .acao:hover { color: var(--tinta); background: var(--fundo); }
+.central-dev .resposta-pronta.nova { border-style: dashed; color: var(--azul); font-weight: 600; }
+.central-dev .resposta-pronta.nova:hover { background: var(--azul-fundo); }
 .central-dev .checklist .botao.principal { grid-column: 1 / -1; margin-top: 0.9rem; min-height: 46px; }
 
 .central-dev .evidencias h3 { font-size: 0.95rem; font-weight: 600; }

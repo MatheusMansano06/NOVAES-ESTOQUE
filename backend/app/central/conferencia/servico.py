@@ -218,7 +218,8 @@ def registrar(devolucao_id: int, dados: dict) -> dict:
         s.add(conf)
         for lanc in decisao["lancamentos"]:
             lanc["deposito_olist"] = olist.deposito_id(lanc["deposito"], d.plataforma)
-    return decisao
+        plataforma, pedido = d.plataforma, d.pedido
+    return {**decisao, "plataforma": plataforma, "pedido": pedido}
 
 
 def _produto_vendido(d: Devolucao) -> tuple[int, str]:

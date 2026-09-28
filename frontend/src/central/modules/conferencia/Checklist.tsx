@@ -1,5 +1,6 @@
-import { useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 
+import { api } from "../../shared/api";
 import type { Conferencia } from "./tipos";
 
 export interface Constatacao {
@@ -78,6 +79,7 @@ export function Checklist({ atual, travada, enviando, onRegistrar }: Props) {
           <textarea value={obs} onChange={(e) => setObs(e.target.value)} rows={3}
                     placeholder="Ex.: risco na lateral, caixa aberta, veio outra peça" />
         </label>
+        <RespostasProntas texto={obs} onEscolher={setObs} />
         <button type="submit" className="botao principal" disabled={faltando > 0}>
           {enviando ? "Registrando…" : faltando ? `Responda mais ${faltando}` : atual ? "Atualizar conferência" : "Registrar conferência"}
         </button>
@@ -93,6 +95,69 @@ interface SimNaoProps {
   ajuda?: string;
   valor: boolean | undefined;
   onEscolher: (v: boolean) => void;
+}
+
+interface RespostaPronta { id: number; texto: string }
+
+/** Frases prontas para "O que você viu", compartilhadas entre operadores: clicar preenche o campo,
+ * "+" salva o texto atual, cada uma tem editar/excluir. */
+function RespostasProntas({ texto, onEscolher }: { texto: string; onEscolher: (t: string) => void }) {
+  const [respostas, setRespostas] = useState<RespostaPronta[]>([]);
+  const [erro, setErro] = useState<string | null>(null);
+
+  useEffect(() => {
+    let ativo = true;
+    api.get<RespostaPronta[]>("/respostas-prontas").then((r) => ativo && setRespostas(r)).catch(() => {});
+    return () => { ativo = false; };
+  }, []);
+
+  async function salvarAtual() {
+    if (!texto.trim()) return;
+    try {
+      const nova = await api.post<RespostaPronta>("/respostas-prontas", { texto });
+      setRespostas((rs) => [...rs, nova]);
+    } catch (e) {
+      setErro((e as Error).message);
+    }
+  }
+
+  async function editar(r: RespostaPronta) {
+    const novo = window.prompt("Editar resposta pronta:", r.texto);
+    if (!novo || !novo.trim() || novo === r.texto) return;
+    try {
+      const salva = await api.put<RespostaPronta>(`/respostas-prontas/${r.id}`, { texto: novo });
+      setRespostas((rs) => rs.map((x) => (x.id === r.id ? salva : x)));
+    } catch (e) {
+      setErro((e as Error).message);
+    }
+  }
+
+  async function excluir(r: RespostaPronta) {
+    if (!window.confirm(`Excluir "${r.texto}"?`)) return;
+    try {
+      await api.del(`/respostas-prontas/${r.id}`);
+      setRespostas((rs) => rs.filter((x) => x.id !== r.id));
+    } catch (e) {
+      setErro((e as Error).message);
+    }
+  }
+
+  if (!respostas.length && !texto.trim()) return null;
+  return (
+    <div className="respostas-prontas">
+      {respostas.map((r) => (
+        <span key={r.id} className="resposta-pronta">
+          <button type="button" onClick={() => onEscolher(r.texto)} title={r.texto}>{r.texto}</button>
+          <button type="button" className="acao" onClick={() => editar(r)} aria-label="Editar">✎</button>
+          <button type="button" className="acao" onClick={() => excluir(r)} aria-label="Excluir">×</button>
+        </span>
+      ))}
+      {texto.trim() && (
+        <button type="button" className="resposta-pronta nova" onClick={salvarAtual}>+ Salvar como resposta pronta</button>
+      )}
+      {erro && <p className="aviso erro" role="alert">{erro}</p>}
+    </div>
+  );
 }
 
 function SimNao({ nome, texto, ajuda, valor, onEscolher }: SimNaoProps) {

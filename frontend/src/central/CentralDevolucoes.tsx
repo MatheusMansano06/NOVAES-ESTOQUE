@@ -4,6 +4,7 @@ import { BiPage } from "./modules/bi/BiPage";
 import { ConferenciaModal } from "./modules/conferencia/ConferenciaModal";
 import { HistoricoPage } from "./modules/historico/HistoricoPage";
 import { OperacaoPage } from "./modules/operacao/OperacaoPage";
+import { OperadoresPage } from "./modules/operadores/OperadoresPage";
 import { ResumoPage } from "./modules/resumo/ResumoPage";
 import { ehEtiquetaFull, RetiradaFullModal } from "./modules/retirada-full/RetiradaFullModal";
 import { BarraSincronizacao } from "./shared/BarraSincronizacao";
@@ -17,6 +18,7 @@ const TELAS = [
   { id: "operacao", nome: "Operação" },
   { id: "bi", nome: "B.I" },
   { id: "historico", nome: "Histórico" },
+  { id: "operadores", nome: "Operadores" },
 ] as const;
 export type IdTela = (typeof TELAS)[number]["id"];
 
@@ -100,6 +102,7 @@ function Central({ onVoltar }: { onVoltar: () => void }) {
         {tela === "operacao" && <OperacaoPage nav={nav} />}
         {tela === "bi" && <BiPage nav={nav} />}
         {tela === "historico" && <HistoricoPage nav={nav} />}
+        {tela === "operadores" && <OperadoresPage nav={nav} />}
       </main>
 
       {codigo && (ehEtiquetaFull(codigo)
