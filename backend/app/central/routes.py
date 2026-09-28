@@ -279,6 +279,10 @@ async def ml_debug_full(request: Request):
                 saida["return_reviews"] = tenta(f"/post-purchase/v1/returns/{ret['id']}/reviews")
             for sh in (ret.get("shipments") or []):
                 saida[f"shipment_{sh.get('shipment_id')}"] = tenta(f"/shipments/{sh.get('shipment_id')}", None, {"x-format-new": "true"})
+        if codigo:
+            saida["sonda_orders_search"] = tenta("/orders/search", {"seller": mlc.USER_ID, "q": codigo})
+            saida["sonda_claims_search"] = tenta("/post-purchase/v1/claims/search", {"player_role": "respondent",
+                                                  "player_user_id": mlc.USER_ID, "q": codigo, "limit": 5})
         for rotulo, path, h in (("shipment", f"/shipments/{codigo}", {"x-format-new": "true"}),
                                 ("order", f"/orders/{codigo}", None),
                                 ("claim", f"/post-purchase/v1/claims/{codigo}", None),
