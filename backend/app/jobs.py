@@ -5,7 +5,7 @@ Tarefas agendadas (Jobs) do sistema de estoque
 """
 
 from apscheduler.schedulers.background import BackgroundScheduler
-from datetime import datetime
+from datetime import datetime, timedelta
 import os
 import logging
 from database import SessionLocal
@@ -340,6 +340,21 @@ def iniciar_scheduler():
             coalesce=True,
             misfire_grace_time=3600,
         )
+        # Central de Devoluções: ML + Shopee + notas/pedidos da Olist. Cada plataforma
+        # isolada (falha de uma não para as outras); o estado vai para /api/central/sincronizacao.
+        if os.getenv("CENTRAL_SINCRONIZAR", "1") == "1":
+            from app.central import agenda as agenda_central
+            scheduler.add_job(
+                agenda_central.rodar,
+                'interval',
+                minutes=max(2, int(os.getenv("CENTRAL_SINCRONIZAR_MINUTOS", "10"))),
+                next_run_time=datetime.now() + timedelta(minutes=1),
+                id='central_devolucoes_sync',
+                name='Central de Devoluções: sincronização das plataformas',
+                max_instances=1,
+                coalesce=True,
+                misfire_grace_time=3600,
+            )
         # Sincronização de vendas do ML nos horários fixos (fuso de São Paulo).
         # Sem timezone explícito rodaria no fuso do servidor (UTC no Railway).
         tz_vendas = os.getenv("ML_VENDAS_TZ", "America/Sao_Paulo")
@@ -365,8 +380,6 @@ def iniciar_scheduler():
                 max_instances=1, coalesce=True, misfire_grace_time=3600,
             )
 
-        # Sync agendado da fila de devoluções (intervalo configurável). Mais
-        # espaçado que o de anúncios: cada rodada custa vários requests por claim.
         # Monitor de estoque em horário de expediente. Alerta fora dele não é
         # acionável — vira ruído e ensina a ignorar o canal. Por isso é agendado
         # por hora do dia, e não a cada N minutos: seg-sex de hora em hora das

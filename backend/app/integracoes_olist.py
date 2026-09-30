@@ -609,6 +609,11 @@ class OlistIntegration:
     def _normalizar_sku_busca(self, valor: str) -> str:
         return re.sub(r'[^a-z0-9]', '', (valor or '').lower())
 
+    @staticmethod
+    def _produto_ativo(p: Dict) -> bool:
+        """Busca do vinculo so mostra ATIVOS (A). Situacao vazia (cache antigo) passa."""
+        return (p.get('situacao') or 'A').upper() == 'A'
+
     def _termo_parece_sku(self, termo: str) -> bool:
         termo = (termo or '').strip()
         return bool(termo) and ' ' not in termo and len(self._normalizar_sku_busca(termo)) >= 3
@@ -675,6 +680,8 @@ class OlistIntegration:
         matches = []
         achou_sku_exato = False
         for p in todos:
+            if not self._produto_ativo(p):
+                continue
             sku = p.get('sku', '') or p.get('codigo_produto', '')
             sku_norm = self._normalizar_sku_busca(sku)
 
@@ -697,6 +704,8 @@ class OlistIntegration:
         if sku_like and not achou_sku_exato:
             via_api = self._buscar_por_codigo_api(termo.strip())
             for p in via_api:
+                if not self._produto_ativo(p):
+                    continue
                 item = dict(p)
                 item['_score'] = max(1100, self._score_busca_produto(item, termo, sku_like))
                 matches.append(item)

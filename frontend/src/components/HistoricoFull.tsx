@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import api from '../services/api'
+import api, { getOperadorSessao } from '../services/api'
 
 interface InboundResumo {
   id: number
@@ -39,6 +39,9 @@ interface Alteracao {
   estoque_atual?: number | null
   tipo: string
   criado_em?: string | null
+  status?: 'pendente' | 'aprovado' | 'recusado'
+  solicitante?: string | null
+  decidido_por?: string | null
 }
 
 interface HistoricoCompleto {
@@ -106,6 +109,24 @@ export function HistoricoFull() {
       setErro('Erro ao carregar histórico: ' + (e.response?.data?.erro || String(e)))
     } finally {
       setCarregando(false)
+    }
+  }
+
+  const ehMaster = getOperadorSessao()?.role === 'master'
+
+  // Só o administrador (master) aprova/recusa o pedido de mudança do Vai pro FULL feito pelo operador.
+  const decidir = async (h: Alteracao, aprovar: boolean) => {
+    if (!dados) return
+    if (!confirm(`${aprovar ? 'Aprovar' : 'Recusar'} a mudança do Vai pro FULL de "${h.titulo_anuncio}": ${Math.round(h.quantidade_anterior)} → ${Math.round(h.quantidade_nova)}?`)) return
+    setAcaoItem(h.item_id)
+    setErro('')
+    try {
+      await api.post(`/embaldes/${dados.embale_id}/historico-full/${h.id}/decidir`, { aprovar })
+      await recarregar()
+    } catch (e: any) {
+      setErro('Erro ao decidir: ' + (e.response?.data?.erro || String(e)))
+    } finally {
+      setAcaoItem(null)
     }
   }
 
@@ -356,6 +377,7 @@ export function HistoricoFull() {
                       <th style={th}>De</th>
                       <th style={th}>Vai pro FULL</th>
                       <th style={th}>Tipo</th>
+                      <th style={th}>Situação</th>
                       <th style={th}>Quando</th>
                     </tr>
                   </thead>
@@ -376,6 +398,25 @@ export function HistoricoFull() {
                               background: aumento ? '#e8f5e9' : '#fff3e0', color: aumento ? '#2e7d32' : '#ef6c00' }}>
                               {aumento ? '↑ aumento' : '↓ redução'}
                             </span>
+                          </td>
+                          <td style={td}>
+                            {h.status === 'pendente' ? (
+                              ehMaster ? (
+                                <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap' }}>
+                                  <button disabled={acaoItem === h.item_id} onClick={() => decidir(h, true)}
+                                    style={{ padding: '0.3rem 0.7rem', background: '#2e7d32', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 700, fontSize: '0.8rem' }}>Aprovar</button>
+                                  <button disabled={acaoItem === h.item_id} onClick={() => decidir(h, false)}
+                                    style={{ padding: '0.3rem 0.7rem', background: '#fff', color: '#c62828', border: '1px solid #c62828', borderRadius: '6px', cursor: 'pointer', fontWeight: 700, fontSize: '0.8rem' }}>Recusar</button>
+                                </div>
+                              ) : (
+                                <span style={{ fontSize: '0.78rem', fontWeight: 700, color: '#8d6e00' }}>⏳ Aguardando administrador</span>
+                              )
+                            ) : (
+                              <span style={{ fontSize: '0.78rem', fontWeight: 700, color: h.status === 'recusado' ? '#c62828' : '#2e7d32' }}>
+                                {h.status === 'recusado' ? 'Recusado' : 'Aprovado'}
+                              </span>
+                            )}
+                            {h.solicitante && <div style={{ fontSize: '0.72rem', color: '#888' }}>pedido por {h.solicitante}{h.decidido_por && h.status !== 'pendente' ? ` · decidido por ${h.decidido_por}` : ''}</div>}
                           </td>
                           <td style={{ ...td, color: '#666' }}>{fmtData(h.criado_em)}</td>
                         </tr>

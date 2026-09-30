@@ -42,6 +42,8 @@ type VisaoInbound = 'upload' | 'lista'
 
 interface ItemRevisao {
   item_id: number
+  // Pedido de mudança do Vai pro FULL aguardando o administrador (nada é retirado até lá)
+  full_pendente?: { id: number; de: number; para: number; solicitante?: string | null } | null
   titulo_anuncio: string
   sku_inbound?: string
   quantidade_original?: number
@@ -267,6 +269,28 @@ export function EmbaldesManager({ modoSeparacao = false }: { modoSeparacao?: boo
       return false
     } finally {
       setBaixandoKit(false)
+    }
+  }
+
+  // Desfaz na Olist a baixa/balanço do item (pela diferença) e o devolve para pendente, para refazer.
+  const [desfazendoId, setDesfazendoId] = useState<number | null>(null)
+  const desfazerItem = async (it: ItemRevisao) => {
+    if (!revisao) return
+    if (!confirm(`Desfazer a baixa/balanço de "${it.titulo_anuncio}"?
+
+O estoque na Olist volta ao que era antes (vendas que caíram no meio são mantidas) e o item fica pendente para refazer.`)) return
+    try {
+      setDesfazendoId(it.item_id)
+      const r = await api.post(`/embaldes/${revisao.embale_id}/itens/${it.item_id}/desfazer`)
+      setItensBaixados((prev) => { const n = { ...prev }; delete n[it.item_id]; return n })
+      setKitResultado((prev) => { const n = { ...prev }; delete n[it.item_id]; return n })
+      setMessage(r.data?.mensagem || 'Desfeito na Olist')
+      await carregarRevisao(revisao.embale_id)
+    } catch (erro: any) {
+      const dados = erro.response?.data || {}
+      setMessage('Erro: ' + (dados.erro || String(erro)) + (dados.detalhe ? ` — ${dados.detalhe}` : ''))
+    } finally {
+      setDesfazendoId(null)
     }
   }
 
@@ -523,6 +547,16 @@ export function EmbaldesManager({ modoSeparacao = false }: { modoSeparacao?: boo
     } catch (erro: any) {
       if (janelaWhats) janelaWhats.close()
       const dados = erro.response?.data || {}
+      if (Array.isArray(dados.resultados)) {
+        // 502 parcial: mostra o que deu certo/errado por componente em vez de só "502"
+        setKitResultado((prev) => ({ ...prev, [item.item_id]: dados.resultados }))
+        const falhas = dados.resultados
+          .filter((r: any) => r.sucesso === false && r.detalhe)
+          .map((r: any) => `${r.sku || r.produto_id}: ${r.detalhe}`)
+          .join(' | ')
+        setMessage('Erro: ' + (dados.mensagem || 'falha no balanço do kit') + (falhas ? ` — ${falhas}` : ''))
+        return false
+      }
       const base = dados.erro || dados.error || String(erro)
       setMessage('Erro: ' + base + (dados.detalhe ? ` — ${dados.detalhe}` : ''))
       return false
@@ -622,9 +656,7 @@ export function EmbaldesManager({ modoSeparacao = false }: { modoSeparacao?: boo
 
   const baixarItem = async (it: ItemRevisao): Promise<boolean> => {
     if (!revisao) return false
-    const qtd = it.tem_falta
-      ? (declaracoes[it.item_id] ?? Math.round(it.estoque_atual || 0))
-      : Math.round(it.quantidade_full)
+    const qtd = Math.round(it.quantidade_full)
     if (!confirm(`Baixar ${qtd} un. de "${it.titulo_anuncio}" na Olist? Não há volta.`)) return false
     try {
       setBaixandoItemId(it.item_id)
@@ -632,8 +664,9 @@ export function EmbaldesManager({ modoSeparacao = false }: { modoSeparacao?: boo
         quantidade: qtd
       })
       const r = resposta.data
-      if (r.status === 'ok' || r.status === 'ja_baixado') {
-        setItensBaixados({ ...itensBaixados, [it.item_id]: r.quantidade_baixada || qtd })
+      if (r.status === 'ok' || r.status === 'ja_baixado' || r.status === 'zerado') {
+        // FULL = 0 volta 'zerado' com 0 baixado: ainda assim conta como concluído (o valor é só marcador)
+        setItensBaixados({ ...itensBaixados, [it.item_id]: r.quantidade_baixada || qtd || 1 })
         setMessage(r.mensagem || 'Baixa aplicada')
         return true
       } else {
@@ -693,6 +726,13 @@ export function EmbaldesManager({ modoSeparacao = false }: { modoSeparacao?: boo
       const resposta = await api.post(`/embaldes/${revisao.embale_id}/itens/${it.item_id}/quantidade-full`, {
         quantidade_full: quantidade,
       })
+      if (resposta.data.pendente !== undefined) {
+        // Operador: virou pedido para o administrador; o FULL continua o de antes.
+        setMessage(resposta.data.mensagem || 'Pedido enviado ao administrador')
+        setQuantidadesFull((anterior) => ({ ...anterior, [it.item_id]: String(Math.round(it.quantidade_full || 0)) }))
+        await carregarRevisao(revisao.embale_id)
+        return
+      }
       const snapshot: ItemRevisao | undefined = resposta.data.snapshot
       if (snapshot) {
         // Só chegamos aqui quando a qtd mudou de fato (gera registro no histórico),
@@ -1244,7 +1284,7 @@ export function EmbaldesManager({ modoSeparacao = false }: { modoSeparacao?: boo
                         const naoAchado = !it.olist_encontrado
                         const semEstoque = it.olist_encontrado && it.estoque_indisponivel
                         const emEspera = !!itensEmEspera[it.item_id]
-                        const podeBaixar = it.olist_encontrado && !semEstoque && !jaBaixado
+                        const podeBaixar = it.olist_encontrado && !semEstoque && !jaBaixado && !it.tem_falta
                         const podeBalancear = it.olist_encontrado && !semEstoque && !jaBaixado
                         const vinculado = it.vinculado === 1 || !!it.olist_produto_id
                         // Foto: Olist (primária, vem no item) com o cache do ML como reserva.
@@ -1376,17 +1416,16 @@ export function EmbaldesManager({ modoSeparacao = false }: { modoSeparacao?: boo
                                   </div>
                                 </div>
 
-                                {/* Declarar (quando há falta) */}
-                                {it.tem_falta && !jaBaixado && !naoAchado && !semEstoque && (
-                                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', flexWrap: 'wrap' }}>
-                                    <label style={{ fontSize: '0.85rem', color: '#666', fontWeight: 700 }}>Declarar p/ baixa:</label>
-                                    <input
-                                      type="number" min="0" max={it.estoque_atual || 0}
-                                      value={declaracoes[it.item_id] ?? Math.round(it.estoque_atual || 0)}
-                                      onChange={(e) => setDeclaracoes({ ...declaracoes, [it.item_id]: parseFloat(e.target.value) || 0 })}
-                                      disabled={emEspera}
-                                      style={{ width: '80px', padding: '0.4rem', borderRadius: '6px', border: '1px solid #ddd', textAlign: 'center', fontSize: '0.95rem', background: emEspera ? '#f0f0f0' : '#fff' }}
-                                    />
+                                {/* Pedido de mudança do FULL aguardando o administrador */}
+                                {it.full_pendente && (
+                                  <div style={{ padding: '0.6rem 0.8rem', borderRadius: '8px', background: '#fff8e1', border: '1px solid #ffb300', color: '#8d6e00', fontSize: '0.88rem', fontWeight: 700 }}>
+                                    ⏳ Aguardando o administrador aprovar: Vai pro FULL {Math.round(it.full_pendente.de)} → {Math.round(it.full_pendente.para)}
+                                    {it.full_pendente.solicitante ? ` (pedido por ${it.full_pendente.solicitante})` : ''}. Nada é retirado até lá.
+                                  </div>
+                                )}
+                                {it.tem_falta && !it.full_pendente && !jaBaixado && !naoAchado && !semEstoque && !emEspera && (
+                                  <div style={{ fontSize: '0.82rem', color: '#c62828', fontWeight: 700 }}>
+                                    Falta estoque para o FULL: faça o Balanço, ou altere o Vai pro FULL (vai para aprovação).
                                   </div>
                                 )}
 
@@ -1413,8 +1452,15 @@ export function EmbaldesManager({ modoSeparacao = false }: { modoSeparacao?: boo
                                 <div style={{ display: 'flex', gap: '0.6rem', flexWrap: 'wrap', marginTop: '0.5rem' }}>
                                   {emEspera ? (
                                     <span style={{ padding: '0.6rem 1rem', color: '#999', fontWeight: 700, background: '#f0f0f0', borderRadius: '8px' }}>Bloqueado (em espera)</span>
+                                  ) : it.full_pendente && !jaBaixado ? (
+                                    <span style={{ padding: '0.6rem 1rem', color: '#8d6e00', fontWeight: 700, background: '#fff8e1', borderRadius: '8px' }}>⏳ Aguardando aprovação</span>
                                   ) : jaBaixado ? (
-                                    <span style={{ padding: '0.6rem 1rem', color: '#2e7d32', fontWeight: 700, background: '#e8f5e9', borderRadius: '8px' }}>✓ Estoque retirado</span>
+                                    <span style={{ display: 'inline-flex', gap: '0.6rem', alignItems: 'center', flexWrap: 'wrap' }}>
+                                      <span style={{ padding: '0.6rem 1rem', color: '#2e7d32', fontWeight: 700, background: '#e8f5e9', borderRadius: '8px' }}>✓ Estoque retirado</span>
+                                      <button onClick={() => desfazerItem(it)} disabled={desfazendoId === it.item_id} style={{ padding: '0.55rem 1rem', background: '#fff', color: '#c62828', border: '1px solid #c62828', borderRadius: '8px', cursor: desfazendoId === it.item_id ? 'wait' : 'pointer', fontWeight: 700, fontSize: '0.85rem' }}>
+                                        {desfazendoId === it.item_id ? 'Desfazendo…' : '↩ Desfazer'}
+                                      </button>
+                                    </span>
                                   ) : naoAchado ? (
                                     <button onClick={() => abrirVinculo(it)} style={{ padding: '0.7rem 1.4rem', background: '#fff', color: '#ef6c00', border: '1px solid #ef6c00', borderRadius: '8px', cursor: 'pointer', fontWeight: 700, fontSize: '0.95rem' }}>Vincular na Olist</button>
                                   ) : (() => {
@@ -1672,7 +1718,7 @@ export function EmbaldesManager({ modoSeparacao = false }: { modoSeparacao?: boo
                                   const bg = naoAchado ? '#fff8f0' : it.tem_falta ? '#ffebee' : '#fff'
                                   const jaBaixado = it.baixa_aplicada === 1 || !!itensBaixados[it.item_id]
                                   const vinculado = it.vinculado === 1 || !!it.olist_produto_id
-                                  const podeBaixar = it.olist_encontrado && !semEstoque && !jaBaixado
+                                  const podeBaixar = it.olist_encontrado && !semEstoque && !jaBaixado && !it.tem_falta
                                   const podeBalancear = it.olist_encontrado && !semEstoque && !jaBaixado
                                   const quantidadeEditavel = quantidadesFull[it.item_id] ?? String(Math.round(it.quantidade_full || 0))
 
@@ -1753,16 +1799,8 @@ export function EmbaldesManager({ modoSeparacao = false }: { modoSeparacao?: boo
                                         )}
                                       </div>
                                       <div style={{ textAlign: 'center' }}>
-                                        {it.tem_falta && !jaBaixado ? (
-                                          <input
-                                            type="number"
-                                            min="0"
-                                            max={it.estoque_atual || 0}
-                                            value={declaracoes[it.item_id] ?? Math.round(it.estoque_atual || 0)}
-                                            onChange={(e) => setDeclaracoes({ ...declaracoes, [it.item_id]: parseFloat(e.target.value) || 0 })}
-                                            disabled={itensEmEspera[it.item_id]}
-                                            style={{ width: '60px', padding: '0.3rem', borderRadius: '3px', border: '1px solid #ddd', textAlign: 'center', fontSize: '0.85rem', backgroundColor: itensEmEspera[it.item_id] ? '#f0f0f0' : '#fff', color: itensEmEspera[it.item_id] ? '#999' : '#000', cursor: itensEmEspera[it.item_id] ? 'not-allowed' : 'auto' }}
-                                          />
+                                        {it.full_pendente ? (
+                                          <span style={{ color: '#8d6e00', fontWeight: 'bold', fontSize: '0.8rem' }}>{Math.round(it.full_pendente.de)} → {Math.round(it.full_pendente.para)}</span>
                                         ) : (
                                           <span style={{ color: '#999', fontSize: '0.8rem' }}>—</span>
                                         )}
@@ -1790,8 +1828,15 @@ export function EmbaldesManager({ modoSeparacao = false }: { modoSeparacao?: boo
                                       <div style={{ textAlign: 'center', display: 'flex', gap: '0.3rem', justifyContent: 'center', flexWrap: 'wrap' }}>
                                         {itensEmEspera[it.item_id] ? (
                                           <span style={{ color: '#999', fontWeight: 'bold', fontSize: '0.8rem' }}>Bloqueado</span>
+                                        ) : it.full_pendente && !jaBaixado ? (
+                                          <span style={{ color: '#8d6e00', fontWeight: 'bold', fontSize: '0.8rem' }}>⏳ Aprovação</span>
                                         ) : jaBaixado ? (
-                                          <span style={{ color: '#2e7d32', fontWeight: 'bold', fontSize: '0.8rem' }}>✓ Baixado</span>
+                                          <span style={{ display: 'inline-flex', gap: '0.4rem', alignItems: 'center' }}>
+                                            <span style={{ color: '#2e7d32', fontWeight: 'bold', fontSize: '0.8rem' }}>✓ Baixado</span>
+                                            <button onClick={() => desfazerItem(it)} disabled={desfazendoId === it.item_id} title="Desfazer baixa/balanço na Olist" style={{ padding: '0.2rem 0.5rem', background: '#fff', color: '#c62828', border: '1px solid #c62828', borderRadius: '4px', cursor: 'pointer', fontSize: '0.75rem', fontWeight: 'bold' }}>
+                                              {desfazendoId === it.item_id ? '…' : '↩ Desfazer'}
+                                            </button>
+                                          </span>
                                         ) : naoAchado ? (
                                           <button
                                             onClick={() => abrirVinculo(it)}
@@ -1982,10 +2027,7 @@ export function EmbaldesManager({ modoSeparacao = false }: { modoSeparacao?: boo
 
             <div style={{ display: 'flex', gap: '0.7rem' }}>
               <button
-                onClick={async () => {
-                  const ok = await balancearKit(balanceandoKit.item, balanceandoKit.kit, revisandoId || 0)
-                  if (ok && modoSeparacao) proximo()
-                }}
+                onClick={() => balancearKit(balanceandoKit.item, balanceandoKit.kit, revisandoId || 0)}
                 disabled={balanceandoId !== null}
                 style={{ flex: 1, padding: '0.7rem', background: '#d32f2f', color: '#fff', border: 'none', borderRadius: '4px', cursor: balanceandoId !== null ? 'not-allowed' : 'pointer', fontWeight: 'bold', opacity: balanceandoId !== null ? 0.6 : 1 }}
               >

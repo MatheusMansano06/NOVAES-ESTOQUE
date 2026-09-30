@@ -1,6 +1,6 @@
 import axios, { AxiosInstance } from 'axios'
 
-const API_ORIGIN = import.meta.env.VITE_API_URL ?? 'http://127.0.0.1:8000'
+export const API_ORIGIN = import.meta.env.VITE_API_URL ?? 'http://127.0.0.1:8000'
 const API_BASE_URL = `${API_ORIGIN}/api`
 export const OPERADOR_SESSION_KEY = 'nvs_operador_sessao'
 
@@ -183,59 +183,6 @@ export const baixarMultiplosOuPdfs = async (nfIds: number[], formato: 'original'
     // Aguarda um pouco entre downloads para não sobrecarregar
     await new Promise(resolve => setTimeout(resolve, 200))
   }
-}
-
-export interface DevolucaoResumo {
-  id: number
-  marketplace: string
-  order_id: string
-  claim_id: string
-  status_marketplace: string
-  motivo: string
-  prazo_resolucao: string | null
-}
-
-export interface DevolucaoItem {
-  sku_esperado: string
-  produto_nome: string
-  quantidade: number
-  cmv_unitario: number | null
-}
-
-export interface DevolucaoEvento {
-  status: string
-  descricao: string
-  origem: string
-  data_hora: string
-}
-
-export interface DevolucaoOlistLink {
-  produto_id_olist: string
-  sku: string
-  produto_nome_olist: string
-  cmv: number
-  estoque_disponivel: number | null
-}
-
-export interface DevolucaoDetalhe extends DevolucaoResumo {
-  itens: DevolucaoItem[]
-  eventos: DevolucaoEvento[]
-  olist: DevolucaoOlistLink | null
-}
-
-export async function listarDevolucoes(): Promise<DevolucaoResumo[]> {
-  const resp = await api.get<DevolucaoResumo[]>('/devolucoes')
-  return resp.data
-}
-
-export async function buscarDevolucao(id: number): Promise<DevolucaoDetalhe> {
-  const resp = await api.get<DevolucaoDetalhe>(`/devolucoes/${id}`)
-  return resp.data
-}
-
-export async function sincronizarDevolucoes(): Promise<{ novos: number; atualizados: number }> {
-  const resp = await api.post('/devolucoes/sincronizar')
-  return resp.data
 }
 
 export default api

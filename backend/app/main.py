@@ -3,6 +3,7 @@ from starlette.routing import Route, Mount
 from starlette.responses import JSONResponse, FileResponse, RedirectResponse, HTMLResponse, Response
 from starlette.middleware.cors import CORSMiddleware
 from starlette.requests import Request
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 from database import engine, Base, SessionLocal
 import os
@@ -43,12 +44,8 @@ from app.integracoes_olist import olist
 from app.integracoes_ml import ml
 from app.integracoes_shopee import shopee
 from app.jobs import iniciar_scheduler
-from app.devolucoes.routes import (
-    listar_devolucoes as devol_listar,
-    detalhe_devolucao as devol_detalhe,
-    sincronizar_devolucoes as devol_sincronizar,
-)
-from app.devolucoes import models as _devolucoes_models  # registra as tabelas no Base antes do create_all
+from app.central.routes import rotas as rotas_central
+from app.central.financeiro.custos import limpar_cache as limpar_cache_custos, registrar_custo
 
 # Carregar variáveis de ambiente do arquivo .env
 load_dotenv()
@@ -92,6 +89,13 @@ def _garantir_colunas_sqlite():
                 if nome in {"foi_balanceado", "saldo_disponivel", "data_balanceamento", "em_espera", "data_em_espera", "nao_enviar", "data_nao_enviar", "olist_imagem"} and nome not in colunas_embale:
                     conn.exec_driver_sql(f"ALTER TABLE itens_embale_fu ADD COLUMN {nome} {tipo}")
                     print(f"[DB] Coluna itens_embale_fu.{nome} criada")
+
+            colunas_hist = {row[1] for row in conn.exec_driver_sql("PRAGMA table_info(historico_full_embale)").fetchall()}
+            for nome, tipo in (("status", "VARCHAR(20)"), ("solicitante", "VARCHAR(120)"),
+                               ("decidido_por", "VARCHAR(120)"), ("decidido_em", "DATETIME")):
+                if colunas_hist and nome not in colunas_hist:
+                    conn.exec_driver_sql(f"ALTER TABLE historico_full_embale ADD COLUMN {nome} {tipo}")
+                    print(f"[DB] Coluna historico_full_embale.{nome} criada")
 
             colunas_embale_header = {row[1] for row in conn.exec_driver_sql("PRAGMA table_info(embaldes_fu)").fetchall()}
             if "revisao_salva_em" not in colunas_embale_header:
@@ -1308,6 +1312,44 @@ async def listar_divergencias(request: Request):
     finally:
         db.close()
 
+async def listar_divergencias_full(request: Request):
+    """
+    GET /api/divergencias-full
+    Itens de inbounds abertos em que o balanço achou MENOS que o Vai pro FULL e que ainda
+    não foram resolvidos (sem baixa, não excluídos). Resolve-se no Histórico FULL.
+    """
+    db = SessionLocal()
+    try:
+        linhas = (db.query(ItemEmbaleFU, EmbaleFU)
+                  .join(EmbaleFU, ItemEmbaleFU.embalde_id == EmbaleFU.id)
+                  .filter(EmbaleFU.status != "encerrado",
+                          ItemEmbaleFU.foi_balanceado == 1,
+                          ItemEmbaleFU.falta > 0,
+                          func.coalesce(ItemEmbaleFU.baixa_aplicada, 0) != 1,
+                          func.coalesce(ItemEmbaleFU.nao_enviar, 0) != 1)
+                  .order_by(ItemEmbaleFU.data_balanceamento.desc())
+                  .all())
+        itens = [{
+            "item_id": i.id,
+            "embale_id": e.id,
+            "inbound": e.nome_embalde,
+            "numero_inbound": e.numero_inbound,
+            "titulo_anuncio": i.titulo_anuncio,
+            "sku_inbound": i.sku_inbound,
+            "quantidade_full": _quantidade_planejada_full(i),
+            "falta": i.falta,
+            "conferido": max(0.0, _quantidade_planejada_full(i) - float(i.falta or 0)),
+            "em_espera": i.em_espera or 0,
+            "data_balanceamento": i.data_balanceamento.isoformat() if i.data_balanceamento else None,
+            "imagem": i.olist_imagem,
+        } for i, e in linhas]
+        return JSONResponse({"total": len(itens), "itens": itens}, headers={"Cache-Control": "no-store"})
+    except Exception as ex:
+        return JSONResponse({"erro": str(ex)}, status_code=500)
+    finally:
+        db.close()
+
+
 async def resolver_divergencia(request: Request):
     """Marca uma divergência como resolvida"""
     db = SessionLocal()
@@ -1932,7 +1974,8 @@ def _buscar_itens_inbound_similares(db, olist_produto_id, olist_sku,
             if not motivo:
                 continue
 
-            qtd_sep = it.quantidade_separada or 0
+            qtd_sep = _quantidade_planejada_full(it)  # FULL atual (pode ter sido reduzido)
+            qtd_original = float(it.quantidade_separada or 0)
             qtd_baix = it.quantidade_baixada or 0
             candidatos.append({
                 "inbound_id": emb.id,
@@ -1945,6 +1988,8 @@ def _buscar_itens_inbound_similares(db, olist_produto_id, olist_sku,
                 "qtd_full": qtd_sep,
                 "qtd_baixada": qtd_baix,
                 "restante_full": max(0, qtd_sep - qtd_baix),
+                "qtd_original": qtd_original,
+                "full_reduzido": qtd_sep < qtd_original,
                 "baixa_aplicada": int(it.baixa_aplicada or 0),
                 "ja_vinculado": bool(it.olist_produto_id),
                 "score": score,
@@ -2071,6 +2116,51 @@ def _calcular_reserva_inbound(db, olist_produto_id, olist_sku, disponivel=None,
     return reserva_total, detalhes
 
 
+def _itens_full_reduzidos(db, olist_produto_id, olist_sku):
+    """Itens ainda sem baixa, em inbound ativo, deste produto, cujo Vai pro FULL está
+    ABAIXO do original do PDF (ex.: zerado por falta de estoque). A conferência da NF
+    pergunta se quer segurar o original — nunca restaura sozinha."""
+    pid = str(olist_produto_id) if olist_produto_id else None
+    sku = (olist_sku or "").strip().lower()
+    if not pid and not sku:
+        return []
+    saida = []
+    for emb in db.query(EmbaleFU).filter(EmbaleFU.status != "encerrado").all():
+        for it in emb.itens:
+            if it.baixa_aplicada == 1 or (it.nao_enviar or 0) == 1:
+                continue
+            casa = (pid and it.olist_produto_id and str(it.olist_produto_id) == pid) or \
+                   (sku and it.sku_inbound and it.sku_inbound.strip().lower() == sku)
+            if not casa:
+                continue
+            original = float(it.quantidade_separada or 0)
+            atual = _quantidade_planejada_full(it)
+            if atual < original:
+                saida.append({"inbound_id": emb.id, "numero_inbound": emb.numero_inbound,
+                              "nome_inbound": emb.nome_embalde, "item_id": it.id,
+                              "titulo": it.titulo_anuncio, "original": original, "atual": atual})
+    return saida
+
+
+def _restaurar_full_original(db, request, item_ids, olist_produto_id, olist_sku):
+    """Volta o Vai pro FULL ao original do PDF nos itens escolhidos pelo conferente
+    (só os que _itens_full_reduzidos devolve para ESTE produto). Registra no histórico. Não commita."""
+    validos = {r["item_id"]: r for r in _itens_full_reduzidos(db, olist_produto_id, olist_sku)}
+    quem = _operador_contexto(request)["operador_nome"]
+    for iid in item_ids or []:
+        r = validos.get(int(iid)) if str(iid).isdigit() else None
+        if not r:
+            continue
+        it = db.query(ItemEmbaleFU).filter(ItemEmbaleFU.id == r["item_id"]).first()
+        it.quantidade_baixar = r["original"]
+        db.add(it)
+        db.add(HistoricoFullEmbale(
+            embale_id=r["inbound_id"], item_id=it.id, titulo_anuncio=it.titulo_anuncio,
+            sku_inbound=it.sku_inbound, quantidade_anterior=r["atual"], quantidade_nova=r["original"],
+            tipo="aumento", status="aprovado", solicitante=quem, decidido_por=quem, decidido_em=datetime.utcnow(),
+        ))
+
+
 async def reserva_inbound_produto(request: Request):
     """
     GET /api/embaldes/reserva-produto?olist_produto_id=X&olist_sku=Y
@@ -2086,6 +2176,7 @@ async def reserva_inbound_produto(request: Request):
             "reservado_full": reserva,
             "tem_reserva": reserva > 0,
             "detalhes": detalhes,
+            "reduzidos": _itens_full_reduzidos(db, pid, sku),
         })
     except Exception as e:
         return JSONResponse({"erro": str(e)}, status_code=500)
@@ -2118,6 +2209,12 @@ async def atualizar_estoque_olist(request: Request):
         agora = datetime.utcnow()
         modo_balanco = estoque_real is not None
         estoque_final_balanco = None
+
+        # Conferente marcou "segurar a quantidade original" em itens com FULL reduzido.
+        restaurar_ids = data.get("restaurar_full_item_ids") or []
+        if restaurar_ids and (modo_balanco or tipo == "E"):
+            _restaurar_full_original(db, request, restaurar_ids, item.olist_produto_id, item.olist_sku)
+            db.flush()
 
         if modo_balanco:
             # Corrige a base fictícia e soma só a parte ORGÂNICA da NF,
@@ -3005,6 +3102,16 @@ def _progresso_item_full(item) -> tuple[float, float]:
     return planejado, realizado
 
 
+def _pedido_full_pendente(db, item_id):
+    """Pedido de mudança do "Vai pro FULL" esperando o master (None se não há)."""
+    return (db.query(HistoricoFullEmbale)
+            .filter(HistoricoFullEmbale.item_id == item_id, HistoricoFullEmbale.status == "pendente")
+            .order_by(HistoricoFullEmbale.id.desc()).first())
+
+
+_MSG_PENDENTE = "A mudança do Vai pro FULL deste item aguarda aprovação do administrador. Nada é retirado até lá."
+
+
 def _marcar_historico_full(db, embale_id, revisao):
     """Marca cada item da revisão com tem_historico_full = True quando houve
     qualquer mudança registrada na quantidade do FULL daquele item."""
@@ -3013,8 +3120,16 @@ def _marcar_historico_full(db, embale_id, revisao):
                .filter(HistoricoFullEmbale.embale_id == embale_id).all()}
     except Exception:
         ids = set()
+    try:
+        pendentes = {h.item_id: h for h in db.query(HistoricoFullEmbale)
+                     .filter(HistoricoFullEmbale.embale_id == embale_id, HistoricoFullEmbale.status == "pendente")}
+    except Exception:
+        pendentes = {}
     for r in revisao:
         r["tem_historico_full"] = r.get("item_id") in ids
+        h = pendentes.get(r.get("item_id"))
+        r["full_pendente"] = None if not h else {"id": h.id, "de": h.quantidade_anterior, "para": h.quantidade_nova,
+                                                  "solicitante": h.solicitante}
 
 
 def _resumo_revisao_salva_item(item):
@@ -3125,6 +3240,17 @@ async def revisar_baixa_embale(request: Request):
         _preencher_imagens_olist(db, itens)
 
         if embale.revisao_salva_em and not force_refresh:
+            # Item vinculado sem estoque de referência (vínculo novo, ou desfeito na versão antiga)
+            # aparecia como "Estoque indisponível" e sem botões: busca na Olist e grava.
+            # ponytail: no máximo 10 por abertura, para não deixar a revisão lenta.
+            sem_saldo = [i for i in itens if i.olist_produto_id and i.olist_estoque_antes is None and i.baixa_aplicada != 1][:10]
+            for i in sem_saldo:
+                saldo = (olist.obter_estoque(str(i.olist_produto_id)) or {}).get("saldo")
+                if saldo is not None:
+                    i.olist_estoque_antes = float(saldo)
+                    db.add(i)
+            if sem_saldo:
+                db.commit()
             revisao = [_resumo_revisao_salva_item(item) for item in itens]
             _marcar_historico_full(db, embale.id, revisao)
             resumo = {
@@ -3320,6 +3446,9 @@ def _aplicar_baixa_item(db, item, embale, qtd_override=None):
             "quantidade_baixada": item.quantidade_baixada
         }
 
+    if _pedido_full_pendente(db, item.id):
+        return {"item_id": item.id, "status": "pendente_aprovacao", "erro": _MSG_PENDENTE}
+
     produto_id, nome_olist = _resolver_olist_para_item(item)
     if not produto_id:
         return {
@@ -3334,9 +3463,17 @@ def _aplicar_baixa_item(db, item, embale, qtd_override=None):
         qtd_baixar = _quantidade_planejada_full(item)
 
     if qtd_baixar <= 0:
+        # Nada vai pro FULL: não há o que retirar, mas o item está resolvido (fica verde e conta
+        # como concluído). Sem isso, balanço com FULL=0 corrigia a Olist e o item ficava pendente.
+        item.quantidade_baixar = 0.0
+        item.quantidade_baixada = 0.0
+        item.baixa_aplicada = 1
+        item.data_baixa = datetime.utcnow()
+        db.add(item)
         return {
             "item_id": item.id, "status": "zerado",
-            "mensagem": "Quantidade a baixar é zero"
+            "quantidade_baixada": 0,
+            "mensagem": "Nada a baixar (FULL = 0): item marcado como concluído"
         }
 
     sucesso = olist.atualizar_estoque(
@@ -3683,6 +3820,43 @@ async def ajustar_quantidade_full_embale(request: Request):
 
         # Quantidade planejada ANTES da mudança (para registrar no histórico)
         quantidade_anterior = _quantidade_planejada_full(item)
+        mudou = abs(quantidade_full - quantidade_anterior) > 0.0001
+        pendente = _pedido_full_pendente(db, item.id)
+
+        # Operador não muda o FULL direto: vira pedido pendente no histórico até o master aprovar.
+        if not _request_eh_master(request):
+            if pendente:
+                if not mudou:
+                    db.delete(pendente)  # voltou ao valor original: cancela o pedido
+                else:
+                    pendente.quantidade_nova = quantidade_full
+                    pendente.tipo = "aumento" if quantidade_full > quantidade_anterior else "reducao"
+                    pendente.criado_em = datetime.utcnow()
+            elif mudou:
+                db.add(HistoricoFullEmbale(
+                    embale_id=embale.id, item_id=item.id, titulo_anuncio=item.titulo_anuncio,
+                    sku_inbound=item.sku_inbound, quantidade_anterior=quantidade_anterior,
+                    quantidade_nova=quantidade_full,
+                    tipo="aumento" if quantidade_full > quantidade_anterior else "reducao",
+                    status="pendente", solicitante=_operador_contexto(request)["operador_nome"],
+                ))
+            db.commit()
+            if mudou:
+                _registrar_log_operacao(request, "quantidade_full_solicitada", "item_embale", item.id,
+                                        f"Pedido de mudança do FULL para {quantidade_full:g}",
+                                        {"embale_id": embale.id, "quantidade_anterior": quantidade_anterior,
+                                         "quantidade_nova": quantidade_full})
+            return JSONResponse({
+                "sucesso": True, "pendente": mudou, "item_id": item.id,
+                "quantidade_full": quantidade_anterior,
+                "mensagem": (f"Pedido enviado: {quantidade_anterior:g} -> {quantidade_full:g}. Aguarda o administrador aprovar; nada é retirado até lá."
+                             if mudou else "Pedido de mudança cancelado."),
+            })
+
+        if pendente:  # master mudou direto: o pedido do operador perde o sentido
+            pendente.status = "recusado"
+            pendente.decidido_por = _operador_contexto(request)["operador_nome"]
+            pendente.decidido_em = datetime.utcnow()
 
         item.quantidade_baixar = quantidade_full
         if item.olist_estoque_antes is not None:
@@ -3699,6 +3873,8 @@ async def ajustar_quantidade_full_embale(request: Request):
                 quantidade_anterior=quantidade_anterior,
                 quantidade_nova=quantidade_full,
                 tipo="aumento" if quantidade_full > quantidade_anterior else "reducao",
+                status="aprovado", solicitante=_operador_contexto(request)["operador_nome"],
+                decidido_por=_operador_contexto(request)["operador_nome"], decidido_em=datetime.utcnow(),
             ))
 
         db.commit()
@@ -3754,6 +3930,8 @@ async def balancear_item_embale(request: Request):
 
         if quantidade_real < 0:
             return JSONResponse({"erro": "Quantidade não pode ser negativa"}, status_code=400)
+        if not float(quantidade_real).is_integer():
+            return JSONResponse({"erro": f"Quantidade real deve ser em unidades inteiras (recebi {quantidade_real:g}). Digite sem ponto: 1527, não 1.527."}, status_code=400)
 
         embale = db.query(EmbaleFU).filter(EmbaleFU.id == embale_id).first()
         if not embale:
@@ -3767,6 +3945,8 @@ async def balancear_item_embale(request: Request):
 
         if not item.olist_produto_id:
             return JSONResponse({"erro": "Item não está vinculado à Olist"}, status_code=400)
+        if _pedido_full_pendente(db, item.id):
+            return JSONResponse({"erro": _MSG_PENDENTE}, status_code=409)
 
         # Obter estoque ANTES (sem cache, p/ valor fiel no momento do balanço)
         produto_id = item.olist_produto_id
@@ -3823,6 +4003,7 @@ async def balancear_item_embale(request: Request):
                     "embale_id": embale.id,
                     "item_id": item.id,
                     "sku_inbound": item.sku_inbound,
+                    "olist_produto_id": str(produto_id),
                     "quantidade_real": quantidade_real,
                     "qtd_full": qtd_full,
                     "falta": item.falta,
@@ -3872,6 +4053,7 @@ async def balancear_item_embale(request: Request):
                 "embale_id": embale.id,
                 "item_id": item.id,
                 "sku_inbound": item.sku_inbound,
+                "olist_produto_id": str(produto_id),
                 "quantidade_real": quantidade_real,
                 "qtd_full": qtd_full,
                 "falta": item.falta,
@@ -4038,6 +4220,8 @@ async def balancear_kit_componentes_embale(request: Request):
             return JSONResponse({"erro": "Item não encontrado neste inbound"}, status_code=404)
         if item.baixa_aplicada == 1:
             return JSONResponse({"erro": "Este item já teve a baixa aplicada"}, status_code=400)
+        if _pedido_full_pendente(db, item.id):
+            return JSONResponse({"erro": _MSG_PENDENTE}, status_code=409)
 
         qtd_full = _quantidade_planejada_full(item)
         resultados = []
@@ -4061,7 +4245,7 @@ async def balancear_kit_componentes_embale(request: Request):
             if por_kit <= 0:
                 por_kit = 1
 
-            if not pid or qtd_real < 0 or qtd_baixar < 0:
+            if not pid or qtd_real < 0 or qtd_baixar < 0 or not float(qtd_real).is_integer():
                 resultados.append({
                     "produto_id": pid,
                     "sku": sku_c,
@@ -4112,7 +4296,8 @@ async def balancear_kit_componentes_embale(request: Request):
                 })
                 continue
 
-            ok_baixa = olist.atualizar_estoque(
+            # Olist recusa saída de quantidade 0 (HTTP 400): nada a baixar = só o balanço.
+            ok_baixa = qtd_baixar == 0 or olist.atualizar_estoque(
                 produto_id=pid,
                 quantidade=qtd_baixar,
                 tipo="S",
@@ -4240,6 +4425,8 @@ async def baixar_kit_componentes_embale(request: Request):
             return JSONResponse({"erro": "Item não encontrado neste inbound"}, status_code=404)
         if item.baixa_aplicada == 1:
             return JSONResponse({"erro": "Este item já teve a baixa aplicada"}, status_code=400)
+        if _pedido_full_pendente(db, item.id):
+            return JSONResponse({"erro": _MSG_PENDENTE}, status_code=409)
 
         resultados = []
         for c in componentes:
@@ -4300,6 +4487,194 @@ async def baixar_kit_componentes_embale(request: Request):
         db.close()
 
 
+_ACOES_ITEM_FULL = ("balanco_item_full", "balanco_item_full_divergente", "balanco_kit_componentes", "baixa_kit_componentes")
+
+
+def _movimentos_desfazer(item_produto_id: str | None, qtd_baixada: float, logs: list[tuple[str, dict]]) -> list[dict]:
+    """
+    Calcula o que lançar na Olist para desfazer a baixa/balanço de um item do inbound.
+    logs: (acao, detalhes) do item, do MAIS NOVO para o mais antigo.
+    Devolve [{"produto_id", "sku", "ajuste"}]: ajuste > 0 = entrada (E), < 0 = saída (S).
+    Soma o EFEITO (diferença) de cada operação desde o último desfazer e aplica o contrário —
+    não volta a um valor absoluto, para não apagar vendas que caíram na Olist no meio.
+    """
+    ja_revertidos: set[str] = set()
+    efeito: dict[str, float] = {}
+    skus: dict[str, str] = {}
+    kit = False
+
+    def soma(pid, sku, valor):
+        if pid:
+            efeito[str(pid)] = efeito.get(str(pid), 0.0) + valor
+            skus.setdefault(str(pid), sku or "")
+
+    produto_da_vez = item_produto_id  # produto do item naquele ponto do histórico (andando para trás)
+    for acao, det in logs:
+        if acao == "desfazer_item_full":
+            break  # daqui para trás já foi desfeito
+        if acao == "vinculo_item_inbound":
+            # A troca de vínculo já transferiu a baixa para o produto novo (fica em qtd_baixada);
+            # o que veio antes dela foi lançado no produto antigo.
+            produto_da_vez = str(det.get("olist_produto_id_antigo") or "") or None
+            continue
+        if acao == "desfazer_item_full_parcial":
+            ja_revertidos.update(str(x) for x in det.get("revertidos") or [])
+        elif acao in ("balanco_item_full", "balanco_item_full_divergente"):
+            # Só a parte do balanço (tipo B); a baixa do item entra uma vez só, abaixo.
+            soma(det.get("olist_produto_id") or produto_da_vez, det.get("sku_inbound"),
+                 float(det.get("quantidade_real") or 0) - float(det.get("estoque_antes") or 0))
+        elif acao == "baixa_kit_componentes":
+            kit = True
+            for r in det.get("resultados") or []:
+                if r.get("sucesso"):
+                    soma(r.get("produto_id"), r.get("sku"), -float(r.get("quantidade") or 0))
+        elif acao == "balanco_kit_componentes":
+            kit = True
+            for r in det.get("resultados") or []:
+                st = r.get("status")
+                if st not in ("ok", "divergencia", "falha_baixa"):
+                    continue  # falha_balanco/invalido: nada foi lançado nesse componente
+                baixou = float(r.get("quantidade_baixar") or 0) if st == "ok" else 0.0
+                soma(r.get("produto_id"), r.get("sku"), float(r.get("quantidade_real") or 0) - baixou - float(r.get("estoque_antes") or 0))
+
+    # Baixa do próprio item (simples ou a que veio junto do balanço): é quantidade_baixada.
+    # Em kit a baixa é por componente e já está nos logs acima (quantidade_baixada do item é só o marcador).
+    if not kit and qtd_baixada > 0:
+        soma(item_produto_id, "", -qtd_baixada)
+
+    return [{"produto_id": pid, "sku": skus[pid], "ajuste": -v}
+            for pid, v in efeito.items() if abs(v) > 1e-9 and pid not in ja_revertidos]
+
+
+async def desfazer_item_embale(request: Request):
+    """
+    POST /api/embaldes/{embale_id}/itens/{item_id}/desfazer
+    Desfaz na Olist a baixa/balanço do item e o devolve para pendente (para refazer).
+    Se um lançamento falhar no meio, guarda o que já foi revertido para não repetir no próximo clique.
+    """
+    db = SessionLocal()
+    try:
+        embale_id = int(request.path_params.get("embale_id"))
+        item_id = int(request.path_params.get("item_id"))
+        embale = db.query(EmbaleFU).filter(EmbaleFU.id == embale_id).first()
+        if not embale:
+            return JSONResponse({"erro": "Inbound não encontrado"}, status_code=404)
+        if embale.status == "encerrado":
+            return JSONResponse({"erro": "Inbound já está encerrado"}, status_code=400)
+        item = next((i for i in embale.itens if i.id == item_id), None)
+        if not item:
+            return JSONResponse({"erro": "Item não encontrado neste inbound"}, status_code=404)
+        if item.baixa_aplicada != 1 and item.foi_balanceado != 1:
+            return JSONResponse({"erro": "Este item não tem baixa nem balanço para desfazer"}, status_code=400)
+
+        logs = [
+            (l.acao, json.loads(l.detalhes_json) if l.detalhes_json else {})
+            for l in db.query(LogOperacao)
+            .filter(LogOperacao.entidade_tipo == "item_embale", LogOperacao.entidade_id == str(item.id),
+                    LogOperacao.acao.in_(_ACOES_ITEM_FULL + ("desfazer_item_full", "desfazer_item_full_parcial",
+                                                             "vinculo_item_inbound")))
+            .order_by(LogOperacao.id.desc())
+            .limit(20)
+        ]
+        produto_id = item.olist_produto_id or _resolver_olist_para_item(item)[0]
+        movs = _movimentos_desfazer(str(produto_id) if produto_id else None, float(item.quantidade_baixada or 0), logs)
+
+        revertidos, falha = [], None
+        for m in movs:
+            ok = olist.atualizar_estoque(
+                produto_id=m["produto_id"],
+                quantidade=abs(m["ajuste"]),
+                tipo="E" if m["ajuste"] > 0 else "S",
+                observacao=f"Desfazer baixa/balanço do Inbound #{embale.numero_inbound} ({item.sku_inbound or item.titulo_anuncio or ''})",
+            )
+            if not ok:
+                falha = {**m, "detalhe": olist._ultimo_erro_estoque}
+                break
+            revertidos.append(m["produto_id"])
+
+        if falha:
+            _registrar_log_operacao(request, "desfazer_item_full_parcial", "item_embale", item.id,
+                                    f"Desfazer parcial do item {item.sku_inbound or item.titulo_anuncio}",
+                                    {"embale_id": embale.id, "revertidos": revertidos, "falha": falha})
+            return JSONResponse({
+                "erro": f"Falhou ao desfazer {falha['sku'] or falha['produto_id']} na Olist. Clique de novo: o que já voltou não é repetido.",
+                "detalhe": falha["detalhe"],
+                "revertidos": revertidos,
+            }, status_code=502)
+
+        item.baixa_aplicada = 0
+        item.quantidade_baixada = None
+        item.data_baixa = None
+        item.foi_balanceado = 0
+        item.data_balanceamento = None
+        item.saldo_disponivel = None
+        item.falta = None
+        if produto_id:
+            saldo = (olist.obter_estoque(str(produto_id), usar_cache=False) or {}).get("saldo")
+            item.olist_estoque_antes = float(saldo) if saldo is not None else item.olist_estoque_antes
+        if item.em_espera == 1:
+            item.em_espera = 0
+            item.data_em_espera = None
+        db.add(item)
+        db.commit()
+        _registrar_log_operacao(request, "desfazer_item_full", "item_embale", item.id,
+                                f"Desfez baixa/balanço do item {item.sku_inbound or item.titulo_anuncio}",
+                                {"embale_id": embale.id, "movimentos": movs})
+        resumo = ", ".join(f"{'+' if m['ajuste'] > 0 else '-'}{abs(m['ajuste']):g} {m['sku'] or m['produto_id']}" for m in movs)
+        return JSONResponse({
+            "sucesso": True,
+            "movimentos": movs,
+            "mensagem": f"Desfeito na Olist ({resumo or 'nada a lançar'}). O item voltou para pendente.",
+        })
+    except Exception as e:
+        db.rollback()
+        return JSONResponse({"erro": str(e)}, status_code=500)
+    finally:
+        db.close()
+
+
+async def decidir_pedido_full_embale(request: Request):
+    """
+    POST /api/embaldes/{embale_id}/historico-full/{hist_id}/decidir   Body: {"aprovar": true|false}
+    Só o master. Aprovar aplica a nova qtd no "Vai pro FULL"; recusar mantém a anterior.
+    """
+    if not _request_eh_master(request):
+        return JSONResponse({"erro": "Só o administrador aprova mudança do Vai pro FULL."}, status_code=403)
+    db = SessionLocal()
+    try:
+        embale_id = int(request.path_params.get("embale_id"))
+        hist_id = int(request.path_params.get("hist_id"))
+        aprovar = bool((await request.json() or {}).get("aprovar"))
+        h = db.query(HistoricoFullEmbale).filter(HistoricoFullEmbale.id == hist_id,
+                                                 HistoricoFullEmbale.embale_id == embale_id).first()
+        if not h:
+            return JSONResponse({"erro": "Pedido não encontrado"}, status_code=404)
+        if h.status != "pendente":
+            return JSONResponse({"erro": f"Este pedido já foi {h.status or 'aplicado'}."}, status_code=409)
+        item = db.query(ItemEmbaleFU).filter(ItemEmbaleFU.id == h.item_id).first()
+        if aprovar:
+            if not item or item.baixa_aplicada == 1:
+                return JSONResponse({"erro": "O item já teve a baixa aplicada: não dá para mudar o FULL."}, status_code=409)
+            item.quantidade_baixar = float(h.quantidade_nova)
+            if item.olist_estoque_antes is not None:
+                item.falta = max(0.0, float(h.quantidade_nova) - float(item.olist_estoque_antes or 0))
+            db.add(item)
+        h.status = "aprovado" if aprovar else "recusado"
+        h.decidido_por = _operador_contexto(request)["operador_nome"]
+        h.decidido_em = datetime.utcnow()
+        db.commit()
+        _registrar_log_operacao(request, "quantidade_full_aprovada" if aprovar else "quantidade_full_recusada",
+                                "item_embale", h.item_id,
+                                f"{'Aprovou' if aprovar else 'Recusou'} FULL {h.quantidade_anterior:g} -> {h.quantidade_nova:g}",
+                                {"embale_id": embale_id, "hist_id": h.id, "solicitante": h.solicitante})
+        return JSONResponse({"sucesso": True, "status": h.status})
+    except Exception as e:
+        db.rollback()
+        return JSONResponse({"erro": str(e)}, status_code=500)
+    finally:
+        db.close()
+
+
 async def listar_historico_full_embale(request: Request):
     """
     GET /api/embaldes/{embale_id}/historico-full
@@ -4325,6 +4700,9 @@ async def listar_historico_full_embale(request: Request):
                     "quantidade_anterior": h.quantidade_anterior,
                     "quantidade_nova": h.quantidade_nova,
                     "tipo": h.tipo,
+                    "status": h.status or "aprovado",
+                    "solicitante": h.solicitante,
+                    "decidido_por": h.decidido_por,
                     "criado_em": h.criado_em.isoformat() if h.criado_em else None,
                 }
                 for h in registros
@@ -4553,6 +4931,9 @@ async def listar_historico_completo_embale(request: Request):
                 "quantidade_nova": h.quantidade_nova,
                 "estoque_atual": resumo_por_item.get(h.item_id, {}).get("estoque_atual"),
                 "tipo": h.tipo,
+                "status": h.status or "aprovado",
+                "solicitante": h.solicitante,
+                "decidido_por": h.decidido_por,
                 "criado_em": h.criado_em.isoformat() if h.criado_em else None,
             }
             for h in registros
@@ -4828,7 +5209,11 @@ async def custos_produto(request: Request):
             if custo <= 0 and not row:
                 ignorados += 1
                 continue
-            if row:
+            if row and custo > 0 and custo != row.custo:
+                # mudança de custo entra no histórico com vigência a partir de agora (o passado mantém o custo antigo)
+                registrar_custo(db, sku, custo, datetime.utcnow(), _operador_contexto(request)["operador_nome"])
+                row.imposto_pct = imposto
+            elif row:
                 row.custo = custo
                 row.imposto_pct = imposto
                 row.atualizado_em = datetime.utcnow()
@@ -4837,6 +5222,8 @@ async def custos_produto(request: Request):
             salvos += 1
 
         db.commit()
+        if salvos:
+            limpar_cache_custos()
         return JSONResponse({"ok": True, "salvos": salvos, "ignorados": ignorados})
     except Exception as e:
         db.rollback()
@@ -6585,6 +6972,7 @@ routes = [
     Route("/api/historico-confirmacao/{item_id}", get_historico_confirmacao, methods=["GET"]),
     Route("/api/notas-fiscais/{nf_id}/tem-divergencias", nf_tem_divergencias, methods=["GET"]),
     Route("/api/divergencias", listar_divergencias, methods=["GET"]),
+    Route("/api/divergencias-full", listar_divergencias_full, methods=["GET"]),
     Route("/api/produtos-manuais", adicionar_produto_manual, methods=["POST"]),
     Route("/api/resolver-divergencia", resolver_divergencia, methods=["POST"]),
     Route("/api/deletar-divergencia", deletar_divergencia, methods=["POST"]),
@@ -6634,17 +7022,15 @@ routes = [
     Route("/api/embaldes/{embale_id}/itens/{item_id}/kit", kit_componentes_embale, methods=["GET"]),
     Route("/api/embaldes/{embale_id}/itens/{item_id}/balancear-kit", balancear_kit_componentes_embale, methods=["POST"]),
     Route("/api/embaldes/{embale_id}/itens/{item_id}/baixar-kit", baixar_kit_componentes_embale, methods=["POST"]),
+    Route("/api/embaldes/{embale_id}/itens/{item_id}/desfazer", desfazer_item_embale, methods=["POST"]),
     Route("/api/embaldes/{embale_id}/historico-full", listar_historico_full_embale, methods=["GET"]),
+    Route("/api/embaldes/{embale_id}/historico-full/{hist_id}/decidir", decidir_pedido_full_embale, methods=["POST"]),
     Route("/api/embaldes/{embale_id}/historico-completo", listar_historico_completo_embale, methods=["GET"]),
     Route("/api/embaldes/{embale_id}/posicao-separacao", salvar_posicao_separacao, methods=["POST"]),
     Route("/api/embaldes/{embale_id}/itens/{item_id}/em-espera", marcar_em_espera_embale, methods=["POST"]),
     Route("/api/embaldes/{embale_id}/itens/{item_id}/nao-enviar", marcar_nao_enviar_embale, methods=["POST"]),
     Route("/api/embaldes/{embale_id}/encerrar", encerrar_embale, methods=["POST"]),
 
-    # --- Central de Devoluções (Fase 1 — leitura e vínculo) ---
-    Route("/api/devolucoes", devol_listar, methods=["GET"]),
-    Route("/api/devolucoes/sincronizar", devol_sincronizar, methods=["POST"]),
-    Route("/api/devolucoes/{id:int}", devol_detalhe, methods=["GET"]),
 
     # Shopee (OAuth + push notification)
     Route("/api/shopee/status", shopee_status, methods=["GET"]),
@@ -6676,6 +7062,8 @@ async def _on_startup():
     except Exception as e:
         print(f"[ERRO] Falha ao iniciar scheduler: {e}")
 
+
+routes.extend(rotas_central)  # /api/central/* — Central de Devoluções
 
 # Serve o frontend compilado (dist) como SPA na raiz "/", se existir.
 # Fica DEPOIS de todas as rotas /api, entao a API tem prioridade.

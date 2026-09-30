@@ -1,0 +1,114 @@
+"""Contestação na Shopee. Mesma interface do ML. Na Shopee toda disputa tem motivo da lista oficial,
+com ou sem problema no produto, então produto_perfeito não muda o caminho."""
+
+import mimetypes
+import os
+from pathlib import Path
+
+from . import client
+
+EMAIL = os.environ.get("SHOPEE_EMAIL_DISPUTA", "")
+
+
+def motivos_contestacao(return_sn: str, produto_perfeito: bool) -> list[dict]:
+    r = client.get("/api/v2/returns/get_return_dispute_reason", {"return_sn": return_sn})
+    lista = r.get("dispute_reason") or r.get("dispute_reason_list") or r.get("reason_list") or []
+    if not lista:
+        # Na Shopee lista vazia nunca significa "sem motivo": a disputa sempre exige um. Mostra a resposta crua para diagnóstico.
+        raise RuntimeError(f"A Shopee não devolveu motivos de disputa para esta devolução. Resposta: {str(r)[:300]}")
+    return [_motivo(m) for m in lista]
+
+
+def _motivo(m: dict) -> dict:
+    """Formato real da Shopee: {'dispute_reason': 46, 'dispute_requirement': '', ...}. Só o código vem; o texto é a exigência, se houver."""
+    id_ = m.get("dispute_reason")
+    if id_ is None or not str(id_).isdigit():
+        raise RuntimeError(f"Formato inesperado do motivo de disputa da Shopee: {str(m)[:300]}")
+    exigencia = (m.get("dispute_requirement") or "").strip()
+    # A exigência é longa e vai fora do <select>; o menu mostra nome + código.
+    nome = NOMES_MOTIVO.get(int(id_))
+    return {"id": int(id_), "texto": f"{nome} (cód. {id_})" if nome else f"Motivo {id_}", "exigencia": exigencia}
+
+
+# ponytail: a API só manda o código. Mapeado pela ordem da lista da Central do Vendedor (46-50) e pelo motivo
+# "buyer's claim is incorrect" das disputas antigas (56). Se a Shopee reordenar, conferir com get_return_detail.
+NOMES_MOTIVO = {
+    46: "Não recebi a devolução, mas consta como entregue",
+    47: "Chegou amassado, arranhado, quebrado ou danificado",
+    48: "Chegou vazio ou faltando peças/acessórios",
+    49: "O produto recebido não é o mesmo que enviei",
+    50: "Não concordo com o desconto das taxas de devolução",
+    56: "Recebi a devolução, mas a alegação do comprador está incorreta",
+}
+
+
+# Status em que a Shopee recusa o confirm porque a devolução já foi aceita (pelo painel ou por prazo).
+_JA_ACEITA = {"RETURN_ACCEPTED": "aceita", "RETURN_COMPLETED": "concluída"}
+
+
+def aceitar(return_sn: str) -> dict:
+    """Aceita a devolução: a Shopee reembolsa o comprador. Irreversível, só por clique do operador."""
+    try:
+        client.post("/api/v2/returns/confirm", {"return_sn": return_sn})
+    except RuntimeError as e:
+        status = next((s for s in _JA_ACEITA if f"Invalid return status: {s}" in str(e)), None)
+        if not status:
+            raise
+        return {"caminho": "aceite", "anexos": [], "aviso": f"A devolução já estava {_JA_ACEITA[status]} na Shopee."}
+    return {"caminho": "aceite", "anexos": [], "aviso": None}
+
+
+def campos_disputa(return_sn: str) -> dict:
+    """Diagnóstico: só os campos de disputa/motivo do detalhe da devolução (sem dados do comprador).
+    Serve para descobrir que código de motivo a Shopee gravou numa contestação feita pela Central do Vendedor."""
+    r = client.get("/api/v2/returns/get_return_detail", {"return_sn": return_sn})
+
+    def filtra(v):
+        if isinstance(v, dict):
+            out = {k: (x if any(p in k.lower() for p in ("dispute", "reason", "status")) else filtra(x)) for k, x in v.items()}
+            return {k: x for k, x in out.items() if x not in (None, {}, [], "")}
+        if isinstance(v, list):
+            return [x for x in (filtra(i) for i in v) if x not in (None, {}, [], "")]
+        return None
+
+    return filtra(r)
+
+
+def _urls(return_sn: str, fotos: list[Path]) -> list[str]:
+    # convert_image: multipart, campo "upload_image" + return_sn, UMA foto por chamada (as demais são ignoradas).
+    urls = []
+    for f in fotos:
+        r = client.post("/api/v2/returns/convert_image", {"return_sn": return_sn},
+                        files=[("upload_image", (f.name, f.read_bytes(), mimetypes.guess_type(f.name)[0] or "image/jpeg"))])
+        if r.get("url"):
+            urls.append(r["url"])
+    return urls
+
+
+def _evidencias(return_sn: str, motivo: int, urls: list[str]) -> list[dict]:
+    """As fotos vão num dos "módulos de evidência" que a Shopee define por motivo (module_index + requirement).
+    ponytail: todas as fotos no primeiro módulo obrigatório (ou no primeiro); separar por módulo se a Shopee recusar."""
+    r = client.get("/api/v2/returns/get_return_dispute_reason", {"return_sn": return_sn})
+    lista = r.get("dispute_reason") or r.get("dispute_reason_list") or r.get("reason_list") or []
+    mods = next((m.get("evidence_module_list") or [] for m in lista if str(m.get("dispute_reason")) == str(motivo)), [])
+    if not mods:
+        raise RuntimeError(f"A Shopee não informou onde anexar as fotos do motivo {motivo}. Resposta: {str(r)[:300]}")
+    mod = next((m for m in mods if m.get("is_required")), mods[0])
+    return [{"module_index": mod.get("module_index"), "requirement": mod.get("requirement") or "", "image_url": urls}]
+
+
+def contestar(return_sn: str, motivo: str, texto: str, fotos: list[Path], videos: list[Path],
+              produto_perfeito: bool) -> dict:
+    if not motivo:
+        raise RuntimeError("A Shopee exige um motivo da lista oficial para abrir a disputa.")
+    if not EMAIL:
+        raise RuntimeError("Defina SHOPEE_EMAIL_DISPUTA no .env da trilha shopee (e-mail de contato exigido na disputa).")
+    urls = _urls(return_sn, fotos)
+    corpo = {"return_sn": return_sn, "email": EMAIL, "dispute_reason_id": int(motivo), "dispute_text_reason": texto}
+    if urls:
+        corpo["image_list"] = _evidencias(return_sn, int(motivo), urls)
+    client.post("/api/v2/returns/dispute", corpo)
+    # ponytail: vídeo pela API exige o upload de mídia da Shopee (não documentado de forma confiável); por ora vai pelo painel.
+    aviso = "A Shopee exige vídeo nesta disputa: anexe pela Central do Vendedor." if videos else \
+            "A Shopee costuma exigir vídeo: grave e anexe pela Central do Vendedor."
+    return {"caminho": "disputa", "anexos": urls, "aviso": aviso}

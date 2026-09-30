@@ -251,6 +251,12 @@ class HistoricoFullEmbale(Base):
     quantidade_nova = Column(Float, default=0)
     tipo = Column(String(20))  # "aumento" ou "reducao"
     criado_em = Column(DateTime, default=datetime.utcnow, index=True)
+    # Operador muda o "Vai pro FULL" → pedido "pendente" até o master aprovar; só então vale.
+    # None (registros antigos) = aplicado direto.
+    status = Column(String(20), nullable=True, index=True)  # pendente | aprovado | recusado
+    solicitante = Column(String(120), nullable=True)
+    decidido_por = Column(String(120), nullable=True)
+    decidido_em = Column(DateTime, nullable=True)
 
     embalde = relationship("EmbaleFU", back_populates="historico_full")
 
@@ -353,6 +359,19 @@ class CustoProduto(Base):
     custo = Column(Float, default=0)
     imposto_pct = Column(Float, default=9)
     atualizado_em = Column(DateTime, default=datetime.utcnow)
+
+
+class CustoProdutoHistorico(Base):
+    """Cada mudança do custo de um SKU com a data a partir da qual vale (UTC). O prejuízo de uma quebra usa o custo
+    vigente no dia da conferência: mudar o preço não reescreve o passado. custos_produto guarda o da vigência mais recente."""
+    __tablename__ = "custos_produto_historico"
+
+    id = Column(Integer, primary_key=True)
+    produto_chave = Column(String(150), index=True, nullable=False)
+    custo = Column(Float, nullable=False)
+    vigente_desde = Column(DateTime, nullable=False, index=True)
+    registrado_em = Column(DateTime, default=datetime.utcnow, nullable=False)
+    registrado_por = Column(String(120))
 
 
 class MercadoLivreItemCache(Base):
