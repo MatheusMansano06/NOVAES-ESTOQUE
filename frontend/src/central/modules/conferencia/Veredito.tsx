@@ -9,9 +9,11 @@ interface Props {
   tela: Tela;
   onAtualizar: () => void;
   onIrParaProvas: () => void;
+  /** "olist" = passo de estoque e NF; "plataforma" = passo de aceitar ou contestar. */
+  parte: "olist" | "plataforma";
 }
 
-export function Veredito({ tela, onAtualizar, onIrParaProvas }: Props) {
+export function Veredito({ tela, onAtualizar, onIrParaProvas, parte }: Props) {
   const { devolucao: d, conferencia: c, evidencias } = tela;
   if (!c) return null;
   const classe = CLASSE[c.classe];
@@ -36,7 +38,7 @@ export function Veredito({ tela, onAtualizar, onIrParaProvas }: Props) {
       </div>
 
       <div className="veredito-colunas">
-        <section aria-labelledby="t-estoque">
+        {parte === "olist" && <section aria-labelledby="t-estoque">
           <h4 id="t-estoque">Estoque na Olist</h4>
           {c.lancamentos.length === 0 ? (
             <p className="aviso">Nada a lançar: o item que chegou não é um produto nosso. Fica registrado só aqui.</p>
@@ -55,9 +57,9 @@ export function Veredito({ tela, onAtualizar, onIrParaProvas }: Props) {
             </ul>
           )}
           <Devolucao tela={tela} onFeito={onAtualizar} />
-        </section>
+        </section>}
 
-        <section aria-labelledby="t-contestar">
+        {parte === "plataforma" && <section aria-labelledby="t-contestar">
           <h4 id="t-contestar">{c.chamado_manual ? "Chamado manual" : `Contestação na ${PLATAFORMA[d.plataforma]}`}</h4>
           <p className={c.contestar || c.chamado_manual ? "aviso forte" : "aviso"}>{c.motivo}</p>
           {(c.contestar || c.chamado_manual) && d.prazo_vendedor && (
@@ -71,7 +73,7 @@ export function Veredito({ tela, onAtualizar, onIrParaProvas }: Props) {
             : c.contestar
               ? <Contestar devolucaoId={d.id} textoInicial={c.observacao ?? ""} temFoto={temFoto} podeAceitar={d.plataforma === "shopee" && SHOPEE_PENDENTE.includes(d.status_plataforma)} onMudou={onAtualizar} />
               : d.plataforma === "shopee" && <AceitarSozinho devolucaoId={d.id} pendente={SHOPEE_PENDENTE.includes(d.status_plataforma)} onMudou={onAtualizar} />}
-        </section>
+        </section>}
       </div>
     </div>
   );

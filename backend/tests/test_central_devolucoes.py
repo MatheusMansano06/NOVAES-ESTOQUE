@@ -74,6 +74,18 @@ def test_fluxo_conferencia():
     assert cliente.get("/api/central/bi/resumo?dias=0").status_code == 422
 
 
+def test_limpar_evidencias_apaga_arquivo_e_linha():
+    from app.central.conferencia import servico as conferencia
+    devolucoes.salvar([_registro(id_externo="C9", codigos=["C9"])])
+    dev_id = next(d["id"] for d in cliente.get("/api/central/devolucoes").json() if d["id_externo"] == "C9")
+    up = cliente.post(f"/api/central/conferencia/{dev_id}/evidencias", files={"arquivo": ("x.png", b"PNG fake", "image/png")}).json()
+    arquivo = conferencia.arquivo_evidencia(up["id"])
+    assert arquivo.exists()
+    assert conferencia.limpar_evidencias(dev_id) == 1
+    assert not arquivo.exists()
+    assert cliente.get(f"/api/central/conferencia/evidencias/{up['id']}").status_code == 404
+
+
 def test_envio_a_caminho():
     from app.central.operacao.regras import envio
     ml = lambda st: {"devolucao": {"status": st}}  # noqa: E731

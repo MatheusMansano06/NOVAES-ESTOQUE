@@ -10,7 +10,10 @@ import { Evidencias } from "./Evidencias";
 import { CULPA, type Midia, type Tela } from "./tipos";
 import { Veredito } from "./Veredito";
 
-const PASSOS = ["Conferir", "Fotos e vídeo", "Resultado e ações"] as const;
+const PASSOS = ["Conferir", "Fotos e vídeo", "Estoque e NF na Olist", "Aceitar ou contestar"] as const;
+
+/** Já conferida reabre no passo da Olist; se o estoque já foi lançado, pula direto para a decisão na plataforma. */
+const passoInicial = (t?: Tela) => (!t?.conferencia ? 0 : t.conferencia.estoque_lancado_em ? 3 : 2);
 
 /** QR da etiqueta amarela do Full: id da triagem (13 dígitos), que a API do ML não expõe. */
 const ETIQUETA_TRIAGEM = /^\d{13}$/;
@@ -108,7 +111,7 @@ export function ConferenciaModal({ codigo, onFechar, onMudou }: Props) {
     try {
       const r = await api.get<Tela[]>(`/conferencia/${encodeURIComponent(codigo)}`);
       setTelas(r);
-      if (inicial && r[0]?.conferencia) setPasso(2); // já conferida: abre no resultado
+      if (inicial && r[0]?.conferencia) setPasso(passoInicial(r[0]));
     } catch (e) {
       setErro((e as Error).message);
     }
@@ -122,7 +125,7 @@ export function ConferenciaModal({ codigo, onFechar, onMudou }: Props) {
     try {
       const r = await api.get<Tela[]>(`/conferencia/${encodeURIComponent(pedido)}?etiqueta=${encodeURIComponent(codigo)}`);
       if (!r.length) setErro(`Nada encontrado para ${pedido} também. Aguarde a próxima sincronização.`);
-      else { setTelas(r); setPasso(r[0].conferencia ? 2 : 0); onMudou(); }
+      else { setTelas(r); setPasso(passoInicial(r[0])); onMudou(); }
     } catch (e) {
       setErro((e as Error).message);
     }
@@ -167,7 +170,7 @@ export function ConferenciaModal({ codigo, onFechar, onMudou }: Props) {
             <div className="segmentos" role="tablist" aria-label="Devoluções com este código">
               {telas.map((t, i) => (
                 <button key={t.devolucao.id} role="tab" aria-selected={i === escolhida}
-                        onClick={() => { setEscolhida(i); setPasso(t.conferencia ? 2 : 0); }}>
+                        onClick={() => { setEscolhida(i); setPasso(passoInicial(t)); }}>
                   {PLATAFORMA[t.devolucao.plataforma]} {t.devolucao.id_externo}
                 </button>
               ))}
@@ -214,7 +217,7 @@ export function ConferenciaModal({ codigo, onFechar, onMudou }: Props) {
                 {PASSOS.map((p, i) => (
                   <li key={p}>
                     <button type="button" aria-current={passo === i ? "step" : undefined}
-                            className={i < passo || (i === 2 && conferida) ? "feito" : ""}
+                            className={i < passo ? "feito" : ""}
                             disabled={i > 0 && !conferida} onClick={() => setPasso(i)}>
                       <span className="stepper-n">{i + 1}</span>{p}
                     </button>
@@ -232,11 +235,19 @@ export function ConferenciaModal({ codigo, onFechar, onMudou }: Props) {
                                 exigidas={tela.conferencia?.evidencias_exigidas ?? []} onEnviada={atualizar} />
                     <div className="passo-rodape">
                       <button type="button" className="botao" onClick={() => setPasso(0)}>Voltar</button>
-                      <button type="button" className="botao principal" onClick={() => setPasso(2)}>Ver resultado</button>
+                      <button type="button" className="botao principal" onClick={() => setPasso(2)}>Continuar</button>
                     </div>
                   </>
                 )}
-                {passo === 2 && <Veredito tela={tela} onAtualizar={atualizar} onIrParaProvas={() => setPasso(1)} />}
+                {passo >= 2 && (
+                  <>
+                    <Veredito tela={tela} onAtualizar={atualizar} onIrParaProvas={() => setPasso(1)} parte={passo === 2 ? "olist" : "plataforma"} />
+                    <div className="passo-rodape">
+                      <button type="button" className="botao" onClick={() => setPasso(passo - 1)}>Voltar</button>
+                      {passo === 2 && <button type="button" className="botao principal" onClick={() => setPasso(3)}>Próximo: aceitar ou contestar</button>}
+                    </div>
+                  </>
+                )}
               </div>
             </section>
           </div>

@@ -26,6 +26,7 @@ TIPOS = {  # content-type aceito → (tipo, extensão). Nome do arquivo do usuá
     "video/mp4": ("video", ".mp4"), "video/webm": ("video", ".webm"), "video/quicktime": ("video", ".mov"),
 }
 LIMITE = {"foto": 15 * 2**20, "video": 200 * 2**20}
+DIAS_GUARDA = 30
 CAMPOS = ("sku_recebido", "produto_correto", "completo", "sem_uso", "revendavel", "erro_nosso", "observacao")
 
 
@@ -247,7 +248,9 @@ def registrar_chamado_aberto(devolucao_id: int, protocolo: str | None, observaca
         conf.chamado_aberto_em, conf.chamado_protocolo = _agora(), protocolo
         if observacao:
             conf.observacao = f"{conf.observacao or ''}\n[chamado] {observacao}".strip()
-        return {"chamado_aberto_em": conf.chamado_aberto_em, "chamado_protocolo": protocolo}
+        resposta = {"chamado_aberto_em": conf.chamado_aberto_em, "chamado_protocolo": protocolo}
+    limpar_evidencias(devolucao_id)  # chamado aberto: as fotos já foram anexadas no painel da plataforma
+    return resposta
 
 
 def registrar(devolucao_id: int, dados: dict) -> dict:
@@ -380,7 +383,24 @@ def salvar_evidencia(devolucao_id: int, content_type: str, conteudo: BinaryIO) -
         ev = Evidencia(devolucao_id=devolucao_id, tipo=tipo, arquivo=nome, tamanho=tamanho, enviada_em=_agora())
         s.add(ev)
         s.flush()
-        return _colunas(ev)
+        resposta = _colunas(ev)
+    limpar_evidencias(dias=DIAS_GUARDA)  # varredura barata: devolução parada há mais que isso não vai mais a disputa
+    return resposta
+
+
+def limpar_evidencias(devolucao_id: int | None = None, dias: int | None = None) -> int:
+    """Apaga arquivo e linha. A foto só serve até a plataforma receber a prova; depois disso só ocupa disco."""
+    with Sessao.begin() as s:
+        q = select(Evidencia)
+        if devolucao_id is not None:
+            q = q.filter_by(devolucao_id=devolucao_id)
+        if dias is not None:
+            q = q.where(Evidencia.enviada_em < _agora() - timedelta(days=dias))
+        evs = s.scalars(q).all()
+        for e in evs:
+            (PASTA / str(e.devolucao_id) / e.arquivo).unlink(missing_ok=True)
+            s.delete(e)
+        return len(evs)
 
 
 def arquivo_evidencia(evidencia_id: int) -> Path:

@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 from sqlalchemy import select
 
 from app.central.conferencia.modelo import Conferencia, Evidencia
-from app.central.conferencia.servico import PASTA, Travada
+from app.central.conferencia.servico import PASTA, Travada, limpar_evidencias
 from app.central.devolucoes.modelo import Devolucao
 from app.central.mercado_livre import acoes as mercado_livre
 from app.central.shopee import acoes as shopee
@@ -66,7 +66,10 @@ def contestar(devolucao_id: int, motivo: str, texto: str) -> dict:
     with Sessao.begin() as s:
         s.add(registro)
         s.flush()
-        return {c.name: getattr(registro, c.name) for c in Contestacao.__table__.columns}
+        resposta = {c.name: getattr(registro, c.name) for c in Contestacao.__table__.columns}
+    if resposta["ok"]:
+        limpar_evidencias(devolucao_id)  # a plataforma já recebeu as fotos
+    return resposta
 
 
 def aceitar(devolucao_id: int) -> dict:
@@ -88,7 +91,10 @@ def aceitar(devolucao_id: int) -> dict:
     with Sessao.begin() as s:
         s.add(registro)
         s.flush()
-        return {c.name: getattr(registro, c.name) for c in Contestacao.__table__.columns}
+        resposta = {c.name: getattr(registro, c.name) for c in Contestacao.__table__.columns}
+    if resposta["ok"]:
+        limpar_evidencias(devolucao_id)  # aceitou: não há mais disputa, a foto não serve a ninguém
+    return resposta
 
 
 def historico(devolucao_id: int) -> list[dict]:

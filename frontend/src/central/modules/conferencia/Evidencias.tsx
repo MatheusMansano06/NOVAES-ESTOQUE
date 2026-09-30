@@ -10,17 +10,38 @@ interface Props {
   onEnviada: () => void;
 }
 
+/** Foto de celular pesa 3-8 MB; para prova de disputa 1600px em JPEG 75% basta e fica em ~250 KB. */
+async function reduzir(f: File): Promise<File> {
+  if (!f.type.startsWith("image/")) return f;
+  try {
+    const img = await createImageBitmap(f);
+    const k = Math.min(1, 1600 / Math.max(img.width, img.height));
+    const tela = document.createElement("canvas");
+    tela.width = Math.round(img.width * k);
+    tela.height = Math.round(img.height * k);
+    tela.getContext("2d")!.drawImage(img, 0, 0, tela.width, tela.height);
+    const b = await new Promise<Blob | null>((ok) => tela.toBlob(ok, "image/jpeg", 0.75));
+    return b && b.size < f.size ? new File([b], "foto.jpg", { type: "image/jpeg" }) : f;
+  } catch {
+    return f; // formato que o navegador não decodifica: sobe o original
+  }
+}
+
 /** Celular: câmera nativa pelo input. Computador: webcam ao vivo para foto e vídeo. */
 export function Evidencias({ devolucaoId, evidencias, exigidas, onEnviada }: Props) {
   const [erro, setErro] = useState<string | null>(null);
   const [enviando, setEnviando] = useState(false);
   const [webcam, setWebcam] = useState(false);
+  const [feito, setFeito] = useState<string | null>(null);
 
-  async function enviar(arquivo: File) {
+  async function enviar(original: File) {
     setErro(null);
+    setFeito(null);
     setEnviando(true);
     try {
+      const arquivo = await reduzir(original);
       await api.enviarArquivo(`/conferencia/${devolucaoId}/evidencias`, arquivo);
+      setFeito(arquivo.type.startsWith("video/") ? "Vídeo gravado" : "Foto tirada");
       onEnviada();
     } catch (e) {
       setErro((e as Error).message);
@@ -56,6 +77,7 @@ export function Evidencias({ devolucaoId, evidencias, exigidas, onEnviada }: Pro
         <button type="button" className="botao" onClick={() => setWebcam(true)}>Usar webcam</button>
       </div>
       {enviando && <p className="sub">Enviando arquivo…</p>}
+      {feito && !enviando && <p className="aviso ok" role="status">✓ {feito}. Pode tirar outra se precisar.</p>}
       {erro && <p className="aviso erro" role="alert">{erro}</p>}
       {evidencias.length > 0 && (
         <ul className="miniaturas">
@@ -70,12 +92,13 @@ export function Evidencias({ devolucaoId, evidencias, exigidas, onEnviada }: Pro
           ))}
         </ul>
       )}
-      {webcam && <Webcam onFechar={() => setWebcam(false)} onCapturar={enviar} />}
+      {webcam && <Webcam onFechar={() => setWebcam(false)} onCapturar={enviar} enviando={enviando} feito={feito} total={evidencias.length} />}
     </section>
   );
 }
 
-function Webcam({ onFechar, onCapturar }: { onFechar: () => void; onCapturar: (f: File) => Promise<void> }) {
+function Webcam({ onFechar, onCapturar, enviando, feito, total }:
+  { onFechar: () => void; onCapturar: (f: File) => Promise<void>; enviando: boolean; feito: string | null; total: number }) {
   const video = useRef<HTMLVideoElement>(null);
   const fluxo = useRef<MediaStream | null>(null);
   const gravador = useRef<MediaRecorder | null>(null);
@@ -132,8 +155,11 @@ function Webcam({ onFechar, onCapturar }: { onFechar: () => void; onCapturar: (f
     <div className="webcam" role="dialog" aria-modal="true" aria-label="Webcam">
       <div className="webcam-caixa">
         {erro ? <p className="aviso erro" role="alert">{erro}</p> : <video ref={video} autoPlay playsInline muted />}
+        <p className={enviando ? "sub" : feito ? "aviso ok" : "sub"} role="status">
+          {enviando ? "Enviando…" : feito ? `✓ ${feito}. ${total} no total.` : "Enquadre o produto e tire a foto."}
+        </p>
         <div className="acoes-evidencia">
-          <button type="button" className="botao principal" onClick={foto} disabled={!!erro || gravando}>Tirar foto</button>
+          <button type="button" className="botao principal" onClick={foto} disabled={!!erro || gravando || enviando}>{enviando ? "Enviando…" : "Tirar foto"}</button>
           <button type="button" className={gravando ? "botao alerta" : "botao"} onClick={alternarGravacao} disabled={!!erro}>
             {gravando ? "Parar e enviar vídeo" : "Gravar vídeo"}
           </button>
