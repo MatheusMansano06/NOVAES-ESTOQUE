@@ -20,6 +20,7 @@ export function Veredito({ tela, onAtualizar, onIrParaProvas, parte }: Props) {
   const resultado = c.estoque_resultado ?? [];
   const temFoto = evidencias.some((e) => e.tipo === "foto");
   const prejuizo = (c.frete_reverso ?? 0) + (c.perda_produto ?? 0);
+  const pendente = d.plataforma === "shopee" ? SHOPEE_PENDENTE.includes(d.status_plataforma) : !!d.aguarda_revisao;
 
   return (
     <div className={`veredito classe-${c.classe}`}>
@@ -71,8 +72,8 @@ export function Veredito({ tela, onAtualizar, onIrParaProvas, parte }: Props) {
           {c.chamado_manual
             ? <ChamadoManual devolucaoId={d.id} abertoEm={c.chamado_aberto_em} protocolo={c.chamado_protocolo} onFeito={onAtualizar} />
             : c.contestar
-              ? <Contestar devolucaoId={d.id} textoInicial={c.observacao ?? ""} temFoto={temFoto} podeAceitar={d.plataforma === "shopee" && SHOPEE_PENDENTE.includes(d.status_plataforma)} onMudou={onAtualizar} />
-              : d.plataforma === "shopee" && <AceitarSozinho devolucaoId={d.id} pendente={SHOPEE_PENDENTE.includes(d.status_plataforma)} onMudou={onAtualizar} />}
+              ? <Contestar devolucaoId={d.id} textoInicial={c.observacao ?? ""} temFoto={temFoto} podeAceitar={pendente} onMudou={onAtualizar} />
+              : <AceitarSozinho devolucaoId={d.id} plataforma={d.plataforma} pendente={pendente} onMudou={onAtualizar} />}
         </section>}
       </div>
     </div>
@@ -228,7 +229,8 @@ function BotaoAceitar({ devolucaoId, onResultado }: { devolucaoId: number; onRes
 // Só nesses status a Shopee aceita o "confirm"; depois disso a devolução já foi aceita ou encerrada por lá.
 const SHOPEE_PENDENTE = ["REQUESTED", "PROCESSING"];
 
-function AceitarSozinho({ devolucaoId, pendente, onMudou }: { devolucaoId: number; pendente: boolean; onMudou: () => void }) {
+function AceitarSozinho({ devolucaoId, plataforma, pendente, onMudou }:
+  { devolucaoId: number; plataforma: string; pendente: boolean; onMudou: () => void }) {
   const [historico, setHistorico] = useState<Contestacao[]>([]);
   useEffect(() => {
     let ativo = true;
@@ -237,7 +239,7 @@ function AceitarSozinho({ devolucaoId, pendente, onMudou }: { devolucaoId: numbe
   }, [devolucaoId]);
   const feito = historico.find((h) => h.ok);
   if (feito) return resultadoEnviado(feito);
-  if (!pendente) return <p className="aviso ok">Na Shopee esta devolução não está mais pendente de aceite: nada a fazer aqui.</p>;
+  if (!pendente) return <p className="aviso ok">Na {PLATAFORMA[plataforma]} esta devolução não está pendente de aceite: nada a fazer aqui.</p>;
   const ultimo = historico[historico.length - 1];
   return (
     <div className="linha-botoes">

@@ -223,6 +223,10 @@ async def mediacoes_contestar(request: Request):
     return await run_in_threadpool(mediacoes.contestar, _id(request), motivo, texto)
 
 
+async def mediacoes_pendentes_revisao(request: Request):
+    return await run_in_threadpool(mediacoes.pendentes_revisao)
+
+
 async def mediacoes_historico(request: Request):
     return await run_in_threadpool(mediacoes.historico, _id(request))
 
@@ -454,6 +458,7 @@ rotas = [
     _rota("/shopee/disputa/{return_sn}", shopee_campos_disputa),
     _rota("/mediacoes/{id:int}/contestar", mediacoes_contestar, "POST"),
     _rota("/mediacoes/{id:int}/aceitar", mediacoes_aceitar, "POST"),
+    _rota("/mediacoes/pendentes-revisao", mediacoes_pendentes_revisao),
     _rota("/mediacoes/{id:int}", mediacoes_historico),
     _rota("/mercado-livre/sincronizar", ml_sincronizar, "POST"),
     _rota("/shopee/sincronizar", shopee_sincronizar, "POST"),

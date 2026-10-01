@@ -7,6 +7,7 @@ from sqlalchemy import select
 from app.central.conferencia.modelo import Conferencia, Evidencia
 from app.central.conferencia.servico import PASTA, Travada, limpar_evidencias
 from app.central.devolucoes.modelo import Devolucao
+from app.central.devolucoes.servico import publico
 from app.central.mercado_livre import acoes as mercado_livre
 from app.central.shopee import acoes as shopee
 from app.central.db import Sessao
@@ -101,3 +102,15 @@ def historico(devolucao_id: int) -> list[dict]:
     with Sessao() as s:
         return [{c.name: getattr(x, c.name) for c in Contestacao.__table__.columns}
                 for x in s.scalars(select(Contestacao).filter_by(devolucao_id=devolucao_id).order_by(Contestacao.id))]
+
+
+def pendentes_revisao() -> list[dict]:
+    """Conferidas aqui, mas com o "Já revisei" ainda aberto no ML e nada enviado pela Central."""
+    with Sessao() as s:
+        feitas = set(s.scalars(select(Contestacao.devolucao_id).filter_by(ok=True)))
+        linhas = s.execute(select(Devolucao, Conferencia).join(Conferencia, Conferencia.devolucao_id == Devolucao.id)
+                           .where(Devolucao.plataforma == "mercado_livre")).all()
+        return [{"id": d.id, "pedido": d.pedido, "classe": c.classe, "contestar": c.contestar,
+                 "chamado_manual": c.chamado_manual, "motivo": c.motivo,
+                 "prazo_vendedor": d.prazo_vendedor, "conferida_em": c.conferida_em}
+                for d, c in linhas if d.id not in feitas and publico(d)["aguarda_revisao"]]
