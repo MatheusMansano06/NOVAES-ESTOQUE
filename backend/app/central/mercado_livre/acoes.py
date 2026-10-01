@@ -18,8 +18,19 @@ def _acoes_do_vendedor(claim_id: str) -> set[str]:
             for a in p.get("available_actions") or []}
 
 
+_MEDIACAO = {"open_dispute", "send_message_to_mediator"}
+_REVISAO_FALHA = {"return_review_fail", "return_review_unified_fail"}
+_REVISAO_OK = {"return_review_ok", "return_review_unified_ok"}
+
+
+def _por_revisao(acoes: set[str], produto_perfeito: bool) -> bool:
+    """Revisão com falha ("Reportar um problema") quando o produto tem problema, ou quando é a única porta aberta:
+    reclamação em "Já revisei" não libera mediação direta, mas o relato sai pela revisão."""
+    return bool(acoes & _REVISAO_FALHA) and (not produto_perfeito or not acoes & _MEDIACAO)
+
+
 def motivos_contestacao(claim_id: str, produto_perfeito: bool) -> list[dict]:
-    if produto_perfeito:
+    if produto_perfeito and _acoes_do_vendedor(claim_id) & _MEDIACAO:
         return []  # a queixa é contra a reclamação, não contra o produto: vai para a mediação só com relato e fotos
     motivos = client.get("/post-purchase/v1/returns/reasons", {"flow": "seller_return_failed", "claim_id": claim_id}) or []
     return [{"id": m["id"], "texto": m["detail"]} for m in motivos]
@@ -37,14 +48,14 @@ def contestar(claim_id: str, motivo: str, texto: str, fotos: list[Path], videos:
     acoes = _acoes_do_vendedor(claim_id)
     aviso = "Vídeos não são enviados pela API do ML: anexe pelo painel se precisar." if videos else None
 
-    if "return_review_fail" in acoes and not produto_perfeito:
+    if _por_revisao(acoes, produto_perfeito):
         devolucao = client.get(f"/post-purchase/v2/claims/{claim_id}/returns")
         nomes = [_anexar(f"/post-purchase/v1/claims/{claim_id}/returns/attachments", f, "file_name") for f in fotos]
         client.post(f"/post-purchase/v1/returns/{devolucao['id']}/return-review",
                     json=[{"reason": motivo, "message": texto, "attachments": nomes}])
         return {"caminho": "revisao_com_falha", "anexos": nomes, "aviso": aviso}
 
-    if "open_dispute" in acoes or "send_message_to_mediator" in acoes:
+    if acoes & _MEDIACAO:
         if "open_dispute" in acoes:
             client.post(f"/post-purchase/v1/claims/{claim_id}/actions/open-dispute")
         nomes = [_anexar(f"/post-purchase/v1/claims/{claim_id}/attachments", f, "filename") for f in fotos]
@@ -54,3 +65,12 @@ def contestar(claim_id: str, motivo: str, texto: str, fotos: list[Path], videos:
         return {"caminho": "mediacao", "anexos": nomes, "aviso": aviso}
 
     raise RuntimeError(f"O ML não libera contestação nesta reclamação agora (ações: {sorted(acoes) or 'nenhuma'}).")
+
+
+def aceitar(claim_id: str) -> dict:
+    """"Chegou como esperado" no painel: revisão OK (corpo vazio), o ML finaliza e reembolsa o comprador."""
+    if not _acoes_do_vendedor(claim_id) & _REVISAO_OK:
+        raise RuntimeError("O ML não libera o aceite desta reclamação agora: aceite pelo painel.")
+    devolucao = client.get(f"/post-purchase/v2/claims/{claim_id}/returns")
+    client.post(f"/post-purchase/v1/returns/{devolucao['id']}/return-review", json={})
+    return {"caminho": "aceite", "anexos": []}
