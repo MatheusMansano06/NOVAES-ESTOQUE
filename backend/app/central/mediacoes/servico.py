@@ -58,10 +58,16 @@ def contestar(devolucao_id: int, motivo: str, texto: str) -> dict:
         plataforma, id_externo, perfeito = d.plataforma, d.id_externo, conf.classe == "A"
     if not fotos:
         raise ValueError("Anexe ao menos uma foto do produto e da embalagem antes de contestar.")
+    modulo = PLATAFORMAS[plataforma]
+    oficiais = {str(m["id"]): m["texto"] for m in modulo.motivos_contestacao(id_externo, perfeito)}
+    if oficiais and str(motivo) not in oficiais:
+        raise ValueError("Escolha um dos motivos oficiais da plataforma antes de contestar.")
+    motivo_texto = oficiais.get(str(motivo), "")
 
     registro = Contestacao(devolucao_id=devolucao_id, motivo=str(motivo), texto=texto, anexos=[], enviada_em=_agora())
     try:
-        r = PLATAFORMAS[plataforma].contestar(id_externo, motivo, texto, fotos, videos, perfeito)
+        extra = {"motivo_texto": motivo_texto} if plataforma == "mercado_livre" else {}
+        r = modulo.contestar(id_externo, motivo, texto, fotos, videos, perfeito, **extra)
         registro.ok, registro.caminho, registro.anexos, registro.aviso = True, r["caminho"], r["anexos"], r.get("aviso")
     except RuntimeError as e:
         registro.ok, registro.erro = False, str(e)

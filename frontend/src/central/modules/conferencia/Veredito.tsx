@@ -199,10 +199,20 @@ function ChamadoManual({ devolucaoId, abertoEm, protocolo, onFeito }:
   );
 }
 
-function resultadoEnviado(r: Contestacao) {
+type Motivo = { id: string; texto: string; exigencia?: string };
+
+/** O que o operador mandou: motivo oficial (pelo nome, quando a lista da plataforma está à mão) e o texto. */
+function OQueOperadorDisse({ r, motivos }: { r: Contestacao; motivos?: Motivo[] | null }) {
+  if (r.caminho === "aceite" || (!r.motivo && !r.texto)) return null;
+  const nome = r.motivo ? motivos?.find((m) => String(m.id) === r.motivo)?.texto ?? r.motivo : "sem motivo oficial";
+  return <p className="sub"><strong>Motivo:</strong> {nome}. <strong>Texto do operador:</strong> “{r.texto}”</p>;
+}
+
+function resultadoEnviado(r: Contestacao, motivos?: Motivo[] | null) {
   return r.caminho === "aceite"
     ? <p className="aviso ok">{r.aviso ?? `Devolução aceita em ${quando(r.enviada_em)}. A plataforma reembolsa o comprador.`}</p>
-    : <p className="aviso ok">Disputa aberta em {quando(r.enviada_em)}.{r.aviso ? ` ${r.aviso}` : ""}</p>;
+    : <><p className="aviso ok">Disputa aberta em {quando(r.enviada_em)}.{r.aviso ? ` ${r.aviso}` : ""}</p>
+        <OQueOperadorDisse r={r} motivos={motivos} /></>;
 }
 
 // Aceitar = reembolsar o comprador na plataforma. Irreversível: confirma antes.
@@ -251,7 +261,7 @@ function AceitarSozinho({ devolucaoId, plataforma, pendente, onMudou }:
 
 function Contestar({ devolucaoId, textoInicial, temFoto, podeAceitar, onMudou }:
   { devolucaoId: number; textoInicial: string; temFoto: boolean; podeAceitar: boolean; onMudou: () => void }) {
-  const [motivos, setMotivos] = useState<{ id: string; texto: string; exigencia?: string }[] | null>(null);
+  const [motivos, setMotivos] = useState<Motivo[] | null>(null);
   const [historico, setHistorico] = useState<Contestacao[]>([]);
   const [motivo, setMotivo] = useState("");
   const [texto, setTexto] = useState(textoInicial);
@@ -261,15 +271,16 @@ function Contestar({ devolucaoId, textoInicial, temFoto, podeAceitar, onMudou }:
   useEffect(() => {
     let ativo = true;
     api.get<Contestacao[]>(`/mediacoes/${devolucaoId}`).then((h) => ativo && setHistorico(h)).catch(() => {});
-    api.get<{ id: string; texto: string }[]>(`/mediacoes/${devolucaoId}/motivos`)
+    api.get<Motivo[]>(`/mediacoes/${devolucaoId}/motivos`)
       .then((m) => ativo && setMotivos(m))
       .catch((e) => ativo && setErro(`Não consegui buscar os motivos da plataforma: ${(e as Error).message}`));
     return () => { ativo = false; };
   }, [devolucaoId]);
 
   const enviada = historico.find((h) => h.ok);
-  if (enviada) return resultadoEnviado(enviada);
+  if (enviada) return resultadoEnviado(enviada, motivos);
   const falhou = historico.length > 0;
+  const tentativa = historico[historico.length - 1];
 
   async function enviar() {
     if (!window.confirm("Enviar a contestação para a plataforma agora? Depois de enviada não dá para desfazer.")) return;
@@ -292,16 +303,17 @@ function Contestar({ devolucaoId, textoInicial, temFoto, podeAceitar, onMudou }:
     onMudou();
   }
 
-  // Lista vazia = a plataforma não pede motivo aqui (ML com produto perfeito: vai direto à mediação).
+  // Lista vazia = a plataforma não tem motivo oficial para este caso; havendo lista, escolher é obrigatório.
   const semMotivo = motivos?.length === 0;
   const pronto = motivos && (semMotivo || motivo) && texto.trim().length >= 10 && temFoto;
   return (
     <div className="contestar">
+      {tentativa && <><p className="sub">Tentativa anterior (não passou):</p><OQueOperadorDisse r={tentativa} motivos={motivos} /></>}
       {semMotivo ? (
         <p className="sub">Vai para a mediação: explique que o produto voltou exatamente como foi enviado.</p>
       ) : (
         <label className="campo">
-          <span>Motivo oficial</span>
+          <span>Motivo oficial (obrigatório)</span>
           <select value={motivo} onChange={(e) => setMotivo(e.target.value)} disabled={!motivos}>
             <option value="">{motivos ? "Escolha o motivo" : "Carregando motivos…"}</option>
             {motivos?.map((m) => <option key={m.id} value={m.id}>{m.texto}{m.exigencia ? " (pede provas)" : ""}</option>)}
@@ -312,7 +324,7 @@ function Contestar({ devolucaoId, textoInicial, temFoto, podeAceitar, onMudou }:
         <p className="sub">{motivos.find((m) => String(m.id) === motivo)!.exigencia}</p>
       )}
       <label className="campo">
-        <span>O que aconteceu (vai para a plataforma)</span>
+        <span>O que aconteceu (obrigatório, mín. 10 letras; vai para a plataforma)</span>
         <textarea value={texto} onChange={(e) => setTexto(e.target.value)} rows={3} maxLength={2000} />
       </label>
       <div className="linha-botoes">

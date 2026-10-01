@@ -30,8 +30,7 @@ def _por_revisao(acoes: set[str], produto_perfeito: bool) -> bool:
 
 
 def motivos_contestacao(claim_id: str, produto_perfeito: bool) -> list[dict]:
-    if produto_perfeito and acoes_vendedor(claim_id) & _MEDIACAO:
-        return []  # a queixa é contra a reclamação, não contra o produto: vai para a mediação só com relato e fotos
+    """Sempre a lista oficial do ML ("Reportar um problema"): o operador escolhe, também quando vai à mediação."""
     motivos = client.get("/post-purchase/v1/returns/reasons", {"flow": "seller_return_failed", "claim_id": claim_id}) or []
     return [{"id": m["id"], "texto": m["detail"]} for m in motivos]
 
@@ -42,7 +41,7 @@ def _anexar(path: str, arquivo: Path, campo: str) -> str:
 
 
 def contestar(claim_id: str, motivo: str, texto: str, fotos: list[Path], videos: list[Path],
-              produto_perfeito: bool) -> dict:
+              produto_perfeito: bool, motivo_texto: str = "") -> dict:
     """Produto com problema → revisão com falha (motivo SRF), quando o ML libera. Produto perfeito com a
     Novaes culpada → mediação, contestando a reclamação. As ações liberadas mudam com o tempo: lidas na hora."""
     acoes = acoes_vendedor(claim_id)
@@ -60,7 +59,7 @@ def contestar(claim_id: str, motivo: str, texto: str, fotos: list[Path], videos:
             client.post(f"/post-purchase/v1/claims/{claim_id}/actions/open-dispute")
         nomes = [_anexar(f"/post-purchase/v1/claims/{claim_id}/attachments", f, "filename") for f in fotos]
         client.post(f"/post-purchase/v1/claims/{claim_id}/actions/send-message",
-                    json={"receiver_role": "mediator", "message": f"[{motivo}] {texto}" if motivo else texto,
+                    json={"receiver_role": "mediator", "message": f"[{motivo_texto}] {texto}" if motivo_texto else texto,
                           "attachments": nomes})
         return {"caminho": "mediacao", "anexos": nomes, "aviso": aviso}
 
