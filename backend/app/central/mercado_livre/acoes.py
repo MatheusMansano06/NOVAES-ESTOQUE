@@ -12,7 +12,7 @@ def pedido_do_envio(shipment_id: str) -> str | None:
     return str(envio["order_id"]) if envio.get("order_id") else None
 
 
-def _acoes_do_vendedor(claim_id: str) -> set[str]:
+def acoes_vendedor(claim_id: str) -> set[str]:
     claim = client.get(f"/post-purchase/v1/claims/{claim_id}") or {}
     return {a["action"] for p in claim.get("players") or [] if p["type"] == "seller"
             for a in p.get("available_actions") or []}
@@ -20,7 +20,7 @@ def _acoes_do_vendedor(claim_id: str) -> set[str]:
 
 _MEDIACAO = {"open_dispute", "send_message_to_mediator"}
 _REVISAO_FALHA = {"return_review_fail", "return_review_unified_fail"}
-_REVISAO_OK = {"return_review_ok", "return_review_unified_ok"}
+REVISAO_OK = {"return_review_ok", "return_review_unified_ok"}
 
 
 def _por_revisao(acoes: set[str], produto_perfeito: bool) -> bool:
@@ -30,7 +30,7 @@ def _por_revisao(acoes: set[str], produto_perfeito: bool) -> bool:
 
 
 def motivos_contestacao(claim_id: str, produto_perfeito: bool) -> list[dict]:
-    if produto_perfeito and _acoes_do_vendedor(claim_id) & _MEDIACAO:
+    if produto_perfeito and acoes_vendedor(claim_id) & _MEDIACAO:
         return []  # a queixa é contra a reclamação, não contra o produto: vai para a mediação só com relato e fotos
     motivos = client.get("/post-purchase/v1/returns/reasons", {"flow": "seller_return_failed", "claim_id": claim_id}) or []
     return [{"id": m["id"], "texto": m["detail"]} for m in motivos]
@@ -45,7 +45,7 @@ def contestar(claim_id: str, motivo: str, texto: str, fotos: list[Path], videos:
               produto_perfeito: bool) -> dict:
     """Produto com problema → revisão com falha (motivo SRF), quando o ML libera. Produto perfeito com a
     Novaes culpada → mediação, contestando a reclamação. As ações liberadas mudam com o tempo: lidas na hora."""
-    acoes = _acoes_do_vendedor(claim_id)
+    acoes = acoes_vendedor(claim_id)
     aviso = "Vídeos não são enviados pela API do ML: anexe pelo painel se precisar." if videos else None
 
     if _por_revisao(acoes, produto_perfeito):
@@ -69,7 +69,7 @@ def contestar(claim_id: str, motivo: str, texto: str, fotos: list[Path], videos:
 
 def aceitar(claim_id: str) -> dict:
     """"Chegou como esperado" no painel: revisão OK (corpo vazio), o ML finaliza e reembolsa o comprador."""
-    if not _acoes_do_vendedor(claim_id) & _REVISAO_OK:
+    if not acoes_vendedor(claim_id) & REVISAO_OK:
         raise RuntimeError("O ML não libera o aceite desta reclamação agora: aceite pelo painel.")
     devolucao = client.get(f"/post-purchase/v2/claims/{claim_id}/returns")
     client.post(f"/post-purchase/v1/returns/{devolucao['id']}/return-review", json={})

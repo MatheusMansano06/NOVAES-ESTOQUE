@@ -1,6 +1,7 @@
 """Contestação guiada: escolhe a plataforma, envia texto + evidências da conferência e guarda o histórico."""
 
-from datetime import datetime, timezone
+from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import select
 
@@ -104,13 +105,30 @@ def historico(devolucao_id: int) -> list[dict]:
                 for x in s.scalars(select(Contestacao).filter_by(devolucao_id=devolucao_id).order_by(Contestacao.id))]
 
 
-def pendentes_revisao() -> list[dict]:
-    """Conferidas aqui, mas com o "Já revisei" ainda aberto no ML e nada enviado pela Central."""
+def pendentes_revisao(ao_vivo: bool = False, dias: int = 30) -> list[dict]:
+    """Conferidas aqui, mas com o "Já revisei" ainda aberto no ML e nada enviado pela Central.
+    `ao_vivo`: pergunta ao ML reclamação por reclamação, em vez de confiar na última sincronização."""
+    desde = _agora() - timedelta(days=dias)
     with Sessao() as s:
         feitas = set(s.scalars(select(Contestacao.devolucao_id).filter_by(ok=True)))
         linhas = s.execute(select(Devolucao, Conferencia).join(Conferencia, Conferencia.devolucao_id == Devolucao.id)
-                           .where(Devolucao.plataforma == "mercado_livre")).all()
-        return [{"id": d.id, "pedido": d.pedido, "classe": c.classe, "contestar": c.contestar,
-                 "chamado_manual": c.chamado_manual, "motivo": c.motivo,
-                 "prazo_vendedor": d.prazo_vendedor, "conferida_em": c.conferida_em}
-                for d, c in linhas if d.id not in feitas and publico(d)["aguarda_revisao"]]
+                           .where(Devolucao.plataforma == "mercado_livre", Conferencia.conferida_em >= desde)).all()
+        candidatos = [{"id": d.id, "id_externo": d.id_externo, "pedido": d.pedido, "classe": c.classe,
+                       "contestar": c.contestar, "chamado_manual": c.chamado_manual, "motivo": c.motivo,
+                       "prazo_vendedor": d.prazo_vendedor, "conferida_em": c.conferida_em,
+                       "aguarda_revisao": publico(d)["aguarda_revisao"]}
+                      for d, c in linhas if d.id not in feitas and not d.id_externo.startswith("envio-")]
+    if not ao_vivo:
+        return [x for x in candidatos if x.pop("aguarda_revisao")]
+
+    def conferir(x: dict) -> dict:
+        x.pop("aguarda_revisao")
+        try:
+            x["acoes"] = sorted(mercado_livre.acoes_vendedor(x["id_externo"]))
+        except Exception as e:  # uma reclamação inacessível não derruba a varredura
+            x["acoes"], x["erro"] = [], f"{type(e).__name__}: {e}"[:200]
+        return x
+
+    with ThreadPoolExecutor(6) as pool:
+        vistos = list(pool.map(conferir, candidatos))
+    return [x for x in vistos if x.get("erro") or set(x["acoes"]) & mercado_livre.REVISAO_OK]

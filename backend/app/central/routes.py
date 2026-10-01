@@ -224,7 +224,8 @@ async def mediacoes_contestar(request: Request):
 
 
 async def mediacoes_pendentes_revisao(request: Request):
-    return await run_in_threadpool(mediacoes.pendentes_revisao)
+    return await run_in_threadpool(mediacoes.pendentes_revisao, _q(request, "ao_vivo", False, bool),
+                                   _q(request, "dias", 30, int, 1, 120))
 
 
 async def mediacoes_historico(request: Request):
