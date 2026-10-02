@@ -1111,10 +1111,14 @@ class OlistIntegration:
             return {"ncm_anterior": detalhe.get("ncm") or "", "ncm_novo": novo_ncm}
         return self._reenviar_produto(produto_id, ajustar, "NCM", max_retries)
 
-    def preencher_dimensoes_produto(self, produto_id: str, medidas: Dict, max_retries: int = 3) -> Dict:
-        """Preenche altura/largura/comprimento (cm) e peso bruto/líquido (kg) SÓ
-        onde o cadastro da Olist está vazio — nunca sobrescreve o que já existe.
-        Relê o cadastro na hora da escrita, então a decisão vale pro estado atual."""
+    def preencher_dimensoes_produto(self, produto_id: str, medidas: Dict, max_retries: int = 3,
+                                    sobrescrever: bool = False) -> Dict:
+        """Grava altura/largura/comprimento (cm) e peso bruto/líquido (kg) do ML.
+        Padrão: SÓ onde o cadastro da Olist está vazio. sobrescrever=True: troca
+        também o que já existe, mas só se divergir do ML (diverge_olist); o peso
+        líquido só muda se estiver vazio ou maior que o novo bruto.
+        Relê o cadastro na hora da escrita e devolve os valores anteriores."""
+        from app.utils.divergencia_dimensoes import diverge_olist
         novos = {
             "altura": medidas.get("altura"), "largura": medidas.get("largura"),
             "comprimento": medidas.get("comprimento"),
@@ -1123,11 +1127,20 @@ class OlistIntegration:
 
         def ajustar(body: Dict, detalhe: Dict) -> Optional[Dict]:
             dim = body["dimensoes"]
-            preenchidos = {k: v for k, v in novos.items() if v and not dim.get(k)}
+            if sobrescrever:
+                if not diverge_olist(dim, medidas):
+                    return None
+                preenchidos = {k: v for k, v in novos.items() if v and k != "pesoLiquido"}
+                liq = dim.get("pesoLiquido")
+                if novos["pesoLiquido"] and (not liq or liq > novos["pesoLiquido"]):
+                    preenchidos["pesoLiquido"] = novos["pesoLiquido"]
+            else:
+                preenchidos = {k: v for k, v in novos.items() if v and not dim.get(k)}
             if not preenchidos:
                 return None
+            anteriores = {k: dim.get(k) for k in preenchidos}
             dim.update(preenchidos)
-            return {"preenchidos": preenchidos}
+            return {"preenchidos": preenchidos, "anteriores": anteriores}
         return self._reenviar_produto(produto_id, ajustar, "dimensões", max_retries)
 
     def _reenviar_produto(self, produto_id: str, ajustar, rotulo: str, max_retries: int = 3) -> Dict:

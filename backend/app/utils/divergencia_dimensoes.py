@@ -99,7 +99,25 @@ def medidas_embalagem(attributes_json: Optional[str]) -> Optional[Dict[str, Any]
     return None
 
 
+def diverge_olist(dim_olist: Dict[str, Any], medidas: Dict[str, Any]) -> List[str]:
+    """Motivos pelos quais o cadastro Olist (cm/kg) difere da embalagem do ML.
+    Lados ordenados e mesma tolerância de comparar(); campo vazio na Olist diverge."""
+    lo = sorted(float(dim_olist.get(k) or 0) for k in ("altura", "largura", "comprimento"))
+    lm = sorted(float(medidas[k]) for k in ("altura", "largura", "comprimento"))
+    motivos = [nome for nome, x, y in zip(LADOS, lo, lm) if _difere(x, y, 1)]
+    pb, pm = float(dim_olist.get("pesoBruto") or 0), medidas.get("peso_kg")
+    if pm and _difere(pb, pm, 0.05):
+        motivos.append("peso")
+    return motivos
+
+
 if __name__ == "__main__":
+    ml = {"altura": 3.0, "largura": 9.8, "comprimento": 30.1, "peso_kg": 0.98}
+    assert diverge_olist({"altura": 1, "largura": 1, "comprimento": 1, "pesoBruto": 0.4}, ml) == list(LADOS) + ["peso"]
+    # Eixos trocados e diferença dentro da tolerância -> bate.
+    assert diverge_olist({"altura": 30, "largura": 3, "comprimento": 10, "pesoBruto": 1.0}, ml) == []
+    assert diverge_olist({"altura": 30, "largura": 3, "comprimento": 10, "pesoBruto": 0}, ml) == ["peso"]
+
     def attrs(pre, h, w, l, p):
         return [{"id": pre + k, "value_name": f"{v} x"} for k, v in (("HEIGHT", h), ("WIDTH", w), ("LENGTH", l), ("WEIGHT", p))]
 
