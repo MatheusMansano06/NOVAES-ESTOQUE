@@ -3001,6 +3001,27 @@ async def atualizar_data_limite_embale(request: Request):
         db.close()
 
 
+def _descartar_vinculo_memorizado_inativo(db, item) -> None:
+    """O upload copia o vínculo memorizado do SKU (VinculoOlist) sem saber se o
+    produto ainda existe; produto excluído/inativo na Olist seguia vinculado.
+    Na 1ª revisão confere a situação e, se não for ativo, apaga a memória e
+    solta o item: o _resolver_olist_para_item busca de novo (só ativos).
+    Só para vínculo vindo da memória — o manual não é reconferido."""
+    if not item.olist_produto_id or not (item.validacao_mensagem or "").startswith("Vinculado via SKU"):
+        return
+    det = olist.obter_detalhes_completo(str(item.olist_produto_id))
+    # ponytail: sem resposta da API mantém o vínculo (não solta tudo se a Olist cair)
+    if det is None or (det.get("situacao") or "A").upper() == "A":
+        return
+    print(f"[VINCULO] {item.sku_inbound}: produto {item.olist_produto_id} situacao={det.get('situacao')} -> refazendo vínculo")
+    db.query(VinculoOlist).filter(VinculoOlist.olist_produto_id == str(item.olist_produto_id)).delete()
+    item.olist_produto_id = None
+    item.olist_sku = None
+    item.olist_nome = None
+    item.validado = 0
+    item.validacao_mensagem = None
+
+
 def _resolver_olist_para_item(item):
     """
     Dado um ItemEmbaleFU, resolve o produto Olist correspondente.
@@ -3276,6 +3297,7 @@ async def revisar_baixa_embale(request: Request):
         resolvidos = {}  # item_id -> (produto_id, nome)
         revisado_em = datetime.utcnow()
         for item in itens:
+            _descartar_vinculo_memorizado_inativo(db, item)
             pid, nome = _resolver_olist_para_item(item)
             resolvidos[item.id] = (pid, nome)
             # Salva o vínculo se for novo (ainda não tinha olist_produto_id).
