@@ -1143,6 +1143,37 @@ class OlistIntegration:
             return {"preenchidos": preenchidos, "anteriores": anteriores}
         return self._reenviar_produto(produto_id, ajustar, "dimensões", max_retries)
 
+    def _anexos(self, metodo: str, produto_id: str, body=None, max_retries: int = 3) -> Dict:
+        """GET/PUT em /produtos/{id}/anexos (imagens). Devolve {"sucesso", "dados"|"erro"}."""
+        token = self.get_access_token()
+        if not token:
+            return {"sucesso": False, "erro": "Sem token válido da Olist (reconecte a integração)."}
+        url = f"{self.API_BASE}/produtos/{produto_id}/anexos"
+        data = json.dumps(body).encode("utf-8") if body is not None else None
+        headers = {"Content-Type": "application/json", "Authorization": f"Bearer {token}"}
+        for tentativa in range(max_retries):
+            self._throttle()
+            try:
+                req = urllib.request.Request(url, data=data, headers=headers, method=metodo)
+                with urllib.request.urlopen(req, timeout=30) as response:
+                    texto = response.read().decode("utf-8") or "null"
+                    return {"sucesso": True, "dados": json.loads(texto)}
+            except urllib.error.HTTPError as e:
+                if e.code == 429 and tentativa < max_retries - 1:
+                    time.sleep(2.0 * (tentativa + 1))
+                    continue
+                return {"sucesso": False, "erro": f"Olist recusou (HTTP {e.code}): {e.read().decode('utf-8', errors='ignore')[:300]}"}
+            except Exception as e:
+                return {"sucesso": False, "erro": str(e)}
+        return {"sucesso": False, "erro": "Olist recusou após retentativas (rate limit 429)."}
+
+    def obter_anexos(self, produto_id: str) -> Dict:
+        return self._anexos("GET", produto_id)
+
+    def substituir_anexos(self, produto_id: str, urls: List[str], externo: bool = False) -> Dict:
+        """Troca TODAS as imagens/anexos do produto pela lista de URLs, nessa ordem."""
+        return self._anexos("PUT", produto_id, [{"url": u, "externo": externo} for u in urls])
+
     def _reenviar_produto(self, produto_id: str, ajustar, rotulo: str, max_retries: int = 3) -> Dict:
         """
         A API v3 (PUT /produtos/{id}) exige o objeto completo do produto — não

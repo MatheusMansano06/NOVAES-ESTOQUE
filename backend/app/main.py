@@ -12,7 +12,7 @@ import asyncio
 import threading
 import re
 import time
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 from datetime import datetime, timedelta
 import uuid
 import urllib.request
@@ -1016,6 +1016,111 @@ async def medidas_ml_olist_iniciar(request: Request):
 async def medidas_ml_olist_status(request: Request):
     """GET /api/olist/medidas-ml — status/resultado da última execução."""
     return JSONResponse(_medidas_ml_estado)
+
+
+_fotos_ml_lock = threading.Lock()
+_fotos_ml_estado: Dict = {"status": "idle", "aplicar": False, "progresso": None,
+                          "resultado": None, "erro": None, "iniciado_em": None, "concluido_em": None}
+
+
+def _rodar_fotos_ml_olist(aplicar: bool, skus: Optional[set], externo: bool) -> None:
+    """Substitui as imagens do produto Olist pelas do anúncio ML do mesmo SKU
+    (o que mais vendeu, quando há vários), na mesma ordem. aplicar=False é prévia.
+    Cada gravação guarda as URLs anteriores em "anteriores"."""
+    chave_de = lambda s: re.sub(r"[^a-z0-9]", "", (s or "").lower())
+    try:
+        db = SessionLocal()
+        try:
+            melhor: Dict[str, Any] = {}
+            for row in db.query(MercadoLivreItemCache).filter(
+                MercadoLivreItemCache.sku.isnot(None), MercadoLivreItemCache.sku != "",
+                MercadoLivreItemCache.status != "closed",
+            ).all():
+                chave = chave_de(row.sku)
+                if chave and (chave not in melhor or (row.vendidos or 0) > (melhor[chave].vendidos or 0)):
+                    melhor[chave] = row
+            item_por_chave = {c: r.item_id for c, r in melhor.items()}
+        finally:
+            db.close()
+
+        alvos = []
+        for p in olist.listar_todos_produtos(limite=3000):
+            chave = chave_de(p.get("sku") or p.get("codigo_produto"))
+            if p.get("situacao") == "E" or chave not in item_por_chave or (skus and chave not in skus):
+                continue
+            alvos.append((p, item_por_chave.pop(chave)))
+
+        fotos: Dict[str, List[str]] = {}
+        ids = [item_id for _, item_id in alvos]
+        for i in range(0, len(ids), 20):
+            _fotos_ml_estado["progresso"] = f"lendo ML {i}/{len(ids)}"
+            for entry in ml._get("/items", {"ids": ",".join(ids[i:i + 20]), "attributes": "id,pictures"}) or []:
+                body = entry.get("body") or {}
+                if entry.get("code") == 200 and body.get("id"):
+                    fotos[body["id"]] = [u for u in ((pic.get("secure_url") or pic.get("url")) for pic in body.get("pictures") or []) if u]
+
+        itens = []
+        for i, (p, item_id) in enumerate(alvos, 1):
+            _fotos_ml_estado["progresso"] = f"{i}/{len(alvos)}"
+            urls_ml = fotos.get(item_id) or []
+            base = {"sku": p.get("sku") or p.get("codigo_produto"), "nome": p.get("nome"),
+                    "produto_id": p.get("id"), "item_id": item_id, "fotos_ml": len(urls_ml)}
+            if not urls_ml:
+                itens.append({**base, "status": "sem_foto_ml"})
+                continue
+            atual = olist.obter_anexos(str(p.get("id")))
+            if not atual.get("sucesso"):
+                itens.append({**base, "status": "erro", "erro": atual.get("erro")})
+                continue
+            urls_olist = [a.get("url") for a in (atual.get("dados") or []) if a.get("url")]
+            base["fotos_olist"] = len(urls_olist)
+            if urls_olist == urls_ml:
+                itens.append({**base, "status": "igual"})
+                continue
+            if not aplicar:
+                itens.append({**base, "status": "a_trocar"})
+                continue
+            r = olist.substituir_anexos(str(p.get("id")), urls_ml, externo=externo)
+            itens.append({**base, "status": "trocado" if r.get("sucesso") else "erro",
+                          "anteriores": urls_olist, "erro": r.get("erro"),
+                          "resposta": r.get("dados") if len(itens) < 3 else None})
+
+        contagem: Dict[str, int] = {}
+        for it in itens:
+            contagem[it["status"]] = contagem.get(it["status"], 0) + 1
+        _fotos_ml_estado.update({
+            "status": "pronto", "erro": None, "concluido_em": datetime.utcnow().isoformat(),
+            "resultado": {"total": len(itens), "contagem": contagem, "itens": itens,
+                          "nao_encontrados": sorted(skus - {chave_de(p.get("sku") or p.get("codigo_produto")) for p, _ in alvos}) if skus else None},
+        })
+    except Exception as e:
+        print(f"[ERRO] Fotos ML -> Olist: {e}")
+        _fotos_ml_estado.update({"status": "erro", "erro": str(e), "concluido_em": datetime.utcnow().isoformat()})
+
+
+async def fotos_ml_olist_iniciar(request: Request):
+    """POST /api/olist/fotos-ml/iniciar  body: {"aplicar": false, "externo": false, "skus": ["576"]}
+    aplicar=false (padrão) = prévia, não grava. skus vazio = todos."""
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    aplicar = body.get("aplicar") is True
+    externo = body.get("externo") is True
+    skus = {re.sub(r"[^a-z0-9]", "", str(s).lower()) for s in (body.get("skus") or []) if str(s).strip()} or None
+    with _fotos_ml_lock:
+        if _fotos_ml_estado["status"] == "rodando":
+            return JSONResponse({"status": "rodando", "progresso": _fotos_ml_estado["progresso"]})
+        _fotos_ml_estado.update({"status": "rodando", "aplicar": aplicar, "externo": externo, "progresso": None,
+                                 "resultado": None, "erro": None,
+                                 "iniciado_em": datetime.utcnow().isoformat(), "concluido_em": None})
+        threading.Thread(target=_rodar_fotos_ml_olist, args=(aplicar, skus, externo), daemon=True).start()
+    return JSONResponse({"status": "rodando", "aplicar": aplicar, "externo": externo})
+
+
+async def fotos_ml_olist_status(request: Request):
+    """GET /api/olist/fotos-ml — status/resultado da última execução."""
+    return JSONResponse(_fotos_ml_estado)
 
 
 _lista_compra_lock = threading.Lock()
@@ -7134,6 +7239,8 @@ routes = [
     Route("/api/fiscal/ml-olist/iniciar", fiscal_ml_olist_iniciar, methods=["POST"]),
     Route("/api/olist/medidas-ml", medidas_ml_olist_status, methods=["GET"]),
     Route("/api/olist/medidas-ml/iniciar", medidas_ml_olist_iniciar, methods=["POST"]),
+    Route("/api/olist/fotos-ml", fotos_ml_olist_status, methods=["GET"]),
+    Route("/api/olist/fotos-ml/iniciar", fotos_ml_olist_iniciar, methods=["POST"]),
     Route("/api/lista-compra/parados", lista_compra_parados_status, methods=["GET"]),
     Route("/api/lista-compra/parados/iniciar", lista_compra_parados_iniciar, methods=["POST"]),
     # Inbound / Lista de Separação para FU
