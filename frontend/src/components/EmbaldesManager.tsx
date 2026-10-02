@@ -205,15 +205,25 @@ export function EmbaldesManager({ modoSeparacao = false }: { modoSeparacao?: boo
     }
   }, [visao])
 
+  // Lista do picker (filtro + ordem). Única fonte: a tela e a detecção de kit
+  // precisam apontar pro MESMO item no sepIndex.
+  const listaSeparacao = (todos: ItemRevisao[]): ItemRevisao[] => {
+    const filtrados = soEditados
+      ? todos.filter((x) => x.tem_historico_full)
+      : soEmEspera
+        ? todos.filter((x) => itensEmEspera[x.item_id])
+        : todos
+    // Ordena pela qtd "Vai pro FULL" salva (não a digitada, senão o item pula enquanto edita).
+    if (!ordemQtd) return filtrados
+    const sinal = ordemQtd === 'desc' ? -1 : 1
+    return [...filtrados].sort((a, b) => sinal * ((a.quantidade_full || 0) - (b.quantidade_full || 0)))
+  }
+
   // Auto-detecção de kit: ao exibir um item no picker, verifica se é kit na Olist
   // (cacheado por item). Se for, o picker mostra os componentes p/ baixar cada um.
   useEffect(() => {
     if (!modoSeparacao || !revisao) return
-    const lista = soEditados
-      ? revisao.itens.filter((x) => x.tem_historico_full)
-      : soEmEspera
-        ? revisao.itens.filter((x) => itensEmEspera[x.item_id])
-        : revisao.itens
+    const lista = listaSeparacao(revisao.itens)
     if (lista.length === 0) return
     const it = lista[Math.min(sepIndex, lista.length - 1)]
     if (!it) return
@@ -240,7 +250,7 @@ export function EmbaldesManager({ modoSeparacao = false }: { modoSeparacao?: boo
       })
       .catch(() => setKitPorItem((prev) => ({ ...prev, [it.item_id]: 'nao' })))
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [modoSeparacao, revisao?.embale_id, sepIndex, soEditados, soEmEspera])
+  }, [modoSeparacao, revisao?.embale_id, sepIndex, soEditados, soEmEspera, ordemQtd])
 
   // Baixa os componentes do kit na Olist (cada um vira uma saída). Retorna true se todos OK.
   const baixarKitComponentes = async (it: ItemRevisao, kit: KitInfo): Promise<boolean> => {
@@ -598,7 +608,7 @@ O estoque na Olist volta ao que era antes (vendas que caíram no meio são manti
       const resposta = await api.get(`/embaldes/${id}/revisao`)
       setRevisao(resposta.data)
       // Retoma de onde parou: posiciona no item salvo no banco (se ainda existir).
-      const itensRev: ItemRevisao[] = resposta.data.itens || []
+      const itensRev = listaSeparacao(resposta.data.itens || [])
       const ultimoId = resposta.data.ultimo_item_separacao
       const idxSalvo = ultimoId != null ? itensRev.findIndex((it) => it.item_id === ultimoId) : -1
       setSepIndex(idxSalvo >= 0 ? idxSalvo : 0)
@@ -1264,17 +1274,7 @@ O estoque na Olist volta ao que era antes (vendas que caíram no meio são manti
                         const qtdEditados = revisao.itens.filter((x) => x.tem_historico_full).length
                         const qtdEmEspera = revisao.itens.filter((x) => itensEmEspera[x.item_id]).length
                         // Filtros: "só editados" (qtd FULL alterada) ou "só em espera".
-                        const filtrados = soEditados
-                          ? revisao.itens.filter((x) => x.tem_historico_full)
-                          : soEmEspera
-                            ? revisao.itens.filter((x) => itensEmEspera[x.item_id])
-                            : revisao.itens
-                        // Ordena pela qtd "Vai pro FULL" salva (não a digitada, senão o item pula enquanto edita).
-                        const itens = ordemQtd
-                          ? [...filtrados].sort((a, b) => ordemQtd === 'desc'
-                              ? (b.quantidade_full || 0) - (a.quantidade_full || 0)
-                              : (a.quantidade_full || 0) - (b.quantidade_full || 0))
-                          : filtrados
+                        const itens = listaSeparacao(revisao.itens)
                         const total = itens.length
                         if ((soEditados || soEmEspera) && total === 0) {
                           return (
