@@ -1105,21 +1105,44 @@ class OlistIntegration:
         return zerados
 
     def atualizar_ncm_produto(self, produto_id: str, novo_ncm: str, max_retries: int = 3) -> Dict:
-        """
-        Atualiza SOMENTE o NCM de um produto no cadastro da Olist.
+        """Atualiza SOMENTE o NCM de um produto no cadastro da Olist."""
+        def ajustar(body: Dict, detalhe: Dict) -> Dict:
+            body["ncm"] = novo_ncm
+            return {"ncm_anterior": detalhe.get("ncm") or "", "ncm_novo": novo_ncm}
+        return self._reenviar_produto(produto_id, ajustar, "NCM", max_retries)
 
+    def preencher_dimensoes_produto(self, produto_id: str, medidas: Dict, max_retries: int = 3) -> Dict:
+        """Preenche altura/largura/comprimento (cm) e peso bruto/líquido (kg) SÓ
+        onde o cadastro da Olist está vazio — nunca sobrescreve o que já existe.
+        Relê o cadastro na hora da escrita, então a decisão vale pro estado atual."""
+        novos = {
+            "altura": medidas.get("altura"), "largura": medidas.get("largura"),
+            "comprimento": medidas.get("comprimento"),
+            "pesoBruto": medidas.get("peso_kg"), "pesoLiquido": medidas.get("peso_kg"),
+        }
+
+        def ajustar(body: Dict, detalhe: Dict) -> Optional[Dict]:
+            dim = body["dimensoes"]
+            preenchidos = {k: v for k, v in novos.items() if v and not dim.get(k)}
+            if not preenchidos:
+                return None
+            dim.update(preenchidos)
+            return {"preenchidos": preenchidos}
+        return self._reenviar_produto(produto_id, ajustar, "dimensões", max_retries)
+
+    def _reenviar_produto(self, produto_id: str, ajustar, rotulo: str, max_retries: int = 3) -> Dict:
+        """
         A API v3 (PUT /produtos/{id}) exige o objeto completo do produto — não
         existe PATCH parcial. Por isso lemos o cadastro atual (obter_detalhes_completo)
-        e reenviamos os mesmos dados, trocando apenas o campo ncm, para não apagar
-        preço, categoria, dimensões etc. Os sub-objetos abaixo seguem exatamente o
-        schema de escrita da Olist (AtualizarProdutoRequestModel no swagger oficial),
-        que aceita menos campos que o de leitura.
+        e reenviamos os mesmos dados, deixando `ajustar(body, detalhe)` trocar só o
+        que precisa, para não apagar preço, categoria, dimensões etc. Os sub-objetos
+        abaixo seguem exatamente o schema de escrita da Olist (AtualizarProdutoRequestModel
+        no swagger oficial), que aceita menos campos que o de leitura.
+        `ajustar` devolve dados extras do resultado, ou None = nada a alterar (não grava).
         """
         detalhe = self.obter_detalhes_completo(str(produto_id))
         if not detalhe:
             return {"sucesso": False, "erro": "Não foi possível ler o cadastro atual do produto na Olist."}
-
-        ncm_anterior = detalhe.get("ncm") or ""
 
         dim = detalhe.get("dimensoes") or {}
         emb = dim.get("embalagem") or {}
@@ -1140,7 +1163,7 @@ class OlistIntegration:
             "descricaoComplementar": detalhe.get("descricaoComplementar"),
             "unidade": detalhe.get("unidade"),
             "unidadePorCaixa": detalhe.get("unidadePorCaixa"),
-            "ncm": novo_ncm,
+            "ncm": detalhe.get("ncm"),
             "gtin": detalhe.get("gtin"),
             "origem": origem,
             "garantia": detalhe.get("garantia"),
@@ -1182,6 +1205,10 @@ class OlistIntegration:
         if emb.get("id"):
             body["dimensoes"]["embalagem"] = {"id": emb.get("id"), "tipo": emb.get("tipo")}
 
+        extra = ajustar(body, detalhe)
+        if extra is None:
+            return {"sucesso": True, "erro": None, "sem_alteracao": True}
+
         token = self.get_access_token()
         if not token:
             token = self.token_v2
@@ -1198,7 +1225,7 @@ class OlistIntegration:
                 req = urllib.request.Request(url, data=post_data, headers=headers, method="PUT")
                 with urllib.request.urlopen(req, timeout=15) as response:
                     response.read()
-                    return {"sucesso": True, "erro": None, "ncm_anterior": ncm_anterior, "ncm_novo": novo_ncm}
+                    return {"sucesso": True, "erro": None, **extra}
             except urllib.error.HTTPError as e:
                 if e.code == 429 and tentativa < max_retries - 1:
                     reset = e.headers.get("x-ratelimit-reset") or e.headers.get("Retry-After")
@@ -1209,10 +1236,10 @@ class OlistIntegration:
                     time.sleep(espera)
                     continue
                 error_body = e.read().decode("utf-8", errors="ignore")
-                print(f"[OLIST] Erro HTTP {e.code} ao atualizar NCM do produto {produto_id}: {error_body[:500]}")
+                print(f"[OLIST] Erro HTTP {e.code} ao atualizar {rotulo} do produto {produto_id}: {error_body[:500]}")
                 return {"sucesso": False, "erro": f"Olist recusou (HTTP {e.code}): {error_body[:300]}"}
             except Exception as e:
-                print(f"[OLIST] Erro ao atualizar NCM do produto {produto_id}: {e}")
+                print(f"[OLIST] Erro ao atualizar {rotulo} do produto {produto_id}: {e}")
                 return {"sucesso": False, "erro": str(e)}
 
         return {"sucesso": False, "erro": "Olist recusou após retentativas (rate limit 429)."}

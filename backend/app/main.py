@@ -12,7 +12,7 @@ import asyncio
 import threading
 import re
 import time
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 from datetime import datetime, timedelta
 import uuid
 import urllib.request
@@ -910,6 +910,102 @@ async def fiscal_ml_olist_iniciar(request: Request):
 async def fiscal_ml_olist_status(request: Request):
     """GET /api/fiscal/ml-olist — status/resultado da última comparação disparada."""
     return JSONResponse(_fiscal_ml_olist_estado)
+
+
+_medidas_ml_lock = threading.Lock()
+_medidas_ml_estado: Dict = {"status": "idle", "aplicar": False, "progresso": None,
+                            "resultado": None, "erro": None, "iniciado_em": None, "concluido_em": None}
+_CAMPOS_MEDIDA = ("altura", "largura", "comprimento", "pesoBruto", "pesoLiquido")
+
+
+def _rodar_medidas_ml_olist(aplicar: bool, skus: Optional[set]) -> None:
+    """Copia a embalagem do anúncio ML (medida pelo ML, senão a declarada) para
+    o cadastro Olist do mesmo SKU, SÓ nos campos vazios. aplicar=False é prévia:
+    só lê. Em thread pelo mesmo motivo de _rodar_comparacao_fiscal_ml_olist."""
+    from app.utils.divergencia_dimensoes import medidas_embalagem
+    chave_de = lambda s: re.sub(r"[^a-z0-9]", "", (s or "").lower())
+    try:
+        db = SessionLocal()
+        try:
+            ml_por_sku: Dict[str, Dict] = {}
+            for row in db.query(MercadoLivreItemCache).filter(
+                MercadoLivreItemCache.sku.isnot(None), MercadoLivreItemCache.sku != "",
+                MercadoLivreItemCache.status != "closed",
+            ).all():
+                m = medidas_embalagem(row.attributes_json)
+                chave = chave_de(row.sku)
+                atual = ml_por_sku.get(chave)
+                # Mesmo SKU em vários anúncios: fica a medida feita pelo ML, se houver.
+                if m and (not atual or (atual["origem"] != "medido_ml" and m["origem"] == "medido_ml")):
+                    ml_por_sku[chave] = {**m, "item_id": row.item_id}
+        finally:
+            db.close()
+
+        alvos = []
+        for p in olist.listar_todos_produtos(limite=3000):
+            chave = chave_de(p.get("sku") or p.get("codigo_produto"))
+            if p.get("situacao") == "E" or chave not in ml_por_sku:
+                continue
+            if skus and chave not in skus:
+                continue
+            alvos.append((p, ml_por_sku.pop(chave)))
+
+        itens = []
+        for i, (p, m) in enumerate(alvos, 1):
+            _medidas_ml_estado["progresso"] = f"{i}/{len(alvos)}"
+            base = {"sku": p.get("sku") or p.get("codigo_produto"), "nome": p.get("nome"),
+                    "produto_id": p.get("id"), "item_id": m["item_id"], "origem_ml": m["origem"],
+                    "ml": {k: m[k] for k in ("altura", "largura", "comprimento", "peso_kg")}}
+            if aplicar:
+                r = olist.preencher_dimensoes_produto(str(p.get("id")), m)
+                status = "erro" if not r.get("sucesso") else ("ja_preenchido" if r.get("sem_alteracao") else "preenchido")
+                itens.append({**base, "status": status, "preenchidos": r.get("preenchidos"), "erro": r.get("erro")})
+                continue
+            dim = (olist.obter_detalhes_completo(str(p.get("id"))) or {}).get("dimensoes")
+            if dim is None:
+                itens.append({**base, "status": "erro", "erro": "Não leu o cadastro na Olist"})
+                continue
+            novos = {"altura": m["altura"], "largura": m["largura"], "comprimento": m["comprimento"],
+                     "pesoBruto": m["peso_kg"], "pesoLiquido": m["peso_kg"]}
+            vazios = [k for k in _CAMPOS_MEDIDA if not dim.get(k) and novos[k]]
+            itens.append({**base, "status": "a_preencher" if vazios else "ja_preenchido",
+                          "olist": {k: dim.get(k) for k in _CAMPOS_MEDIDA}, "campos_vazios": vazios})
+
+        contagem: Dict[str, int] = {}
+        for it in itens:
+            contagem[it["status"]] = contagem.get(it["status"], 0) + 1
+        _medidas_ml_estado.update({
+            "status": "pronto", "erro": None, "concluido_em": datetime.utcnow().isoformat(),
+            "resultado": {"total": len(itens), "contagem": contagem, "itens": itens,
+                          "nao_encontrados": sorted(skus - {chave_de(p.get("sku") or p.get("codigo_produto")) for p, _ in alvos}) if skus else None},
+        })
+    except Exception as e:
+        print(f"[ERRO] Medidas ML -> Olist: {e}")
+        _medidas_ml_estado.update({"status": "erro", "erro": str(e), "concluido_em": datetime.utcnow().isoformat()})
+
+
+async def medidas_ml_olist_iniciar(request: Request):
+    """POST /api/olist/medidas-ml/iniciar  body: {"aplicar": false, "skus": ["576"]}
+    aplicar=false (padrão) = prévia, não grava nada. skus vazio = todos."""
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    aplicar = body.get("aplicar") is True
+    skus = {re.sub(r"[^a-z0-9]", "", str(s).lower()) for s in (body.get("skus") or []) if str(s).strip()} or None
+    with _medidas_ml_lock:
+        if _medidas_ml_estado["status"] == "rodando":
+            return JSONResponse({"status": "rodando", "aplicar": _medidas_ml_estado["aplicar"],
+                                 "progresso": _medidas_ml_estado["progresso"]})
+        _medidas_ml_estado.update({"status": "rodando", "aplicar": aplicar, "progresso": None, "resultado": None,
+                                   "erro": None, "iniciado_em": datetime.utcnow().isoformat(), "concluido_em": None})
+        threading.Thread(target=_rodar_medidas_ml_olist, args=(aplicar, skus), daemon=True).start()
+    return JSONResponse({"status": "rodando", "aplicar": aplicar})
+
+
+async def medidas_ml_olist_status(request: Request):
+    """GET /api/olist/medidas-ml — status/resultado da última execução."""
+    return JSONResponse(_medidas_ml_estado)
 
 
 _lista_compra_lock = threading.Lock()
@@ -7026,6 +7122,8 @@ routes = [
     Route("/api/olist/produtos-tipos/iniciar", produtos_tipos_iniciar, methods=["POST"]),
     Route("/api/fiscal/ml-olist", fiscal_ml_olist_status, methods=["GET"]),
     Route("/api/fiscal/ml-olist/iniciar", fiscal_ml_olist_iniciar, methods=["POST"]),
+    Route("/api/olist/medidas-ml", medidas_ml_olist_status, methods=["GET"]),
+    Route("/api/olist/medidas-ml/iniciar", medidas_ml_olist_iniciar, methods=["POST"]),
     Route("/api/lista-compra/parados", lista_compra_parados_status, methods=["GET"]),
     Route("/api/lista-compra/parados/iniciar", lista_compra_parados_iniciar, methods=["POST"]),
     # Inbound / Lista de Separação para FU
