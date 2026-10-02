@@ -148,6 +148,7 @@ export function EmbaldesManager({ modoSeparacao = false }: { modoSeparacao?: boo
   // Filtro do picker: mostrar só os itens que tiveram a qtd do FULL alterada
   const [soEditados, setSoEditados] = useState(false)
   const [soEmEspera, setSoEmEspera] = useState(false)
+  const [ordemQtd, setOrdemQtd] = useState<'' | 'desc' | 'asc'>('')
   // Accordion para expandir/colapsar produtos
   const [produtosExpandidos, setProdutosExpandidos] = useState<Set<string>>(new Set())
   const toggleProduto = (chave: string) => {
@@ -1263,11 +1264,17 @@ O estoque na Olist volta ao que era antes (vendas que caíram no meio são manti
                         const qtdEditados = revisao.itens.filter((x) => x.tem_historico_full).length
                         const qtdEmEspera = revisao.itens.filter((x) => itensEmEspera[x.item_id]).length
                         // Filtros: "só editados" (qtd FULL alterada) ou "só em espera".
-                        const itens = soEditados
+                        const filtrados = soEditados
                           ? revisao.itens.filter((x) => x.tem_historico_full)
                           : soEmEspera
                             ? revisao.itens.filter((x) => itensEmEspera[x.item_id])
                             : revisao.itens
+                        // Ordena pela qtd "Vai pro FULL" salva (não a digitada, senão o item pula enquanto edita).
+                        const itens = ordemQtd
+                          ? [...filtrados].sort((a, b) => ordemQtd === 'desc'
+                              ? (b.quantidade_full || 0) - (a.quantidade_full || 0)
+                              : (a.quantidade_full || 0) - (b.quantidade_full || 0))
+                          : filtrados
                         const total = itens.length
                         if ((soEditados || soEmEspera) && total === 0) {
                           return (
@@ -1329,6 +1336,18 @@ O estoque na Olist volta ao que era antes (vendas que caíram no meio são manti
                                 }}
                               >
                                 ⏸️ Em espera ({qtdEmEspera})
+                              </button>
+                              <button
+                                onClick={() => { setOrdemQtd((o) => (o === '' ? 'desc' : o === 'desc' ? 'asc' : '')); setSepIndex(0) }}
+                                title="Ordenar pela quantidade do Vai pro FULL (clique para alternar)"
+                                style={{
+                                  padding: '0.5rem 1rem', borderRadius: '999px', fontWeight: 700, fontSize: '0.85rem', cursor: 'pointer',
+                                  border: `1px solid ${ordemQtd ? '#2e7d32' : '#a5d6a7'}`,
+                                  background: ordemQtd ? '#2e7d32' : '#fff',
+                                  color: ordemQtd ? '#fff' : '#2e7d32',
+                                }}
+                              >
+                                {ordemQtd === 'desc' ? '⬇️ Maior → menor qtd' : ordemQtd === 'asc' ? '⬆️ Menor → maior qtd' : '↕️ Ordenar por qtd'}
                               </button>
                               {soEditados && (
                                 <span style={{ fontSize: '0.82rem', color: '#666' }}>Mostrando só os editados. <button onClick={() => { setSoEditados(false); setSepIndex(0) }} style={{ background: 'none', border: 'none', color: '#1976D2', cursor: 'pointer', fontWeight: 700, padding: 0 }}>Ver todos</button></span>
