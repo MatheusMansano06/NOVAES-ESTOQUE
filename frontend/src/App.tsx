@@ -17,6 +17,7 @@ import { NegociacaoShopee } from './components/NegociacaoShopee'
 import { EstoqueEmbalagens } from './components/EstoqueEmbalagens'
 import { ConferenciaNcm } from './components/ConferenciaNcm'
 import { PaginaClassificacaoTipos, PaginaFiscalMlOlist } from './components/DashboardProdutos'
+import { CalculadoraTikTok } from './components/CalculadoraTikTok'
 import { CentralDevolucoes } from './central/CentralDevolucoes'
 import { PlataformaSelecao, type Platform, LogoMercadoLivre, LogoShopee, LogoOperacao } from './components/PlataformaSelecao'
 import { LoginNVS } from './components/LoginNVS'
@@ -96,7 +97,7 @@ interface ProdutoEstoque {
   }>
 }
 
-type Pagina = 'bemvindo' | 'inicial' | 'conferencia' | 'produtos_nota' | 'relacionamento_produto' | 'fornecedores' | 'full-operacoes' | 'anuncios' | 'notas-fiscais' | 'operadores' | 'garimpador' | 'lista-compra' | 'radar-full' | 'estoque-embalagens' | 'central-devolucoes' | 'conferencia-ncm' | 'classificacao-tipos' | 'fiscal-ml-olist' | 'divergencia-dimensoes' | 'negociacao-shopee'
+type Pagina = 'bemvindo' | 'inicial' | 'conferencia' | 'produtos_nota' | 'relacionamento_produto' | 'fornecedores' | 'full-operacoes' | 'anuncios' | 'notas-fiscais' | 'operadores' | 'garimpador' | 'lista-compra' | 'radar-full' | 'estoque-embalagens' | 'central-devolucoes' | 'conferencia-ncm' | 'classificacao-tipos' | 'fiscal-ml-olist' | 'divergencia-dimensoes' | 'negociacao-shopee' | 'calculadora-tiktok'
 
 interface Divergencia {
   item_id: number
@@ -1699,6 +1700,7 @@ function App() {
       label: 'Ferramentas',
       items: [
         { key: 'garimpador', label: 'Garimpador', icon: 'search', active: pagina === 'garimpador', onClick: () => setPagina('garimpador') },
+        { key: 'calculadora-tiktok', label: 'Calculadora TikTok', icon: 'receipt', active: pagina === 'calculadora-tiktok', onClick: () => setPagina('calculadora-tiktok') },
         { key: 'conferencia-ncm', label: 'Conferência NCM', icon: 'warning', active: pagina === 'conferencia-ncm', onClick: () => setPagina('conferencia-ncm') },
         { key: 'classificacao-tipos', label: 'Classificação Simples x Kit', icon: 'dashboard', active: pagina === 'classificacao-tipos', onClick: () => setPagina('classificacao-tipos') },
         { key: 'fiscal-ml-olist', label: 'Fiscal ML x Olist', icon: 'sync', active: pagina === 'fiscal-ml-olist', onClick: () => setPagina('fiscal-ml-olist') },
@@ -3161,6 +3163,15 @@ function App() {
       'Fiscal: Mercado Livre x Olist',
       'Compara NCM, GTIN/EAN e CEST entre as duas plataformas e corrige o que estiver divergente.',
       <PaginaFiscalMlOlist />
+    )
+  }
+
+  // ===== CALCULADORA TIKTOK SHOP =====
+  if (pagina === 'calculadora-tiktok') {
+    return renderComShell(
+      'Calculadora TikTok Shop',
+      'Rentabilidade por produto: taxas sobre o valor total da venda, preço mínimo e preço ideal.',
+      <CalculadoraTikTok />
     )
   }
 

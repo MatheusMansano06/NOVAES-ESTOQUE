@@ -403,6 +403,16 @@ def limpar_evidencias(devolucao_id: int | None = None, dias: int | None = None) 
         return len(evs)
 
 
+def excluir_evidencia(evidencia_id: int) -> dict:
+    with Sessao.begin() as s:
+        ev = s.get(Evidencia, evidencia_id)
+        if not ev:
+            raise LookupError(f"Evidência {evidencia_id} não existe")
+        (PASTA / str(ev.devolucao_id) / ev.arquivo).unlink(missing_ok=True)
+        s.delete(ev)
+    return {"ok": True}
+
+
 def arquivo_evidencia(evidencia_id: int) -> Path:
     with Sessao() as s:
         ev = s.get(Evidencia, evidencia_id)

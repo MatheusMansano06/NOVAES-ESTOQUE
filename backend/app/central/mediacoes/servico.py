@@ -1,12 +1,14 @@
 """Contestação guiada: escolhe a plataforma, envia texto + evidências da conferência e guarda o histórico."""
 
-from datetime import datetime, timezone
+from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import select
 
 from app.central.conferencia.modelo import Conferencia, Evidencia
 from app.central.conferencia.servico import PASTA, Travada, limpar_evidencias
 from app.central.devolucoes.modelo import Devolucao
+from app.central.devolucoes.servico import publico
 from app.central.mercado_livre import acoes as mercado_livre
 from app.central.shopee import acoes as shopee
 from app.central.db import Sessao
@@ -56,10 +58,16 @@ def contestar(devolucao_id: int, motivo: str, texto: str) -> dict:
         plataforma, id_externo, perfeito = d.plataforma, d.id_externo, conf.classe == "A"
     if not fotos:
         raise ValueError("Anexe ao menos uma foto do produto e da embalagem antes de contestar.")
+    modulo = PLATAFORMAS[plataforma]
+    oficiais = {str(m["id"]): m["texto"] for m in modulo.motivos_contestacao(id_externo, perfeito)}
+    if oficiais and str(motivo) not in oficiais:
+        raise ValueError("Escolha um dos motivos oficiais da plataforma antes de contestar.")
+    motivo_texto = oficiais.get(str(motivo), "")
 
     registro = Contestacao(devolucao_id=devolucao_id, motivo=str(motivo), texto=texto, anexos=[], enviada_em=_agora())
     try:
-        r = PLATAFORMAS[plataforma].contestar(id_externo, motivo, texto, fotos, videos, perfeito)
+        extra = {"motivo_texto": motivo_texto} if plataforma == "mercado_livre" else {}
+        r = modulo.contestar(id_externo, motivo, texto, fotos, videos, perfeito, **extra)
         registro.ok, registro.caminho, registro.anexos, registro.aviso = True, r["caminho"], r["anexos"], r.get("aviso")
     except RuntimeError as e:
         registro.ok, registro.erro = False, str(e)
@@ -101,3 +109,32 @@ def historico(devolucao_id: int) -> list[dict]:
     with Sessao() as s:
         return [{c.name: getattr(x, c.name) for c in Contestacao.__table__.columns}
                 for x in s.scalars(select(Contestacao).filter_by(devolucao_id=devolucao_id).order_by(Contestacao.id))]
+
+
+def pendentes_revisao(ao_vivo: bool = False, dias: int = 30) -> list[dict]:
+    """Conferidas aqui, mas com o "Já revisei" ainda aberto no ML e nada enviado pela Central.
+    `ao_vivo`: pergunta ao ML reclamação por reclamação, em vez de confiar na última sincronização."""
+    desde = _agora() - timedelta(days=dias)
+    with Sessao() as s:
+        feitas = set(s.scalars(select(Contestacao.devolucao_id).filter_by(ok=True)))
+        linhas = s.execute(select(Devolucao, Conferencia).join(Conferencia, Conferencia.devolucao_id == Devolucao.id)
+                           .where(Devolucao.plataforma == "mercado_livre", Conferencia.conferida_em >= desde)).all()
+        candidatos = [{"id": d.id, "id_externo": d.id_externo, "pedido": d.pedido, "classe": c.classe,
+                       "contestar": c.contestar, "chamado_manual": c.chamado_manual, "motivo": c.motivo,
+                       "prazo_vendedor": d.prazo_vendedor, "conferida_em": c.conferida_em,
+                       "aguarda_revisao": publico(d)["aguarda_revisao"]}
+                      for d, c in linhas if d.id not in feitas and not d.id_externo.startswith("envio-")]
+    if not ao_vivo:
+        return [x for x in candidatos if x.pop("aguarda_revisao")]
+
+    def conferir(x: dict) -> dict:
+        x.pop("aguarda_revisao")
+        try:
+            x["acoes"] = sorted(mercado_livre.acoes_vendedor(x["id_externo"]))
+        except Exception as e:  # uma reclamação inacessível não derruba a varredura
+            x["acoes"], x["erro"] = [], f"{type(e).__name__}: {e}"[:200]
+        return x
+
+    with ThreadPoolExecutor(6) as pool:
+        vistos = list(pool.map(conferir, candidatos))
+    return [x for x in vistos if x.get("erro") or set(x["acoes"]) & mercado_livre.REVISAO_OK]

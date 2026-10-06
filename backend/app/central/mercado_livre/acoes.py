@@ -12,15 +12,25 @@ def pedido_do_envio(shipment_id: str) -> str | None:
     return str(envio["order_id"]) if envio.get("order_id") else None
 
 
-def _acoes_do_vendedor(claim_id: str) -> set[str]:
+def acoes_vendedor(claim_id: str) -> set[str]:
     claim = client.get(f"/post-purchase/v1/claims/{claim_id}") or {}
     return {a["action"] for p in claim.get("players") or [] if p["type"] == "seller"
             for a in p.get("available_actions") or []}
 
 
+_MEDIACAO = {"open_dispute", "send_message_to_mediator"}
+_REVISAO_FALHA = {"return_review_fail", "return_review_unified_fail"}
+REVISAO_OK = {"return_review_ok", "return_review_unified_ok"}
+
+
+def _por_revisao(acoes: set[str], produto_perfeito: bool) -> bool:
+    """Revisão com falha ("Reportar um problema") quando o produto tem problema, ou quando é a única porta aberta:
+    reclamação em "Já revisei" não libera mediação direta, mas o relato sai pela revisão."""
+    return bool(acoes & _REVISAO_FALHA) and (not produto_perfeito or not acoes & _MEDIACAO)
+
+
 def motivos_contestacao(claim_id: str, produto_perfeito: bool) -> list[dict]:
-    if produto_perfeito:
-        return []  # a queixa é contra a reclamação, não contra o produto: vai para a mediação só com relato e fotos
+    """Sempre a lista oficial do ML ("Reportar um problema"): o operador escolhe, também quando vai à mediação."""
     motivos = client.get("/post-purchase/v1/returns/reasons", {"flow": "seller_return_failed", "claim_id": claim_id}) or []
     return [{"id": m["id"], "texto": m["detail"]} for m in motivos]
 
@@ -31,26 +41,35 @@ def _anexar(path: str, arquivo: Path, campo: str) -> str:
 
 
 def contestar(claim_id: str, motivo: str, texto: str, fotos: list[Path], videos: list[Path],
-              produto_perfeito: bool) -> dict:
+              produto_perfeito: bool, motivo_texto: str = "") -> dict:
     """Produto com problema → revisão com falha (motivo SRF), quando o ML libera. Produto perfeito com a
     Novaes culpada → mediação, contestando a reclamação. As ações liberadas mudam com o tempo: lidas na hora."""
-    acoes = _acoes_do_vendedor(claim_id)
+    acoes = acoes_vendedor(claim_id)
     aviso = "Vídeos não são enviados pela API do ML: anexe pelo painel se precisar." if videos else None
 
-    if "return_review_fail" in acoes and not produto_perfeito:
+    if _por_revisao(acoes, produto_perfeito):
         devolucao = client.get(f"/post-purchase/v2/claims/{claim_id}/returns")
         nomes = [_anexar(f"/post-purchase/v1/claims/{claim_id}/returns/attachments", f, "file_name") for f in fotos]
         client.post(f"/post-purchase/v1/returns/{devolucao['id']}/return-review",
                     json=[{"reason": motivo, "message": texto, "attachments": nomes}])
         return {"caminho": "revisao_com_falha", "anexos": nomes, "aviso": aviso}
 
-    if "open_dispute" in acoes or "send_message_to_mediator" in acoes:
+    if acoes & _MEDIACAO:
         if "open_dispute" in acoes:
             client.post(f"/post-purchase/v1/claims/{claim_id}/actions/open-dispute")
         nomes = [_anexar(f"/post-purchase/v1/claims/{claim_id}/attachments", f, "filename") for f in fotos]
         client.post(f"/post-purchase/v1/claims/{claim_id}/actions/send-message",
-                    json={"receiver_role": "mediator", "message": f"[{motivo}] {texto}" if motivo else texto,
+                    json={"receiver_role": "mediator", "message": f"[{motivo_texto}] {texto}" if motivo_texto else texto,
                           "attachments": nomes})
         return {"caminho": "mediacao", "anexos": nomes, "aviso": aviso}
 
     raise RuntimeError(f"O ML não libera contestação nesta reclamação agora (ações: {sorted(acoes) or 'nenhuma'}).")
+
+
+def aceitar(claim_id: str) -> dict:
+    """"Chegou como esperado" no painel: revisão OK (corpo vazio), o ML finaliza e reembolsa o comprador."""
+    if not acoes_vendedor(claim_id) & REVISAO_OK:
+        raise RuntimeError("O ML não libera o aceite desta reclamação agora: aceite pelo painel.")
+    devolucao = client.get(f"/post-purchase/v2/claims/{claim_id}/returns")
+    client.post(f"/post-purchase/v1/returns/{devolucao['id']}/return-review", json={})
+    return {"caminho": "aceite", "anexos": []}

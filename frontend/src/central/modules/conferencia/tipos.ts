@@ -84,6 +84,10 @@ export interface Tela {
 
 export interface Contestacao {
   ok: boolean;
+  /** Código do motivo oficial que o operador escolheu ("" quando a plataforma não pediu). */
+  motivo?: string;
+  /** O que o operador escreveu para a plataforma. */
+  texto?: string;
   caminho: string | null;
   aviso: string | null;
   erro: string | null;

@@ -50,6 +50,17 @@ export function Evidencias({ devolucaoId, evidencias, exigidas, onEnviada }: Pro
     }
   }
 
+  async function excluir(id: number) {
+    setErro(null);
+    setFeito(null);
+    try {
+      await api.del(`/conferencia/evidencias/${id}`);
+      onEnviada();
+    } catch (e) {
+      setErro((e as Error).message);
+    }
+  }
+
   function escolher(e: ChangeEvent<HTMLInputElement>) {
     const arquivo = e.target.files?.[0];
     e.target.value = "";
@@ -88,6 +99,8 @@ export function Evidencias({ devolucaoId, evidencias, exigidas, onEnviada }: Pro
                   ? <img src={`${BASE_API}/conferencia/evidencias/${ev.id}`} alt={`Foto ${ev.id}`} />
                   : <span className="video-miniatura">Vídeo</span>}
               </a>
+              <button type="button" className="excluir-miniatura" aria-label={`Excluir ${ev.tipo === "foto" ? "foto" : "vídeo"} ${ev.id}`}
+                onClick={() => void excluir(ev.id)}>×</button>
             </li>
           ))}
         </ul>

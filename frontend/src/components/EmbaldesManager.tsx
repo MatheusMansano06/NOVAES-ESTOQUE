@@ -29,7 +29,6 @@ interface Inbound {
   qtd_items: number
   qtd_validados: number
   qtd_baixados?: number
-  qtd_baixados_apos_encerramento?: number
   total_lido?: number
   total_planejado_full?: number
   total_baixado_full?: number
@@ -148,6 +147,7 @@ export function EmbaldesManager({ modoSeparacao = false }: { modoSeparacao?: boo
   // Filtro do picker: mostrar só os itens que tiveram a qtd do FULL alterada
   const [soEditados, setSoEditados] = useState(false)
   const [soEmEspera, setSoEmEspera] = useState(false)
+  const [ordemQtd, setOrdemQtd] = useState<'' | 'desc' | 'asc'>('')
   // Accordion para expandir/colapsar produtos
   const [produtosExpandidos, setProdutosExpandidos] = useState<Set<string>>(new Set())
   const toggleProduto = (chave: string) => {
@@ -204,15 +204,25 @@ export function EmbaldesManager({ modoSeparacao = false }: { modoSeparacao?: boo
     }
   }, [visao])
 
+  // Lista do picker (filtro + ordem). Única fonte: a tela e a detecção de kit
+  // precisam apontar pro MESMO item no sepIndex.
+  const listaSeparacao = (todos: ItemRevisao[]): ItemRevisao[] => {
+    const filtrados = soEditados
+      ? todos.filter((x) => x.tem_historico_full)
+      : soEmEspera
+        ? todos.filter((x) => itensEmEspera[x.item_id])
+        : todos
+    // Ordena pela qtd "Vai pro FULL" salva (não a digitada, senão o item pula enquanto edita).
+    if (!ordemQtd) return filtrados
+    const sinal = ordemQtd === 'desc' ? -1 : 1
+    return [...filtrados].sort((a, b) => sinal * ((a.quantidade_full || 0) - (b.quantidade_full || 0)))
+  }
+
   // Auto-detecção de kit: ao exibir um item no picker, verifica se é kit na Olist
   // (cacheado por item). Se for, o picker mostra os componentes p/ baixar cada um.
   useEffect(() => {
     if (!modoSeparacao || !revisao) return
-    const lista = soEditados
-      ? revisao.itens.filter((x) => x.tem_historico_full)
-      : soEmEspera
-        ? revisao.itens.filter((x) => itensEmEspera[x.item_id])
-        : revisao.itens
+    const lista = listaSeparacao(revisao.itens)
     if (lista.length === 0) return
     const it = lista[Math.min(sepIndex, lista.length - 1)]
     if (!it) return
@@ -239,7 +249,7 @@ export function EmbaldesManager({ modoSeparacao = false }: { modoSeparacao?: boo
       })
       .catch(() => setKitPorItem((prev) => ({ ...prev, [it.item_id]: 'nao' })))
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [modoSeparacao, revisao?.embale_id, sepIndex, soEditados, soEmEspera])
+  }, [modoSeparacao, revisao?.embale_id, sepIndex, soEditados, soEmEspera, ordemQtd])
 
   // Baixa os componentes do kit na Olist (cada um vira uma saída). Retorna true se todos OK.
   const baixarKitComponentes = async (it: ItemRevisao, kit: KitInfo): Promise<boolean> => {
@@ -390,11 +400,12 @@ O estoque na Olist volta ao que era antes (vendas que caíram no meio são manti
 
   const salvarData = async (id: number) => {
     try {
-      await api.post(`/embaldes/${id}/data-limite`, { data_limite: novaData || null })
+      const { data } = await api.post(`/embaldes/${id}/data-limite`, { data_limite: novaData || null })
       setEditandoData(null)
       setNovaData('')
       await carregarInbounds()
-      setMessage('Data limite atualizada')
+      if (data?.reaberto) setAba('processando')
+      setMessage(data?.mensagem || 'Data limite atualizada')
     } catch (erro: any) {
       setMessage('Erro: ' + (erro.response?.data?.erro || String(erro)))
     }
@@ -597,7 +608,7 @@ O estoque na Olist volta ao que era antes (vendas que caíram no meio são manti
       const resposta = await api.get(`/embaldes/${id}/revisao`)
       setRevisao(resposta.data)
       // Retoma de onde parou: posiciona no item salvo no banco (se ainda existir).
-      const itensRev: ItemRevisao[] = resposta.data.itens || []
+      const itensRev = listaSeparacao(resposta.data.itens || [])
       const ultimoId = resposta.data.ultimo_item_separacao
       const idxSalvo = ultimoId != null ? itensRev.findIndex((it) => it.item_id === ultimoId) : -1
       setSepIndex(idxSalvo >= 0 ? idxSalvo : 0)
@@ -1178,14 +1189,13 @@ O estoque na Olist volta ao que era antes (vendas que caíram no meio são manti
                       ) : (
                         <strong>{formatarData(inb.data_limite) || 'sem data'}</strong>
                       )}
-                      {ehAtivo(inb.status) && (
-                        <button
-                          onClick={() => { setEditandoData(inb.id); setNovaData(inb.data_limite?.slice(0, 10) || '') }}
-                          style={{ marginLeft: '0.5rem', padding: '0.2rem 0.5rem', background: 'none', border: '1px solid #ddd', borderRadius: '4px', cursor: 'pointer', fontSize: '0.78rem' }}
-                        >
-                          editar
-                        </button>
-                      )}
+                      <button
+                        onClick={() => { setEditandoData(inb.id); setNovaData(inb.data_limite?.slice(0, 10) || '') }}
+                        title={ehAtivo(inb.status) ? undefined : 'Data futura (ou sem data) reabre o inbound'}
+                        style={{ marginLeft: '0.5rem', padding: '0.2rem 0.5rem', background: 'none', border: '1px solid #ddd', borderRadius: '4px', cursor: 'pointer', fontSize: '0.78rem' }}
+                      >
+                        {ehAtivo(inb.status) ? 'editar' : 'editar / reabrir'}
+                      </button>
                       {inb.status === 'encerrado' && inb.data_encerramento && (
                         <div style={{ color: '#999', marginTop: '0.2rem' }}>
                           Encerrado em {formatarData(inb.data_encerramento)}
@@ -1200,7 +1210,7 @@ O estoque na Olist volta ao que era antes (vendas que caíram no meio são manti
                   <div style={{ flex: '0 1 110px', textAlign: 'center' }}>
                     {(() => {
                       const total = inb.qtd_items || 0
-                      const processados = inb.qtd_baixados_apos_encerramento || 0
+                      const processados = inb.qtd_baixados || 0
                       const percentual = total > 0 ? Math.round((processados / total) * 100) : 0
                       return (
                         <>
@@ -1263,11 +1273,7 @@ O estoque na Olist volta ao que era antes (vendas que caíram no meio são manti
                         const qtdEditados = revisao.itens.filter((x) => x.tem_historico_full).length
                         const qtdEmEspera = revisao.itens.filter((x) => itensEmEspera[x.item_id]).length
                         // Filtros: "só editados" (qtd FULL alterada) ou "só em espera".
-                        const itens = soEditados
-                          ? revisao.itens.filter((x) => x.tem_historico_full)
-                          : soEmEspera
-                            ? revisao.itens.filter((x) => itensEmEspera[x.item_id])
-                            : revisao.itens
+                        const itens = listaSeparacao(revisao.itens)
                         const total = itens.length
                         if ((soEditados || soEmEspera) && total === 0) {
                           return (
@@ -1329,6 +1335,18 @@ O estoque na Olist volta ao que era antes (vendas que caíram no meio são manti
                                 }}
                               >
                                 ⏸️ Em espera ({qtdEmEspera})
+                              </button>
+                              <button
+                                onClick={() => { setOrdemQtd((o) => (o === '' ? 'desc' : o === 'desc' ? 'asc' : '')); setSepIndex(0) }}
+                                title="Ordenar pela quantidade do Vai pro FULL (clique para alternar)"
+                                style={{
+                                  padding: '0.5rem 1rem', borderRadius: '999px', fontWeight: 700, fontSize: '0.85rem', cursor: 'pointer',
+                                  border: `1px solid ${ordemQtd ? '#2e7d32' : '#a5d6a7'}`,
+                                  background: ordemQtd ? '#2e7d32' : '#fff',
+                                  color: ordemQtd ? '#fff' : '#2e7d32',
+                                }}
+                              >
+                                {ordemQtd === 'desc' ? '⬇️ Maior → menor qtd' : ordemQtd === 'asc' ? '⬆️ Menor → maior qtd' : '↕️ Ordenar por qtd'}
                               </button>
                               {soEditados && (
                                 <span style={{ fontSize: '0.82rem', color: '#666' }}>Mostrando só os editados. <button onClick={() => { setSoEditados(false); setSepIndex(0) }} style={{ background: 'none', border: 'none', color: '#1976D2', cursor: 'pointer', fontWeight: 700, padding: 0 }}>Ver todos</button></span>

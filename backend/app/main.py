@@ -12,7 +12,7 @@ import asyncio
 import threading
 import re
 import time
-from typing import Any, Dict
+from typing import Any, Dict, List, Optional
 from datetime import datetime, timedelta
 import uuid
 import urllib.request
@@ -29,7 +29,7 @@ from app.models import (
     MercadoLivreItemCache, MercadoLivreSyncState, HistoricoFullEmbale,
     CustoProduto, Operador, LogOperacao, OlistEstoqueSnapshot,
     Embalagem, EmbalagemCompra, EmbalagemMovimento, EmbalagemVinculo,
-    MLNotificacao, NegociacaoShopee, NegociacaoShopeeItem
+    MLNotificacao, NegociacaoShopee, NegociacaoShopeeItem, CalculoTikTok
 )
 from app import negociacao_shopee as negoc
 from app.utils.nfe_parser import NFeParsing
@@ -910,6 +910,494 @@ async def fiscal_ml_olist_iniciar(request: Request):
 async def fiscal_ml_olist_status(request: Request):
     """GET /api/fiscal/ml-olist — status/resultado da última comparação disparada."""
     return JSONResponse(_fiscal_ml_olist_estado)
+
+
+_medidas_ml_lock = threading.Lock()
+_medidas_ml_estado: Dict = {"status": "idle", "aplicar": False, "progresso": None,
+                            "resultado": None, "erro": None, "iniciado_em": None, "concluido_em": None}
+_CAMPOS_MEDIDA = ("altura", "largura", "comprimento", "pesoBruto", "pesoLiquido")
+
+
+def _rodar_medidas_ml_olist(aplicar: bool, skus: Optional[set], sobrescrever: bool = False) -> None:
+    """Copia a embalagem do anúncio ML (medida pelo ML, senão a declarada) para
+    o cadastro Olist do mesmo SKU: só nos campos vazios, ou com sobrescrever=True
+    também onde o cadastro diverge do ML. aplicar=False é prévia: só lê.
+    Em thread pelo mesmo motivo de _rodar_comparacao_fiscal_ml_olist."""
+    from app.utils.divergencia_dimensoes import medidas_embalagem, diverge_olist
+    chave_de = lambda s: re.sub(r"[^a-z0-9]", "", (s or "").lower())
+    try:
+        db = SessionLocal()
+        try:
+            ml_por_sku: Dict[str, Dict] = {}
+            for row in db.query(MercadoLivreItemCache).filter(
+                MercadoLivreItemCache.sku.isnot(None), MercadoLivreItemCache.sku != "",
+                MercadoLivreItemCache.status != "closed",
+            ).all():
+                m = medidas_embalagem(row.attributes_json)
+                chave = chave_de(row.sku)
+                atual = ml_por_sku.get(chave)
+                # Mesmo SKU em vários anúncios: fica a medida feita pelo ML, se houver.
+                if m and (not atual or (atual["origem"] != "medido_ml" and m["origem"] == "medido_ml")):
+                    ml_por_sku[chave] = {**m, "item_id": row.item_id}
+        finally:
+            db.close()
+
+        alvos = []
+        for p in olist.listar_todos_produtos(limite=3000):
+            chave = chave_de(p.get("sku") or p.get("codigo_produto"))
+            if p.get("situacao") == "E" or chave not in ml_por_sku:
+                continue
+            if skus and chave not in skus:
+                continue
+            alvos.append((p, ml_por_sku.pop(chave)))
+
+        itens = []
+        for i, (p, m) in enumerate(alvos, 1):
+            _medidas_ml_estado["progresso"] = f"{i}/{len(alvos)}"
+            base = {"sku": p.get("sku") or p.get("codigo_produto"), "nome": p.get("nome"),
+                    "produto_id": p.get("id"), "item_id": m["item_id"], "origem_ml": m["origem"],
+                    "ml": {k: m[k] for k in ("altura", "largura", "comprimento", "peso_kg")}}
+            if aplicar:
+                r = olist.preencher_dimensoes_produto(str(p.get("id")), m, sobrescrever=sobrescrever)
+                status = "erro" if not r.get("sucesso") else ("ja_preenchido" if r.get("sem_alteracao") else "preenchido")
+                itens.append({**base, "status": status, "preenchidos": r.get("preenchidos"),
+                              "anteriores": r.get("anteriores"), "erro": r.get("erro")})
+                continue
+            dim = (olist.obter_detalhes_completo(str(p.get("id"))) or {}).get("dimensoes")
+            if dim is None:
+                itens.append({**base, "status": "erro", "erro": "Não leu o cadastro na Olist"})
+                continue
+            if sobrescrever:
+                motivos = diverge_olist(dim, m)
+                itens.append({**base, "status": "divergente" if motivos else "bate",
+                              "olist": {k: dim.get(k) for k in _CAMPOS_MEDIDA}, "motivos": motivos})
+                continue
+            novos = {"altura": m["altura"], "largura": m["largura"], "comprimento": m["comprimento"],
+                     "pesoBruto": m["peso_kg"], "pesoLiquido": m["peso_kg"]}
+            vazios = [k for k in _CAMPOS_MEDIDA if not dim.get(k) and novos[k]]
+            itens.append({**base, "status": "a_preencher" if vazios else "ja_preenchido",
+                          "olist": {k: dim.get(k) for k in _CAMPOS_MEDIDA}, "campos_vazios": vazios})
+
+        contagem: Dict[str, int] = {}
+        for it in itens:
+            contagem[it["status"]] = contagem.get(it["status"], 0) + 1
+        _medidas_ml_estado.update({
+            "status": "pronto", "erro": None, "concluido_em": datetime.utcnow().isoformat(),
+            "resultado": {"total": len(itens), "contagem": contagem, "itens": itens,
+                          "nao_encontrados": sorted(skus - {chave_de(p.get("sku") or p.get("codigo_produto")) for p, _ in alvos}) if skus else None},
+        })
+    except Exception as e:
+        print(f"[ERRO] Medidas ML -> Olist: {e}")
+        _medidas_ml_estado.update({"status": "erro", "erro": str(e), "concluido_em": datetime.utcnow().isoformat()})
+
+
+async def medidas_ml_olist_iniciar(request: Request):
+    """POST /api/olist/medidas-ml/iniciar  body: {"aplicar": false, "sobrescrever": false, "skus": ["576"]}
+    aplicar=false (padrão) = prévia, não grava nada. sobrescrever=true troca também
+    medidas já cadastradas que divergem do ML. skus vazio = todos."""
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    aplicar = body.get("aplicar") is True
+    sobrescrever = body.get("sobrescrever") is True
+    skus = {re.sub(r"[^a-z0-9]", "", str(s).lower()) for s in (body.get("skus") or []) if str(s).strip()} or None
+    with _medidas_ml_lock:
+        if _medidas_ml_estado["status"] == "rodando":
+            return JSONResponse({"status": "rodando", "aplicar": _medidas_ml_estado["aplicar"],
+                                 "progresso": _medidas_ml_estado["progresso"]})
+        _medidas_ml_estado.update({"status": "rodando", "aplicar": aplicar, "sobrescrever": sobrescrever,
+                                   "progresso": None, "resultado": None,
+                                   "erro": None, "iniciado_em": datetime.utcnow().isoformat(), "concluido_em": None})
+        threading.Thread(target=_rodar_medidas_ml_olist, args=(aplicar, skus, sobrescrever), daemon=True).start()
+    return JSONResponse({"status": "rodando", "aplicar": aplicar, "sobrescrever": sobrescrever})
+
+
+async def medidas_ml_olist_status(request: Request):
+    """GET /api/olist/medidas-ml — status/resultado da última execução."""
+    return JSONResponse(_medidas_ml_estado)
+
+
+_fotos_ml_lock = threading.Lock()
+_fotos_ml_estado: Dict = {"status": "idle", "aplicar": False, "progresso": None,
+                          "resultado": None, "erro": None, "iniciado_em": None, "concluido_em": None}
+
+
+def _rodar_fotos_ml_olist(aplicar: bool, skus: Optional[set], externo: bool) -> None:
+    """Substitui as imagens do produto Olist pelas do anúncio ML do mesmo SKU
+    (o que mais vendeu, quando há vários), na mesma ordem. aplicar=False é prévia.
+    Cada gravação guarda as URLs anteriores em "anteriores"."""
+    chave_de = lambda s: re.sub(r"[^a-z0-9]", "", (s or "").lower())
+    try:
+        db = SessionLocal()
+        try:
+            melhor: Dict[str, Any] = {}
+            for row in db.query(MercadoLivreItemCache).filter(
+                MercadoLivreItemCache.sku.isnot(None), MercadoLivreItemCache.sku != "",
+                MercadoLivreItemCache.status != "closed",
+            ).all():
+                chave = chave_de(row.sku)
+                if chave and (chave not in melhor or (row.vendidos or 0) > (melhor[chave].vendidos or 0)):
+                    melhor[chave] = row
+            item_por_chave = {c: r.item_id for c, r in melhor.items()}
+        finally:
+            db.close()
+
+        alvos = []
+        for p in olist.listar_todos_produtos(limite=3000):
+            chave = chave_de(p.get("sku") or p.get("codigo_produto"))
+            if p.get("situacao") == "E" or chave not in item_por_chave or (skus and chave not in skus):
+                continue
+            alvos.append((p, item_por_chave.pop(chave)))
+
+        fotos: Dict[str, List[str]] = {}
+        ids = [item_id for _, item_id in alvos]
+        for i in range(0, len(ids), 20):
+            _fotos_ml_estado["progresso"] = f"lendo ML {i}/{len(ids)}"
+            for entry in ml._get("/items", {"ids": ",".join(ids[i:i + 20]), "attributes": "id,pictures"}) or []:
+                body = entry.get("body") or {}
+                if entry.get("code") == 200 and body.get("id"):
+                    # -O é a cópia reduzida (máx. 500px); -F.jpg é a original (até 1200px) em JPEG — Amazon não aceita webp
+                    fotos[body["id"]] = [re.sub(r"-O\.(jpg|jpeg|webp|png)$", "-F.jpg", u)
+                                         for u in ((pic.get("secure_url") or pic.get("url")) for pic in body.get("pictures") or []) if u]
+
+        itens = []
+        for i, (p, item_id) in enumerate(alvos, 1):
+            _fotos_ml_estado["progresso"] = f"{i}/{len(alvos)}"
+            urls_ml = fotos.get(item_id) or []
+            base = {"sku": p.get("sku") or p.get("codigo_produto"), "nome": p.get("nome"),
+                    "produto_id": p.get("id"), "item_id": item_id, "fotos_ml": len(urls_ml)}
+            if not urls_ml:
+                itens.append({**base, "status": "sem_foto_ml"})
+                continue
+            atual = olist.obter_anexos(str(p.get("id")))
+            if not atual.get("sucesso"):
+                itens.append({**base, "status": "erro", "erro": atual.get("erro")})
+                continue
+            urls_olist = [a.get("url") for a in (atual.get("dados") or []) if a.get("url")]
+            base["fotos_olist"] = len(urls_olist)
+            if urls_olist == urls_ml:
+                itens.append({**base, "status": "igual"})
+                continue
+            if not aplicar:
+                itens.append({**base, "status": "a_trocar"})
+                continue
+            r = olist.substituir_anexos(str(p.get("id")), urls_ml, externo=externo)
+            itens.append({**base, "status": "trocado" if r.get("sucesso") else "erro",
+                          "anteriores": urls_olist, "erro": r.get("erro"),
+                          "resposta": r.get("dados") if len(itens) < 3 else None})
+
+        contagem: Dict[str, int] = {}
+        for it in itens:
+            contagem[it["status"]] = contagem.get(it["status"], 0) + 1
+        _fotos_ml_estado.update({
+            "status": "pronto", "erro": None, "concluido_em": datetime.utcnow().isoformat(),
+            "resultado": {"total": len(itens), "contagem": contagem, "itens": itens,
+                          "nao_encontrados": sorted(skus - {chave_de(p.get("sku") or p.get("codigo_produto")) for p, _ in alvos}) if skus else None},
+        })
+    except Exception as e:
+        print(f"[ERRO] Fotos ML -> Olist: {e}")
+        _fotos_ml_estado.update({"status": "erro", "erro": str(e), "concluido_em": datetime.utcnow().isoformat()})
+
+
+async def fotos_ml_olist_iniciar(request: Request):
+    """POST /api/olist/fotos-ml/iniciar  body: {"aplicar": false, "externo": false, "skus": ["576"]}
+    aplicar=false (padrão) = prévia, não grava. skus vazio = todos."""
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    aplicar = body.get("aplicar") is True
+    externo = body.get("externo") is True
+    skus = {re.sub(r"[^a-z0-9]", "", str(s).lower()) for s in (body.get("skus") or []) if str(s).strip()} or None
+    with _fotos_ml_lock:
+        if _fotos_ml_estado["status"] == "rodando":
+            return JSONResponse({"status": "rodando", "progresso": _fotos_ml_estado["progresso"]})
+        _fotos_ml_estado.update({"status": "rodando", "aplicar": aplicar, "externo": externo, "progresso": None,
+                                 "resultado": None, "erro": None,
+                                 "iniciado_em": datetime.utcnow().isoformat(), "concluido_em": None})
+        threading.Thread(target=_rodar_fotos_ml_olist, args=(aplicar, skus, externo), daemon=True).start()
+    return JSONResponse({"status": "rodando", "aplicar": aplicar, "externo": externo})
+
+
+async def fotos_ml_olist_status(request: Request):
+    """GET /api/olist/fotos-ml — status/resultado da última execução."""
+    return JSONResponse(_fotos_ml_estado)
+
+
+_IMG_HOSTS = ("http2.mlstatic.com", "s3.amazonaws.com")
+# Amazon: >= 1000px de um lado e >= 500 do outro, só JPEG/PNG (sem webp). TikTok: lado >= 300.
+_IMG_LADO = 1000
+
+
+def _img_fora(img) -> bool:
+    return img.format not in ("JPEG", "PNG") or max(img.size) < _IMG_LADO or min(img.size) < 500
+# código curto -> URL de origem. A Olist recusa link longo ("extensão não encontrada") e baixa a imagem
+# na hora do PUT, então basta valer durante o job. ponytail: some no restart; rodar o job de novo resolve.
+_img_quadrada_urls: Dict[str, str] = {}
+
+
+def _baixar_imagem(url: str):
+    from PIL import Image
+    if urllib.parse.urlparse(url).hostname not in _IMG_HOSTS:
+        raise ValueError("host não permitido")
+    with urllib.request.urlopen(url, timeout=30) as r:
+        return Image.open(io.BytesIO(r.read()))
+
+
+async def imagem_quadrada(request: Request):
+    """GET /api/imagem-quadrada/{cod}.jpg -> a imagem centralizada num quadrado branco
+    (ampliada até o lado maior ter 1000px), em JPEG. URL pública para a Olist baixar (ela exige extensão no link).
+    Só aceita imagens do ML e do S3 da Olist."""
+    from PIL import Image
+    try:
+        url = _img_quadrada_urls[request.path_params["cod"]]
+        img = (await asyncio.to_thread(_baixar_imagem, url)).convert("RGB")
+    except Exception as e:
+        return JSONResponse({"erro": str(e)}, status_code=400)
+    escala = _IMG_LADO / max(img.size)
+    if escala > 1:
+        img = img.resize((round(img.width * escala), round(img.height * escala)), Image.LANCZOS)
+    lado = max(img.size)
+    tela = Image.new("RGB", (lado, lado), "white")
+    tela.paste(img, ((lado - img.width) // 2, (lado - img.height) // 2))
+    buf = io.BytesIO()
+    tela.save(buf, "JPEG", quality=92)
+    return Response(buf.getvalue(), media_type="image/jpeg")
+
+
+_img_peq_lock = threading.Lock()
+_img_peq_estado: Dict = {"status": "idle", "aplicar": False, "progresso": None,
+                         "resultado": None, "erro": None, "iniciado_em": None, "concluido_em": None}
+
+
+def _rodar_imagens_pequenas(aplicar: bool, skus: Optional[set], base: str) -> None:
+    """Troca, nos produtos Olist, só as imagens fora da regra (Amazon/TikTok) pela versão em quadrado branco
+    (/api/imagem-quadrada), mantendo a ordem. aplicar=False é prévia."""
+    import hashlib
+    chave_de = lambda s: re.sub(r"[^a-z0-9]", "", (s or "").lower())
+    try:
+        alvos = [p for p in olist.listar_todos_produtos(limite=3000) if p.get("situacao") != "E"
+                 and (not skus or chave_de(p.get("sku") or p.get("codigo_produto")) in skus)]
+        itens = []
+        for i, p in enumerate(alvos, 1):
+            _img_peq_estado["progresso"] = f"{i}/{len(alvos)}"
+            base_it = {"sku": p.get("sku"), "produto_id": p.get("id")}
+            atual = olist.obter_anexos(str(p.get("id")))
+            if not atual.get("sucesso"):
+                itens.append({**base_it, "status": "erro", "erro": atual.get("erro")})
+                continue
+            urls = [a.get("url") for a in (atual.get("dados") or []) if a.get("url")]
+            novas, pequenas = [], []
+            for k, u in enumerate(urls, 1):
+                try:
+                    img = _baixar_imagem(u)
+                    if _img_fora(img):
+                        pequenas.append(f"{k}:{img.width}x{img.height}" + ("" if img.format == "JPEG" else f" {img.format}"))
+                        cod = hashlib.md5(u.encode()).hexdigest()[:16]
+                        _img_quadrada_urls[cod] = u
+                        u = f"{base}/api/imagem-quadrada/{cod}.jpg"
+                except Exception:
+                    pass
+                novas.append(u)
+            if not pequenas:
+                continue
+            if not aplicar:
+                itens.append({**base_it, "status": "previa", "pequenas": pequenas})
+                continue
+            r = olist.substituir_anexos(str(p.get("id")), novas)
+            itens.append({**base_it, "status": "trocado" if r.get("sucesso") else "erro", "pequenas": pequenas,
+                          "anteriores": urls, "erro": r.get("erro")})
+        contagem: Dict[str, int] = {}
+        for it in itens:
+            contagem[it["status"]] = contagem.get(it["status"], 0) + 1
+        _img_peq_estado.update({"status": "pronto", "erro": None, "concluido_em": datetime.utcnow().isoformat(),
+                                "resultado": {"total": len(itens), "contagem": contagem, "itens": itens}})
+    except Exception as e:
+        print(f"[ERRO] Imagens pequenas Olist: {e}")
+        _img_peq_estado.update({"status": "erro", "erro": str(e), "concluido_em": datetime.utcnow().isoformat()})
+
+
+async def imagens_pequenas_iniciar(request: Request):
+    """POST /api/olist/imagens-pequenas/iniciar  body: {"aplicar": false, "skus": []}  skus vazio = todos."""
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    aplicar = body.get("aplicar") is True
+    skus = {re.sub(r"[^a-z0-9]", "", str(s).lower()) for s in (body.get("skus") or []) if str(s).strip()} or None
+    base = f"https://{request.headers.get('host')}"
+    with _img_peq_lock:
+        if _img_peq_estado["status"] == "rodando":
+            return JSONResponse({"status": "rodando", "progresso": _img_peq_estado["progresso"]})
+        _img_peq_estado.update({"status": "rodando", "aplicar": aplicar, "progresso": None, "resultado": None,
+                                "erro": None, "iniciado_em": datetime.utcnow().isoformat(), "concluido_em": None})
+        threading.Thread(target=_rodar_imagens_pequenas, args=(aplicar, skus, base), daemon=True).start()
+    return JSONResponse({"status": "rodando", "aplicar": aplicar})
+
+
+async def imagens_pequenas_status(request: Request):
+    """GET /api/olist/imagens-pequenas — status/resultado da última execução."""
+    return JSONResponse(_img_peq_estado)
+
+
+_marca_lock = threading.Lock()
+_marca_estado: Dict = {"status": "idle", "aplicar": False, "progresso": None,
+                       "resultado": None, "erro": None, "iniciado_em": None, "concluido_em": None}
+
+
+def _rodar_marca_olist(aplicar: bool, nome: str, sobrescrever: bool, skus: Optional[set]) -> None:
+    """Põe a marca `nome` nos produtos Olist ativos sem marca (sobrescrever=True troca todas). aplicar=False é prévia."""
+    chave_de = lambda s: re.sub(r"[^a-z0-9]", "", (s or "").lower())
+    try:
+        marca_id = olist.marca_id(nome) if aplicar else None
+        if aplicar and not marca_id:
+            raise RuntimeError(f"Não consegui obter/criar a marca '{nome}' na Olist")
+        alvos = [p for p in olist.listar_todos_produtos(limite=3000) if p.get("situacao") != "E"
+                 and (not skus or chave_de(p.get("sku")) in skus)]
+        itens = []
+        for i, p in enumerate(alvos, 1):
+            _marca_estado["progresso"] = f"{i}/{len(alvos)}"
+            base = {"sku": p.get("sku"), "produto_id": p.get("id")}
+            if not aplicar:
+                atual = ((olist.obter_detalhes_completo(str(p.get("id"))) or {}).get("marca") or {}).get("nome")
+                itens.append({**base, "status": "previa", "marca_atual": atual})
+                continue
+            r = olist.atualizar_marca(str(p.get("id")), marca_id, sobrescrever)
+            status = "erro" if not r.get("sucesso") else ("mantido" if r.get("sem_alteracao") else "atualizado")
+            itens.append({**base, "status": status, "anterior": r.get("anterior"), "erro": r.get("erro")})
+        contagem: Dict[str, int] = {}
+        for it in itens:
+            contagem[it["status"]] = contagem.get(it["status"], 0) + 1
+        _marca_estado.update({"status": "pronto", "erro": None, "concluido_em": datetime.utcnow().isoformat(),
+                              "resultado": {"total": len(itens), "contagem": contagem, "itens": itens}})
+    except Exception as e:
+        print(f"[ERRO] Marca Olist: {e}")
+        _marca_estado.update({"status": "erro", "erro": str(e), "concluido_em": datetime.utcnow().isoformat()})
+
+
+async def marca_olist_iniciar(request: Request):
+    """POST /api/olist/marca/iniciar  body: {"aplicar": false, "marca": "Genérica", "sobrescrever": false, "skus": []}"""
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    aplicar = body.get("aplicar") is True
+    nome = (body.get("marca") or "Genérica").strip()
+    sobrescrever = body.get("sobrescrever") is True
+    skus = {re.sub(r"[^a-z0-9]", "", str(s).lower()) for s in (body.get("skus") or []) if str(s).strip()} or None
+    with _marca_lock:
+        if _marca_estado["status"] == "rodando":
+            return JSONResponse({"status": "rodando", "progresso": _marca_estado["progresso"]})
+        _marca_estado.update({"status": "rodando", "aplicar": aplicar, "progresso": None, "resultado": None,
+                              "erro": None, "iniciado_em": datetime.utcnow().isoformat(), "concluido_em": None})
+        threading.Thread(target=_rodar_marca_olist, args=(aplicar, nome, sobrescrever, skus), daemon=True).start()
+    return JSONResponse({"status": "rodando", "aplicar": aplicar, "marca": nome})
+
+
+async def marca_olist_status(request: Request):
+    """GET /api/olist/marca — status/resultado da última execução."""
+    return JSONResponse(_marca_estado)
+
+
+_preco_desc_lock = threading.Lock()
+_preco_desc_estado: Dict = {"status": "idle", "aplicar": False, "progresso": None,
+                            "resultado": None, "erro": None, "iniciado_em": None, "concluido_em": None}
+
+
+def _rodar_preco_desc_ml_olist(aplicar: bool, skus: Optional[set], campos: set) -> None:
+    """Copia do anúncio ML do mesmo SKU (ativo primeiro, depois o mais vendido) para o produto Olist:
+    preço = preço cheio do anúncio (original_price, sem promoção) e descrição = texto do anúncio.
+    aplicar=False é prévia. Cada gravação guarda os valores anteriores."""
+    chave_de = lambda s: re.sub(r"[^a-z0-9]", "", (s or "").lower())
+    try:
+        db = SessionLocal()
+        try:
+            melhor: Dict[str, Any] = {}
+            for row in db.query(MercadoLivreItemCache).filter(
+                MercadoLivreItemCache.sku.isnot(None), MercadoLivreItemCache.sku != "",
+                MercadoLivreItemCache.status != "closed",
+            ).all():
+                chave = chave_de(row.sku)
+                rank = (row.status == "active", row.vendidos or 0)
+                if chave and (chave not in melhor or rank > (melhor[chave].status == "active", melhor[chave].vendidos or 0)):
+                    melhor[chave] = row
+            item_por_chave = {c: r.item_id for c, r in melhor.items()}
+        finally:
+            db.close()
+
+        alvos = []
+        for p in olist.listar_todos_produtos(limite=3000):
+            chave = chave_de(p.get("sku") or p.get("codigo_produto"))
+            if p.get("situacao") == "E" or chave not in item_por_chave or (skus and chave not in skus):
+                continue
+            alvos.append((p, item_por_chave.pop(chave)))
+
+        precos: Dict[str, Optional[float]] = {}
+        ids = [item_id for _, item_id in alvos]
+        for i in range(0, len(ids), 20):
+            _preco_desc_estado["progresso"] = f"lendo preços ML {i}/{len(ids)}"
+            for entry in ml._get("/items", {"ids": ",".join(ids[i:i + 20]), "attributes": "id,price,original_price"}) or []:
+                body = entry.get("body") or {}
+                if entry.get("code") == 200 and body.get("id"):
+                    precos[body["id"]] = float(body.get("original_price") or body.get("price") or 0) or None
+
+        itens = []
+        for i, (p, item_id) in enumerate(alvos, 1):
+            _preco_desc_estado["progresso"] = f"{i}/{len(alvos)}"
+            preco = precos.get(item_id) if "preco" in campos else None
+            desc = None
+            if "descricao" in campos:
+                d = ml._get(f"/items/{item_id}/description") or {}
+                desc = (d.get("plain_text") or "").strip() or None
+            base = {"sku": p.get("sku") or p.get("codigo_produto"), "nome": p.get("nome"), "produto_id": p.get("id"),
+                    "item_id": item_id, "preco_olist": p.get("preco"), "preco_ml": preco,
+                    "descricao_ml_chars": len(desc) if desc else 0}
+            if preco is None and desc is None:
+                itens.append({**base, "status": "sem_dado_ml"})
+                continue
+            if not aplicar:
+                itens.append({**base, "status": "previa"})
+                continue
+            r = olist.atualizar_preco_descricao(str(p.get("id")), preco, desc)
+            status = "erro" if not r.get("sucesso") else ("igual" if r.get("sem_alteracao") else "atualizado")
+            itens.append({**base, "status": status, "anteriores": r.get("anteriores"), "erro": r.get("erro")})
+
+        contagem: Dict[str, int] = {}
+        for it in itens:
+            contagem[it["status"]] = contagem.get(it["status"], 0) + 1
+        _preco_desc_estado.update({
+            "status": "pronto", "erro": None, "concluido_em": datetime.utcnow().isoformat(),
+            "resultado": {"total": len(itens), "contagem": contagem, "itens": itens,
+                          "nao_encontrados": sorted(skus - {chave_de(p.get("sku") or p.get("codigo_produto")) for p, _ in alvos}) if skus else None},
+        })
+    except Exception as e:
+        print(f"[ERRO] Preço/descrição ML -> Olist: {e}")
+        _preco_desc_estado.update({"status": "erro", "erro": str(e), "concluido_em": datetime.utcnow().isoformat()})
+
+
+async def preco_desc_ml_olist_iniciar(request: Request):
+    """POST /api/olist/preco-descricao-ml/iniciar  body: {"aplicar": false, "campos": ["preco","descricao"], "skus": []}
+    aplicar=false (padrão) = prévia, não grava. skus vazio = todos."""
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    aplicar = body.get("aplicar") is True
+    campos = {c for c in (body.get("campos") or ["preco", "descricao"]) if c in ("preco", "descricao")}
+    skus = {re.sub(r"[^a-z0-9]", "", str(s).lower()) for s in (body.get("skus") or []) if str(s).strip()} or None
+    with _preco_desc_lock:
+        if _preco_desc_estado["status"] == "rodando":
+            return JSONResponse({"status": "rodando", "progresso": _preco_desc_estado["progresso"]})
+        _preco_desc_estado.update({"status": "rodando", "aplicar": aplicar, "progresso": None, "resultado": None,
+                                   "erro": None, "iniciado_em": datetime.utcnow().isoformat(), "concluido_em": None})
+        threading.Thread(target=_rodar_preco_desc_ml_olist, args=(aplicar, skus, campos), daemon=True).start()
+    return JSONResponse({"status": "rodando", "aplicar": aplicar, "campos": sorted(campos)})
+
+
+async def preco_desc_ml_olist_status(request: Request):
+    """GET /api/olist/preco-descricao-ml — status/resultado da última execução."""
+    return JSONResponse(_preco_desc_estado)
 
 
 _lista_compra_lock = threading.Lock()
@@ -2883,7 +3371,6 @@ async def listar_embaldes(request: Request):
                     "qtd_items": len(e.itens),
                     "qtd_validados": sum(1 for i in e.itens if i.validado == 1),
                     "qtd_baixados": sum(1 for i in e.itens if _progresso_item_full(i)[1] >= _progresso_item_full(i)[0] and _progresso_item_full(i)[0] > 0),
-                    "qtd_baixados_apos_encerramento": sum(1 for i in e.itens if i.baixa_aplicada == 1 and i.data_baixa and e.data_encerramento and i.data_baixa > e.data_encerramento),
                     "qtd_em_espera": sum(1 for i in e.itens if (i.em_espera or 0) == 1),
                     "total_lido": sum(i.quantidade_separada or 0 for i in e.itens),
                     "revisao_salva_em": e.revisao_salva_em.isoformat() if e.revisao_salva_em else None,
@@ -2974,6 +3461,14 @@ async def atualizar_data_limite_embale(request: Request):
         else:
             embale.data_limite = None
 
+        # Encerrado com data nova no futuro (ou sem data) volta pra ação. Data já
+        # vencida não reabre: o job encerrar_inbounds_vencidos fecharia de novo.
+        reaberto = False
+        if embale.status == "encerrado" and (not embale.data_limite or embale.data_limite > datetime.utcnow()):
+            embale.status = "processando"
+            embale.data_encerramento = None
+            reaberto = True
+
         db.commit()
         _registrar_log_operacao(
             request,
@@ -2986,12 +3481,14 @@ async def atualizar_data_limite_embale(request: Request):
                 "numero_inbound": embale.numero_inbound,
                 "data_limite_anterior": data_limite_anterior,
                 "data_limite_nova": embale.data_limite.isoformat() if embale.data_limite else None,
+                "reaberto": reaberto,
             },
         )
         return JSONResponse({
             "id": embale.id,
             "data_limite": embale.data_limite.isoformat() if embale.data_limite else None,
-            "mensagem": "Data limite atualizada"
+            "reaberto": reaberto,
+            "mensagem": "Inbound reaberto: voltou para Em ação" if reaberto else "Data limite atualizada"
         })
 
     except Exception as e:
@@ -2999,6 +3496,27 @@ async def atualizar_data_limite_embale(request: Request):
         return JSONResponse({"erro": str(e)}, status_code=500)
     finally:
         db.close()
+
+
+def _descartar_vinculo_memorizado_inativo(db, item) -> None:
+    """O upload copia o vínculo memorizado do SKU (VinculoOlist) sem saber se o
+    produto ainda existe; produto excluído/inativo na Olist seguia vinculado.
+    Na 1ª revisão confere a situação e, se não for ativo, apaga a memória e
+    solta o item: o _resolver_olist_para_item busca de novo (só ativos).
+    Só para vínculo vindo da memória — o manual não é reconferido."""
+    if not item.olist_produto_id or not (item.validacao_mensagem or "").startswith("Vinculado via SKU"):
+        return
+    det = olist.obter_detalhes_completo(str(item.olist_produto_id))
+    # ponytail: sem resposta da API mantém o vínculo (não solta tudo se a Olist cair)
+    if det is None or (det.get("situacao") or "A").upper() == "A":
+        return
+    print(f"[VINCULO] {item.sku_inbound}: produto {item.olist_produto_id} situacao={det.get('situacao')} -> refazendo vínculo")
+    db.query(VinculoOlist).filter(VinculoOlist.olist_produto_id == str(item.olist_produto_id)).delete()
+    item.olist_produto_id = None
+    item.olist_sku = None
+    item.olist_nome = None
+    item.validado = 0
+    item.validacao_mensagem = None
 
 
 def _resolver_olist_para_item(item):
@@ -3276,6 +3794,7 @@ async def revisar_baixa_embale(request: Request):
         resolvidos = {}  # item_id -> (produto_id, nome)
         revisado_em = datetime.utcnow()
         for item in itens:
+            _descartar_vinculo_memorizado_inativo(db, item)
             pid, nome = _resolver_olist_para_item(item)
             resolvidos[item.id] = (pid, nome)
             # Salva o vínculo se for novo (ainda não tinha olist_produto_id).
@@ -5232,6 +5751,117 @@ async def custos_produto(request: Request):
         db.close()
 
 
+_CAMPOS_TIKTOK = ("preco_venda", "custo", "embalagem", "comissao_pct", "imposto_pct", "taxa_fixa",
+                  "afiliado_pct", "frete", "ads_pct", "outros", "lucro", "margem_pct")
+
+
+async def tiktok_calculos(request: Request):
+    """GET /api/tiktok/calculos -> {calculos:[...]} (mais recentes primeiro). POST salva um cálculo."""
+    db = SessionLocal()
+    try:
+        if request.method == "GET":
+            rows = db.query(CalculoTikTok).order_by(CalculoTikTok.id.desc()).all()
+            return JSONResponse({"calculos": [
+                {"id": r.id, "sku": r.sku, "produto": r.produto, "classificacao": r.classificacao,
+                 "criado_em": r.criado_em.isoformat() if r.criado_em else None,
+                 **{c: getattr(r, c) for c in _CAMPOS_TIKTOK}} for r in rows
+            ]}, headers={"Cache-Control": "no-store"})
+        body = await request.json()
+        sku = str(body.get("sku") or "").strip()
+        if not sku:
+            return JSONResponse({"erro": "SKU obrigatório"}, status_code=400)
+        try:
+            campos = {c: float(body.get(c) or 0) for c in _CAMPOS_TIKTOK}
+        except (TypeError, ValueError):
+            return JSONResponse({"erro": "valores numéricos inválidos"}, status_code=400)
+        db.add(CalculoTikTok(sku=sku, produto=str(body.get("produto") or "").strip()[:300],
+                             classificacao=str(body.get("classificacao") or "")[:30], **campos))
+        db.commit()
+        return JSONResponse({"ok": True})
+    except Exception as e:
+        db.rollback()
+        return JSONResponse({"erro": str(e)}, status_code=500)
+    finally:
+        db.close()
+
+
+async def comparativo_skus(request: Request):
+    """GET /api/comparativo-skus?skus=A,B -> margem do mesmo SKU no ML, Shopee e TikTok."""
+    skus = [s.strip() for s in (request.query_params.get("skus") or "").split(",") if s.strip()][:50]
+    db = SessionLocal()
+    try:
+        from app.comparativo_sku import comparar
+        dados = await asyncio.to_thread(comparar, db, skus)
+        return JSONResponse({"itens": dados}, headers={"Cache-Control": "no-store"})
+    except Exception as e:
+        return JSONResponse({"erro": str(e)}, status_code=500)
+    finally:
+        db.close()
+
+
+async def auditoria_shopee_catalogo(request: Request):
+    """GET /api/auditoria/shopee-catalogo -> anúncios da Shopee no nível do item (com SKUs das variações). Só leitura."""
+    try:
+        from app.auditoria_catalogo import itens_shopee
+        itens = await asyncio.to_thread(itens_shopee)
+        return JSONResponse({"total": len(itens), "itens": itens}, headers={"Cache-Control": "no-store"})
+    except Exception as e:
+        return JSONResponse({"erro": str(e)}, status_code=500)
+
+
+async def auditoria_shopee_logistica(request: Request):
+    """GET /api/auditoria/shopee-logistica?item_ids=1,2 -> canais de envio da loja (limites) e medidas dos anúncios. Só leitura."""
+    from app.integracoes_shopee import shopee as sh
+    canais = await asyncio.to_thread(sh.chamar, "/api/v2/logistics/get_channel_list", {})
+    ids = (request.query_params.get("item_ids") or "").strip()
+    itens = await asyncio.to_thread(sh.chamar, "/api/v2/product/get_item_base_info", {"item_id_list": ids}) if ids else None
+    return JSONResponse({"canais": canais, "itens": itens}, headers={"Cache-Control": "no-store"})
+
+
+async def auditoria_olist_anexos(request: Request):
+    """GET /api/auditoria/olist-anexos?ids=1,2 -> URLs das imagens de cada produto Olist (máx. 50). Só leitura."""
+    ids = [i.strip() for i in (request.query_params.get("ids") or "").split(",") if i.strip().isdigit()][:50]
+    saida = {}
+    for pid in ids:
+        r = await asyncio.to_thread(olist.obter_anexos, pid)
+        saida[pid] = [a.get("url") for a in (r.get("dados") or []) if a.get("url")] if r.get("sucesso") else {"erro": r.get("erro")}
+    return JSONResponse(saida, headers={"Cache-Control": "no-store"})
+
+
+async def tiktok_calculo_excluir(request: Request):
+    """DELETE /api/tiktok/calculos/{id} · PATCH edita custo (lucro/margem/classificação recalculados no front)."""
+    db = SessionLocal()
+    try:
+        q = db.query(CalculoTikTok).filter(CalculoTikTok.id == int(request.path_params["calculo_id"]))
+        if request.method == "PATCH":
+            body = await request.json()
+            row = q.first()
+            if not row:
+                return JSONResponse({"erro": "cálculo não encontrado"}, status_code=404)
+            try:
+                custo, lucro, margem = (float(body[k]) for k in ("custo", "lucro", "margem_pct"))
+            except (KeyError, TypeError, ValueError):
+                return JSONResponse({"erro": "custo, lucro e margem_pct numéricos obrigatórios"}, status_code=400)
+            if custo < 0:
+                return JSONResponse({"erro": "custo não pode ser negativo"}, status_code=400)
+            row.custo, row.lucro, row.margem_pct = custo, lucro, margem
+            row.classificacao = str(body.get("classificacao") or row.classificacao)[:30]
+            # O custo editado aqui também vira o custo oficial do SKU (margem dos Anúncios ML), com histórico de vigência.
+            oficial = db.query(CustoProduto).filter(CustoProduto.produto_chave == row.sku).first()
+            mudou_oficial = custo > 0 and (not oficial or abs((oficial.custo or 0) - custo) > 0.009)
+            if mudou_oficial:
+                registrar_custo(db, row.sku, custo, datetime.utcnow(), _operador_contexto(request)["operador_nome"])
+            db.commit()
+            if mudou_oficial:
+                limpar_cache_custos()
+            return JSONResponse({"ok": True, "custo_oficial_atualizado": mudou_oficial})
+        q.delete()
+        db.commit()
+        return JSONResponse({"ok": True})
+    finally:
+        db.close()
+
+
 async def ml_status(request: Request):
     """GET /api/ml/status — situação da integração Mercado Livre."""
     return JSONResponse(ml.status(), headers={"Cache-Control": "no-store"})
@@ -6914,6 +7544,10 @@ routes = [
     Route("/api/notas-fiscais/{id:int}/frete", atualizar_frete_nota, methods=["POST"]),
     Route("/api/precos-venda", precos_venda, methods=["GET", "POST"]),
     Route("/api/custos", custos_produto, methods=["GET", "POST"]),
+    Route("/api/tiktok/calculos", tiktok_calculos, methods=["GET", "POST"]),
+    Route("/api/comparativo-skus", comparativo_skus, methods=["GET"]),
+    Route("/api/auditoria/shopee-catalogo", auditoria_shopee_catalogo, methods=["GET"]),
+    Route("/api/tiktok/calculos/{calculo_id:int}", tiktok_calculo_excluir, methods=["DELETE", "PATCH"]),
     Route("/api/ml/status", ml_status, methods=["GET"]),
     Route("/api/ml/sync", ml_sync_cache, methods=["POST"]),
     Route("/api/ml/anuncios", ml_anuncios, methods=["GET"]),
@@ -7004,6 +7638,19 @@ routes = [
     Route("/api/olist/produtos-tipos/iniciar", produtos_tipos_iniciar, methods=["POST"]),
     Route("/api/fiscal/ml-olist", fiscal_ml_olist_status, methods=["GET"]),
     Route("/api/fiscal/ml-olist/iniciar", fiscal_ml_olist_iniciar, methods=["POST"]),
+    Route("/api/olist/medidas-ml", medidas_ml_olist_status, methods=["GET"]),
+    Route("/api/olist/medidas-ml/iniciar", medidas_ml_olist_iniciar, methods=["POST"]),
+    Route("/api/olist/fotos-ml", fotos_ml_olist_status, methods=["GET"]),
+    Route("/api/olist/fotos-ml/iniciar", fotos_ml_olist_iniciar, methods=["POST"]),
+    Route("/api/olist/preco-descricao-ml", preco_desc_ml_olist_status, methods=["GET"]),
+    Route("/api/olist/marca", marca_olist_status, methods=["GET"]),
+    Route("/api/olist/marca/iniciar", marca_olist_iniciar, methods=["POST"]),
+    Route("/api/imagem-quadrada/{cod}.jpg", imagem_quadrada, methods=["GET"]),
+    Route("/api/olist/imagens-pequenas", imagens_pequenas_status, methods=["GET"]),
+    Route("/api/olist/imagens-pequenas/iniciar", imagens_pequenas_iniciar, methods=["POST"]),
+    Route("/api/olist/preco-descricao-ml/iniciar", preco_desc_ml_olist_iniciar, methods=["POST"]),
+    Route("/api/auditoria/shopee-logistica", auditoria_shopee_logistica, methods=["GET"]),
+    Route("/api/auditoria/olist-anexos", auditoria_olist_anexos, methods=["GET"]),
     Route("/api/lista-compra/parados", lista_compra_parados_status, methods=["GET"]),
     Route("/api/lista-compra/parados/iniciar", lista_compra_parados_iniciar, methods=["POST"]),
     # Inbound / Lista de Separação para FU

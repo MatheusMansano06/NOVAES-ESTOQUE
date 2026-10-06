@@ -78,4 +78,10 @@ def ids_por_codigos(candidatos) -> list[int]:
 
 
 def publico(d: Devolucao) -> dict:
-    return {c.name: getattr(d, c.name) for c in Devolucao.__table__.columns if c.name != "bruto"}
+    r = {c.name: getattr(d, c.name) for c in Devolucao.__table__.columns if c.name != "bruto"}
+    # "Já revisei" no ML, pela última sincronização; o aceite confere ao vivo antes de enviar.
+    claim = (d.bruto or {}).get("claim") or {}
+    r["aguarda_revisao"] = any(a["action"] in ("return_review_ok", "return_review_unified_ok")
+                               for p in claim.get("players") or [] if p["type"] == "seller"
+                               for a in p.get("available_actions") or [])
+    return r

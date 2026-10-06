@@ -361,6 +361,29 @@ class CustoProduto(Base):
     atualizado_em = Column(DateTime, default=datetime.utcnow)
 
 
+class CalculoTikTok(Base):
+    """Cálculo de rentabilidade TikTok Shop salvo na aba Operação. Entradas + resultado (lucro/margem) congelados."""
+    __tablename__ = "tiktok_calculos"
+
+    id = Column(Integer, primary_key=True)
+    sku = Column(String(150), index=True)
+    produto = Column(String(300))
+    preco_venda = Column(Float, default=0)
+    custo = Column(Float, default=0)
+    embalagem = Column(Float, default=0)
+    comissao_pct = Column(Float, default=0)
+    imposto_pct = Column(Float, default=0)
+    taxa_fixa = Column(Float, default=0)
+    afiliado_pct = Column(Float, default=0)
+    frete = Column(Float, default=0)
+    ads_pct = Column(Float, default=0)
+    outros = Column(Float, default=0)
+    lucro = Column(Float, default=0)
+    margem_pct = Column(Float, default=0)
+    classificacao = Column(String(30))
+    criado_em = Column(DateTime, default=datetime.utcnow)
+
+
 class CustoProdutoHistorico(Base):
     """Cada mudança do custo de um SKU com a data a partir da qual vale (UTC). O prejuízo de uma quebra usa o custo
     vigente no dia da conferência: mudar o preço não reescreve o passado. custos_produto guarda o da vigência mais recente."""

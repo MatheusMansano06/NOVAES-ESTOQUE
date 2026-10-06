@@ -10,6 +10,8 @@ export interface Devolucao {
   rastreio: string | null;
   etapa: string;
   status_plataforma: string;
+  /** ML: botão "Já revisei" pendente no painel (pela última sincronização). */
+  aguarda_revisao?: boolean;
   em_mediacao: boolean;
   pode_contestar: boolean;
   motivo: string;

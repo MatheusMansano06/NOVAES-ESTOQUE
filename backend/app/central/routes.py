@@ -198,6 +198,10 @@ async def conferencia_ver_evidencia(request: Request):
     return FileResponse(await run_in_threadpool(conferencia.arquivo_evidencia, _id(request)))
 
 
+async def conferencia_excluir_evidencia(request: Request):
+    return await run_in_threadpool(conferencia.excluir_evidencia, _id(request))
+
+
 # ---------- Mediações ----------
 
 async def mediacoes_motivos(request: Request):
@@ -221,6 +225,11 @@ async def mediacoes_contestar(request: Request):
     if not isinstance(motivo, str) or not isinstance(texto, str) or not 10 <= len(texto) <= 2000:
         raise ValueError("texto deve ter entre 10 e 2000 caracteres")
     return await run_in_threadpool(mediacoes.contestar, _id(request), motivo, texto)
+
+
+async def mediacoes_pendentes_revisao(request: Request):
+    return await run_in_threadpool(mediacoes.pendentes_revisao, _q(request, "ao_vivo", False, bool),
+                                   _q(request, "dias", 30, int, 1, 120))
 
 
 async def mediacoes_historico(request: Request):
@@ -454,8 +463,10 @@ rotas = [
     _rota("/shopee/disputa/{return_sn}", shopee_campos_disputa),
     _rota("/mediacoes/{id:int}/contestar", mediacoes_contestar, "POST"),
     _rota("/mediacoes/{id:int}/aceitar", mediacoes_aceitar, "POST"),
+    _rota("/mediacoes/pendentes-revisao", mediacoes_pendentes_revisao),
     _rota("/mediacoes/{id:int}", mediacoes_historico),
     _rota("/mercado-livre/sincronizar", ml_sincronizar, "POST"),
+    _rota("/conferencia/evidencias/{id:int}", conferencia_excluir_evidencia, "DELETE"),
     _rota("/shopee/sincronizar", shopee_sincronizar, "POST"),
     _rota("/shopee/sincronizar-falha-entrega", shopee_sincronizar_falha_entrega, "POST"),
     _rota("/olist/pedidos/{numero}", olist_pedido),

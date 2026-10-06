@@ -129,187 +129,122 @@ def _extrair_items_shopee_pdf(pdf) -> dict:
     }
 
 
+_PASSO_LINHA_SHOPEE = 26.2  # distância vertical entre linhas da mesma célula
+
+
+def _linhas_shopee_por_char(page) -> List[tuple]:
+    """
+    Agrupa CARACTERES pela altura exata (não palavras arredondadas).
+
+    O Picking List da Shopee desenha o produto que vem quebrado da página
+    anterior 1,5pt acima do produto seguinte; agrupando por palavra os dois se
+    intercalam ("LVaisnedirear" = Lander + Viseira). Pelo char, cada linha
+    fica com a sua altura e as duas camadas se separam.
+    Retorna [(top, {coluna: [palavras]})] ordenado por top.
+    """
+    por_top: dict = {}
+    for ch in page.chars:
+        por_top.setdefault(round(ch["top"], 1), []).append(ch)
+
+    linhas = []
+    for top in sorted(por_top):
+        palavras = []  # [x0, texto]
+        ultimo_x1 = None
+        for ch in sorted(por_top[top], key=lambda c: c["x0"]):
+            texto = ch.get("text") or ""
+            if not texto.strip():
+                ultimo_x1 = None
+                continue
+            if ultimo_x1 is None or ch["x0"] - ultimo_x1 > 2:
+                palavras.append([ch["x0"], texto])
+            else:
+                palavras[-1][1] += texto
+            ultimo_x1 = ch["x1"]
+
+        colunas = {"vendor": [], "shopee": [], "name": [], "warehouse": [], "qty": []}
+        for x0, texto in palavras:
+            if x0 < 110:
+                colunas["vendor"].append(texto)
+            elif x0 < 190:
+                colunas["shopee"].append(texto)
+            elif x0 < 445:
+                colunas["name"].append(texto)
+            elif x0 < 525:
+                colunas["warehouse"].append(texto)
+            else:
+                colunas["qty"].append(texto)
+        linhas.append((top, colunas))
+    return linhas
+
+
 def _extrair_items_shopee_pagina_v2(page) -> List[dict]:
     """
-    Parser v2 para Shopee: agrupa linhas consecutivas para montar item completo.
-    Lida com nomes de produtos quebrados em múltiplas linhas.
+    Monta os itens do Picking List da Shopee a partir das linhas por char.
 
-    IMPORTANTE: Se múltiplos SKUs vendor estão na mesma altura Y, trata como
-    produtos DIFERENTES (sobrepostos no PDF). Separa por mudança de SKU vendor.
-
-    Padrão esperado:
-    - SKU_vendor (coluna 1) | SKU_shopee padrão XXXXX_X (coluna 2) | Nome... | Item without/with | QTD
-    - Continuações de nome vêm em linhas seguintes
-    - GTIN marca fim do item (fica para a próxima)
+    Uma linha com SKU Shopee (XXXXX_X) abre um item; as demais são
+    continuação (nome quebrado, SKU vendedor quebrado, dígitos da qtd).
+    Como dois itens podem estar abertos ao mesmo tempo (camadas sobrepostas),
+    a continuação vai para o item cuja última linha está a um passo de linha
+    de distância. A qtd é a junção dos números puros da coluna Qnt: no
+    layout normal vem inteira na 1ª linha; no layout quebrado vem um dígito
+    por linha ("2", "0", "0" = 200).
     """
-    words = page.extract_words(use_text_flow=True)
-    rows = {}
-    for word in words:
-        key = round(word["top"])
-        rows.setdefault(key, []).append(word)
+    abertos: List[dict] = []
+    fechados: List[dict] = []
 
-    # Primeiro agrupamento: por coluna de vendor (x < 110)
-    # Se múltiplos vendors na mesma altura, separa como diferentes
-    linhas_brutos_separadas = []
+    def fechar(cond) -> None:
+        for item in [i for i in abertos if cond(i)]:
+            abertos.remove(item)
+            fechados.append(item)
 
-    for key in sorted(rows):
-        words_ordenados = sorted(rows[key], key=lambda x: x["x0"])
-
-        # Extrair todos os vendors dessa linha
-        vendors_linha = []
-        outras_colunas = {"shopee": [], "name": [], "warehouse": [], "qty": []}
-
-        for word in words_ordenados:
-            texto = (word.get("text") or "").strip()
-            if not texto:
-                continue
-            x0 = word["x0"]
-            if x0 < 110:
-                vendors_linha.append((x0, texto))
-            elif x0 < 190:
-                outras_colunas["shopee"].append((x0, texto))
-            elif x0 < 445:
-                outras_colunas["name"].append((x0, texto))
-            elif x0 < 525:
-                outras_colunas["warehouse"].append((x0, texto))
-            else:
-                outras_colunas["qty"].append((x0, texto))
-
-        # Se tem múltiplos vendors, são produtos diferentes
-        if len(vendors_linha) > 1:
-            # Criar um "item" por vendor, separando as colunas por posição X
-            for idx, (vendor_x, vendor_texto) in enumerate(vendors_linha):
-                partes = {"vendor": [vendor_texto], "shopee": [], "name": [], "warehouse": [], "qty": []}
-
-                # Para cada coluna, pegar os textos "mais próximos" deste vendor em X
-                for campo, valores in outras_colunas.items():
-                    if valores:
-                        # Se tem tantos textos quanto vendors, alinha por índice
-                        # Senão, pega o primeiro
-                        if len(valores) >= len(vendors_linha):
-                            partes[campo] = [valores[idx][1]]
-                        else:
-                            partes[campo] = [valores[0][1]]
-
-                linhas_brutos_separadas.append({k: " ".join(v).strip() for k, v in partes.items()})
-        else:
-            # Padrão: um vendor por linha
-            partes = {"vendor": [], "shopee": [], "name": [], "warehouse": [], "qty": []}
-            partes["vendor"] = [v[1] for v in vendors_linha]
-            partes["shopee"] = [v[1] for v in outras_colunas["shopee"]]
-            partes["name"] = [v[1] for v in outras_colunas["name"]]
-            partes["warehouse"] = [v[1] for v in outras_colunas["warehouse"]]
-            partes["qty"] = [v[1] for v in outras_colunas["qty"]]
-
-            linhas_brutos_separadas.append({k: " ".join(v).strip() for k, v in partes.items()})
-
-    linhas_brutos = linhas_brutos_separadas
-
-    items = []
-    item_atual = None
-
-    for linha in linhas_brutos:
-        texto_linha = " ".join(
-            parte for parte in [
-                linha["vendor"],
-                linha["shopee"],
-                linha["name"],
-                linha["warehouse"],
-                linha["qty"],
-            ] if parte
-        ).strip()
-
+    for top, col in _linhas_shopee_por_char(page):
+        texto_linha = " ".join(" ".join(v) for v in col.values()).strip()
+        # Rodapé "Notas / Total N" (em duas alturas) encerra a tabela da página
+        if texto_linha.lower().startswith(("notas", "total")):
+            break
         if not texto_linha or _linha_shopee_ignorada(texto_linha):
             continue
 
-        # Tentar extrair SKU Shopee (padrão: XXXXX_X)
-        sku_shopee = _extrair_sku_shopee(linha["shopee"])
-        sku_vendor = _extrair_sku_vendor_shopee(linha["vendor"])
+        # Item cuja última linha ficou longe demais já terminou
+        fechar(lambda i: top - i["ultimo_top"] > _PASSO_LINHA_SHOPEE * 1.6)
 
-        # Se tem SKU Shopee, é um novo item
-        if sku_shopee:
-            if item_atual:
-                items.append(_normalizar_item_shopee(item_atual))
+        shopee = " ".join(col["shopee"])
+        sku_shopee = _extrair_sku_shopee(shopee)
+        vendor = " ".join(col["vendor"])
+        digitos_qtd = [t for t in col["qty"] if t.isdigit()]
 
-            qty_linha = _extrair_quantidade_coluna_shopee(linha["qty"])
-            sku_base = sku_vendor or sku_shopee
-
-            # Nome = tudo que vem após remover o SKU Shopee
-            nome_sem_sku = _remover_sku_shopee_do_texto(linha['shopee'], sku_shopee)
-            nome_completo = f"{nome_sem_sku} {linha['name']}".strip()
-            nome_completo = _limpar_campo_shopee(nome_completo)
-
-            item_atual = {
-                "sku": sku_base,
-                "codigo_ml": sku_shopee,  # Guardar SKU Shopee como codigo_ml
-                "titulo_anuncio": nome_completo,
-                "qtd_partes": [str(qty_linha)] if qty_linha is not None else [],
-            }
+        if sku_shopee or (not abertos and _extrair_sku_vendor_shopee(vendor)):
+            # Novo item fecha o que estava na mesma camada (linha logo acima)
+            fechar(lambda i: top - i["ultimo_top"] > _PASSO_LINHA_SHOPEE / 2)
+            nome = _remover_sku_shopee_do_texto(shopee, sku_shopee) if sku_shopee else ""
+            abertos.append({
+                "top": top,
+                "ultimo_top": top,
+                "sku": _extrair_sku_vendor_shopee(vendor) or "",
+                "codigo_ml": sku_shopee,
+                "titulo_anuncio": _limpar_campo_shopee(f"{nome} {' '.join(col['name'])}"),
+                "qtd_partes": digitos_qtd,
+            })
             continue
 
-        # Se não tem SKU Shopee mas tem vendor SKU, pode ser novo item
-        if sku_vendor and item_atual is None:
-            qty_linha = _extrair_quantidade_coluna_shopee(linha["qty"])
-            nome_completo = f"{linha['name']}".strip()
-            nome_completo = _limpar_campo_shopee(nome_completo)
-
-            item_atual = {
-                "sku": sku_vendor,
-                "codigo_ml": None,
-                "titulo_anuncio": nome_completo,
-                "qtd_partes": [str(qty_linha)] if qty_linha is not None else [],
-            }
+        if not abertos:
             continue
+        item = min(abertos, key=lambda i: abs(top - i["ultimo_top"] - _PASSO_LINHA_SHOPEE))
+        item["ultimo_top"] = top
+        extra = _limpar_campo_shopee(" ".join(col["name"]))
+        if extra and not _texto_warehouse_shopee(extra):
+            item["titulo_anuncio"] = f"{item['titulo_anuncio']} {extra}".strip()
+        # SKU do vendedor longo quebra na linha de baixo (VISMX5FOKKE + R)
+        if item["sku"] and re.fullmatch(r'[\w+\-/]+', vendor):
+            item["sku"] += vendor
+        item["qtd_partes"].extend(digitos_qtd)
 
-        # Senão, é continuação do item atual (linha quebrada)
-        if item_atual:
-            # Adicionar à descrição
-            descricao_extra = _limpar_campo_shopee(
-                f"{linha['shopee']} {linha['name']} {linha['qty']}"
-            )
-
-            if descricao_extra and not _texto_warehouse_shopee(descricao_extra) and "gtin" not in descricao_extra.lower():
-                item_atual["titulo_anuncio"] = f"{item_atual['titulo_anuncio']} {descricao_extra}".strip()
-
-            # Tentar extrair quantidade se vem aqui
-            qty_linha = _extrair_quantidade_coluna_shopee(linha["qty"])
-            if qty_linha and not item_atual["qtd_partes"]:
-                item_atual["qtd_partes"] = [str(qty_linha)]
-
-    if item_atual:
-        items.append(_normalizar_item_shopee(item_atual))
-
-    return items
-
-
-def _linhas_shopee(page) -> List[dict]:
-    words = page.extract_words(use_text_flow=True)
-    rows = {}
-    for word in words:
-        key = round(word["top"])
-        rows.setdefault(key, []).append(word)
-
-    linhas = []
-    for key in sorted(rows):
-        partes = {"vendor": [], "shopee": [], "name": [], "warehouse": [], "qty": []}
-        for word in sorted(rows[key], key=lambda x: x["x0"]):
-            texto = (word.get("text") or "").strip()
-            if not texto:
-                continue
-            x0 = word["x0"]
-            if x0 < 110:
-                partes["vendor"].append(texto)
-            elif x0 < 190:
-                partes["shopee"].append(texto)
-            elif x0 < 445:
-                partes["name"].append(texto)
-            elif x0 < 525:
-                partes["warehouse"].append(texto)
-            else:
-                partes["qty"].append(texto)
-
-        linhas.append({k: " ".join(v).strip() for k, v in partes.items()})
-    return linhas
+    fechar(lambda i: True)
+    fechados.sort(key=lambda i: i["top"])
+    for item in fechados:
+        if not item["sku"]:
+            item["sku"] = item["codigo_ml"] or ""
+    return [_normalizar_item_shopee(i) for i in fechados]
 
 
 def _linha_shopee_ignorada(texto_linha: str) -> bool:
@@ -336,7 +271,7 @@ def _extrair_sku_vendor_shopee(texto: str) -> str | None:
         return None
     if re.search(r'\d{8,}_\d+', valor):
         return valor
-    if re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9+\-_/]{2,}', valor):
+    if re.fullmatch(r'[^\W_][\w+\-/]{2,}', valor):  # \w aceita acento (CAVLETÃO)
         return valor
     return None
 
@@ -345,74 +280,13 @@ def _remover_sku_shopee_do_texto(texto: str, sku_shopee: str) -> str:
     return (texto or "").replace(sku_shopee, "", 1).strip()
 
 
-def _extrair_digitos_qtd(texto: str) -> List[str]:
-    if not texto:
-        return []
-    texto_limpo = texto.lower()
-    if "gtin" in texto_limpo:
-        return []
-    return re.findall(r'\d+', texto)
 
-
-def _extrair_quantidade_coluna_shopee(texto: str) -> int | None:
-    numeros = _extrair_digitos_qtd(texto)
-    if not numeros:
-        return None
-    try:
-        return int(numeros[-1])
-    except Exception:
-        return None
-
-
-def _linha_indica_novo_item_shopee(linha: dict, sku_vendor: str | None, qty_linha: int | None) -> bool:
-    if not sku_vendor or not qty_linha or qty_linha <= 0:
-        return False
-    texto_name = (linha.get("name") or "").strip()
-    texto_qty = (linha.get("qty") or "").lower()
-    return bool(texto_name) and ("item" in texto_qty or "without" in texto_qty or qty_linha > 0)
 
 
 def _texto_warehouse_shopee(texto: str) -> bool:
     texto_norm = (texto or "").lower()
     return "gtin" in texto_norm or texto_norm in {"item", "without", "item without"}
 
-
-def _detectar_nome_multiplo_produto(texto: str) -> bool:
-    """
-    Detecta se um nome provavelmente contém DOIS produtos diferentes.
-    Procura por padrão: "Par ... (tipo1) ... (tipo2)"
-    Exemplos de pares discriminantes:
-    - Manete + Viseira
-    - Retrovisor + Farol
-    - Protetor + Escapamento (ambas do mesmo produto, OK)
-
-    Retorna True se parece haver múltiplos produtos DISTINTOS.
-    """
-    if not texto or len(texto) < 30:
-        return False
-
-    # Grupos de categorias: produtos que NUNCA aparecem juntos no mesmo item
-    NUNCA_JUNTO = [
-        ("manete", ["viseira", "farol", "espelho", "retrovisor", "lanterna"]),
-        ("viseira", ["manete", "protetor", "embreagem", "retrovisor"]),
-        ("retrovisor", ["manete", "viseira", "farol", "embreagem"]),
-        ("farol", ["viseira", "manete", "retrovisor", "embreagem"]),
-        ("espelho", ["manete", "embreagem", "freio", "protetor"]),
-    ]
-
-    texto_lower = texto.lower()
-
-    for tipo1, incompativeis in NUNCA_JUNTO:
-        # Procura tipo1 (com ou sem espaço antes)
-        tem_tipo1 = (f" {tipo1}" in texto_lower or texto_lower.startswith(tipo1))
-        if tem_tipo1:
-            for tipo2 in incompativeis:
-                # Procura tipo2
-                tem_tipo2 = (f" {tipo2}" in texto_lower or texto_lower.startswith(tipo2))
-                if tem_tipo2:
-                    return True
-
-    return False
 
 
 def _limpar_campo_shopee(texto: str) -> str:
@@ -430,12 +304,8 @@ def _limpar_campo_shopee(texto: str) -> str:
 
 
 def _normalizar_item_shopee(item: dict) -> dict:
-    quantidade = 0
-    if item.get("qtd_partes"):
-        try:
-            quantidade = float(item["qtd_partes"][0])
-        except Exception:
-            quantidade = 0
+    partes = "".join(item.get("qtd_partes") or [])
+    quantidade = float(partes) if partes.isdigit() else 0
 
     titulo = _limpar_campo_shopee(item.get("titulo_anuncio", ""))
     sku = _limpar_campo_shopee(item.get("sku", ""))
