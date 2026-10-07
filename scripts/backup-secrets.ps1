@@ -4,7 +4,7 @@
 # (NAO passa pelo GitHub - este zip esta no .gitignore)
 # ============================================================
 $ErrorActionPreference = 'Stop'
-$root = Split-Path -Parent $MyInvocation.MyCommand.Path
+$root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
 Set-Location $root
 
 Write-Host ""

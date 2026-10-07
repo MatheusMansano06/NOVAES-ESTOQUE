@@ -1,14 +1,18 @@
 from starlette.applications import Starlette
-from starlette.routing import Route, Mount
+from starlette.routing import Route as _Route, Mount
 from starlette.responses import JSONResponse, FileResponse, RedirectResponse, HTMLResponse, Response
 from starlette.middleware.cors import CORSMiddleware
+from starlette.middleware.gzip import GZipMiddleware
 from starlette.requests import Request
+from starlette.concurrency import run_in_threadpool
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 from database import engine, Base, SessionLocal
 import os
 import json
 import asyncio
+import functools
+import inspect
 import threading
 import re
 import time
@@ -21,6 +25,21 @@ from dotenv import load_dotenv
 from difflib import SequenceMatcher
 import unicodedata
 import io
+
+
+def Route(path: str, endpoint, **kwargs) -> _Route:
+    """As rotas async deste arquivo chamam código bloqueante (urllib, SQLite) sem
+    await: no event loop único, cada chamada lenta ao ML/Olist travava o app
+    inteiro. Aqui cada uma roda numa thread com loop próprio; o corpo é lido
+    antes, no loop principal (request.json()/form() reusam o corpo em cache)."""
+    if inspect.iscoroutinefunction(endpoint):
+        alvo = endpoint
+
+        @functools.wraps(alvo)
+        async def endpoint(request: Request):
+            await request.body()
+            return await run_in_threadpool(asyncio.run, alvo(request))
+    return _Route(path, endpoint, **kwargs)
 
 from app.models import (
     NotaFiscal, ItemEstoque, ConfirmacaoEstoque, StatusEstoque, VinculoOlist,
@@ -7690,6 +7709,9 @@ if os.path.isdir(STATIC_DIR):
     routes.append(Mount("/", app=StaticFiles(directory=STATIC_DIR, html=True), name="frontend"))
 
 app = Starlette(routes=routes, on_startup=[_on_startup])
+
+# Comprime respostas JSON/JS (egress era 57 GB/mês sem compressão)
+app.add_middleware(GZipMiddleware, minimum_size=1024)
 
 # Add CORS
 app.add_middleware(

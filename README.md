@@ -89,4 +89,4 @@ O `Dockerfile` da raiz compila o frontend e o embute no backend. Passos:
 ```
 
 Configuração de chaves: copie `backend/.env.example` → `backend/.env`.
-Setup detalhado da Olist em [SETUP_OLIST_APP.md](./SETUP_OLIST_APP.md).
+Setup detalhado da Olist em [docs/SETUP_OLIST_APP.md](docs/SETUP_OLIST_APP.md).

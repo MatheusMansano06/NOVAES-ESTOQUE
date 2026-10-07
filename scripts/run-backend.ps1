@@ -5,7 +5,7 @@ Write-Host "================================" -ForegroundColor Cyan
 Write-Host "  ESTOQUE VIRTUAL - BACKEND" -ForegroundColor Cyan
 Write-Host "================================`n" -ForegroundColor Cyan
 
-$backendPath = "$PSScriptRoot\backend"
+$backendPath = "$PSScriptRoot\..\backend"
 
 # Activate virtual environment
 Write-Host "Activating Python virtual environment..." -ForegroundColor Yellow

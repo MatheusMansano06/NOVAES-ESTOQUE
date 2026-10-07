@@ -5,7 +5,7 @@ Write-Host "================================" -ForegroundColor Cyan
 Write-Host "  ESTOQUE VIRTUAL - FRONTEND" -ForegroundColor Cyan
 Write-Host "================================`n" -ForegroundColor Cyan
 
-$frontendPath = "$PSScriptRoot\frontend"
+$frontendPath = "$PSScriptRoot\..\frontend"
 
 # Start frontend
 Write-Host "Starting Vite dev server..." -ForegroundColor Yellow

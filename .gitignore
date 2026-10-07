@@ -70,3 +70,11 @@ __pycache__/
 
 # Railway
 .railway/
+
+# Arquivos locais (não versionar)
+_local/
+backend/backups/
+graphify-out/
+.claude/projects/
+.claude/worktrees/
+.claude/settings.local.json

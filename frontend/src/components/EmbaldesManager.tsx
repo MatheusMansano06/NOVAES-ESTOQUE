@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import api from '../services/api'
 
-const SHARED_SYNC_INTERVAL_MS = 5000
+const SHARED_SYNC_INTERVAL_MS = 20000
 
 interface ItemInbound {
   id: number

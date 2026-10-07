@@ -35,7 +35,7 @@ import {
 } from './services/api'
 
 const API_BASE = import.meta.env.VITE_API_URL ?? 'http://127.0.0.1:8000'
-const SHARED_SYNC_INTERVAL_MS = 5000
+const SHARED_SYNC_INTERVAL_MS = 20000
 
 async function fetchJsonNoCache(url: string, init?: RequestInit) {
   const res = await fetch(url, {
@@ -518,6 +518,7 @@ function App() {
   useEffect(() => {
     if (!operadorSessao) return
     const carregar = async () => {
+      if (document.visibilityState === 'hidden') return
       try {
         const data = await fetchJsonNoCache(`${API_BASE}/api/embaldes?limit=200`)
         setInboundsAtivos((data.items || []).filter((e: any) => e.status !== 'encerrado'))
@@ -533,6 +534,7 @@ function App() {
   useEffect(() => {
     if (!operadorSessao) return
     const sincronizar = async () => {
+      if (document.visibilityState === 'hidden') return
       await Promise.allSettled([
         loadNotas(true),
         loadEstoque(true),

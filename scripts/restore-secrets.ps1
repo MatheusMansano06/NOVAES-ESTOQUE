@@ -3,7 +3,7 @@
 # Le 'estoque-virtual-secrets.zip' e coloca em backend\
 # ============================================================
 $ErrorActionPreference = 'Stop'
-$root = Split-Path -Parent $MyInvocation.MyCommand.Path
+$root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
 Set-Location $root
 
 Write-Host ""

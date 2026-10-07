@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 
 const API_BASE = import.meta.env.VITE_API_URL ?? 'http://127.0.0.1:8000'
-const SHARED_SYNC_INTERVAL_MS = 5000
+const SHARED_SYNC_INTERVAL_MS = 20000
 
 async function fetchJsonNoCache(url: string) {
   const res = await fetch(url, {
