@@ -3,7 +3,7 @@ Utilitários para gerenciamento de fornecedores
 """
 
 from sqlalchemy.orm import Session
-from app.models import Fornecedor, NotaFiscal
+from app.models import Fornecedor
 
 
 def garantir_fornecedor(db: Session, nome: str, cnpj: str = None, endereco: str = None) -> Fornecedor:
@@ -36,33 +36,3 @@ def garantir_fornecedor(db: Session, nome: str, cnpj: str = None, endereco: str 
     db.flush()  # Para obter o ID
 
     return fornecedor
-
-
-def linkar_fornecedor_nf(db: Session, nf: NotaFiscal) -> bool:
-    """
-    Garante que uma nota fiscal está linkada a um fornecedor.
-    Se não tiver fornecedor_id, cria/busca o fornecedor baseado no nome da NF
-    e atualiza a nota fiscal.
-
-    Retorna True se sucesso, False caso contrário.
-    """
-    if not nf:
-        return False
-
-    # Se já tem fornecedor_id, nada a fazer
-    if nf.fornecedor_id:
-        return True
-
-    # Garantir que fornecedor existe
-    fornecedor = garantir_fornecedor(
-        db,
-        nome=nf.fornecedor,
-        cnpj=nf.cnpj,
-        endereco=nf.endereco
-    )
-
-    if fornecedor:
-        nf.fornecedor_id = fornecedor.id
-        return True
-
-    return False

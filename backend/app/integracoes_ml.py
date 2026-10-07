@@ -1984,68 +1984,6 @@ class MLIntegration:
         body = self._get(f"/items/{item_id}", {"attributes": "id,title,price,category_id,listing_type_id,seller_custom_field,available_quantity"})
         return self._simplificar_item(body) if body else None
 
-    def obter_anuncio_completo(self, item_id: str, force_refresh: bool = False) -> Dict:
-        return self.sync_item(item_id, force=force_refresh)
-        body = self._get(f"/items/{item_id}")
-        if not body:
-            return {"erro": "Anúncio não encontrado"}
-
-        desc = self._get(f"/items/{item_id}/description") or {}
-        prices = self._get(f"/items/{item_id}/prices") or {}
-        sale_price = self._get(f"/items/{item_id}/sale_price", {"quantity": 1}) or {}
-        frete = self._get(f"/users/{self.user_id}/shipping_options/free", {"item_id": item_id, "verbose": "true"}) or {}
-        zip_code = (((body.get("seller_address") or {}).get("zip_code")) or os.getenv("ML_DEFAULT_ZIP_CODE") or "").strip()
-        shipping_options = self._get(f"/items/{item_id}/shipping_options", {"zip_code": zip_code}) if zip_code else None
-        preco_efetivo = sale_price.get("amount") if isinstance(sale_price, dict) and sale_price.get("amount") is not None else body.get("price")
-        precificacao = self.precificacao(float(preco_efetivo or 0), body.get("category_id"))
-
-        atributos = []
-        for attr in (body.get("attributes") or []):
-            atributos.append({
-                "id": attr.get("id"),
-                "name": attr.get("name"),
-                "value_id": attr.get("value_id"),
-                "value_name": attr.get("value_name"),
-                "value_type": attr.get("value_type"),
-            })
-
-        pictures = [{
-            "id": pic.get("id"),
-            "url": pic.get("secure_url") or pic.get("url"),
-        } for pic in (body.get("pictures") or [])]
-
-        tarifa_atual = None
-        lt = body.get("listing_type_id")
-        if lt == "gold_special":
-            tarifa_atual = precificacao.get("classico")
-        elif lt == "gold_pro":
-            tarifa_atual = precificacao.get("premium")
-
-        recommended_shipping = None
-        if isinstance(shipping_options, dict):
-            options = shipping_options.get("options") or []
-            if options:
-                recommended_shipping = options[0]
-
-        item = self._simplificar_item(body)
-        item["frete_custo"] = ((frete.get("coverage") or {}).get("all_country") or {}).get("list_cost")
-        item["frete_moeda"] = ((frete.get("coverage") or {}).get("all_country") or {}).get("currency_id")
-
-        return {
-            "item": item,
-            "description": desc,
-            "attributes": atributos,
-            "pictures": pictures,
-            "prices": prices.get("prices") or [],
-            "sale_price": sale_price,
-            "shipping_fee": (frete.get("coverage") or {}).get("all_country"),
-            "shipping_preview": recommended_shipping,
-            "shipping_tags": (body.get("shipping") or {}).get("tags") or [],
-            "tags": body.get("tags") or [],
-            "sale_terms": body.get("sale_terms") or [],
-            "tarifa_atual": tarifa_atual,
-            "zip_code_usado": zip_code or None,
-        }
 
     # ---------- preços por quantidade (atacado B2B) ----------
     B2B_CONTEXT = "channel_marketplace,user_type_business"
@@ -2152,63 +2090,7 @@ class MLIntegration:
         return {"ok": True, "aplicado": True, "tiers_enviados": len(payload) - 1}
 
     # ---------- preço de venda (cheio + promocional) ----------
-    def resumo_preco(self, item_id: str, force_refresh: bool = False) -> Dict:
-        """Valor cheio (preço base) + valor promocional efetivo (o que o consumidor paga)."""
-        detail = self.sync_item(item_id, force=force_refresh)
-        if detail.get("erro"):
-            return detail
-        item = detail.get("item") or {}
-        sale_price = detail.get("sale_price") or {}
-        cheio = item.get("preco")
-        promocional = sale_price.get("amount") if isinstance(sale_price, dict) and sale_price.get("amount") is not None else (item.get("preco_original") or cheio)
-        if promocional is None:
-            promocional = cheio
-        tem_promocao = (cheio is not None and promocional is not None and float(promocional) < float(cheio) - 0.01)
-        return {
-            "cheio": cheio,
-            "promocional": promocional,
-            "tem_promocao": bool(tem_promocao),
-            "catalogo": False,
-            "status": item.get("status"),
-            "cache": detail.get("cache"),
-        }
 
-    def aplicar_preco(self, item_id: str, preco: float) -> Dict:
-        """Aplica o preço base ao anúncio (PUT /items). Catálogo/fechado são bloqueados pelo ML.
-
-        Verifica relendo o preço, já que mudanças no ML podem não refletir de imediato.
-        Retorna também o preço anterior, para registrar histórico no cliente.
-        """
-        try:
-            preco = round(float(preco), 2)
-        except (TypeError, ValueError):
-            return {"erro": "Preço inválido"}
-        if preco <= 0:
-            return {"erro": "Preço deve ser maior que zero"}
-
-        body = self._get(f"/items/{item_id}", {"attributes": "id,price,catalog_listing,status"})
-        if not body:
-            return {"erro": "Anúncio não encontrado"}
-        preco_anterior = body.get("price")
-        if body.get("catalog_listing"):
-            return {"erro": "Este é um anúncio de catálogo: o preço é definido pelo catálogo do Mercado Livre e não pode ser alterado por aqui.", "bloqueado": True}
-        if body.get("status") == "closed":
-            return {"erro": "Anúncio finalizado: não é possível alterar o preço.", "bloqueado": True}
-
-        resp = self._request_json("PUT", f"/items/{item_id}", {"price": preco})
-        if not resp or resp.get("erro"):
-            cause = resp.get("erro") if isinstance(resp, dict) else None
-            return {"erro": cause or "Falha ao aplicar o preço no Mercado Livre", "preco_anterior": preco_anterior}
-
-        confere = self._get(f"/items/{item_id}", {"attributes": "id,price"}) or {}
-        aplicado = confere.get("price") is not None and abs(float(confere["price"]) - preco) <= 0.01
-        if not aplicado:
-            return {"erro": "O Mercado Livre não aplicou o novo preço.", "aplicado": False, "preco_anterior": preco_anterior}
-        self.sync_item(item_id, force=True)
-        return {"ok": True, "aplicado": True, "preco_anterior": preco_anterior, "preco_novo": preco}
-
-    def atualizar_descricao(self, item_id: str, plain_text: str) -> Dict:
-        return self._request_json("PUT", f"/items/{item_id}/description", {"plain_text": plain_text}) or {"erro": "Falha ao atualizar descrição"}
 
     def _merge_attribute_values(self, current_attrs: List[Dict[str, Any]], updates: Dict[str, Dict[str, Any]]) -> List[Dict[str, Any]]:
         merged: List[Dict[str, Any]] = []
@@ -2237,12 +2119,6 @@ class MLIntegration:
             merged.append({"id": attr_id, **({"value_id": value_id} if value_id else {"value_name": value_name})})
         return merged
 
-    def atualizar_atributos(self, item_id: str, updates: Dict[str, Dict[str, Any]]) -> Dict:
-        body = self._get(f"/items/{item_id}")
-        if not body:
-            return {"erro": "Anúncio não encontrado"}
-        attrs = self._merge_attribute_values(body.get("attributes") or [], updates)
-        return self._request_json("PUT", f"/items/{item_id}", {"attributes": attrs}) or {"erro": "Falha ao atualizar atributos"}
 
     @staticmethod
     def _num(texto: Any) -> Optional[float]:
@@ -2254,113 +2130,6 @@ class MLIntegration:
         except (ValueError, IndexError):
             return None
 
-    def atualizar_dimensoes(self, item_id: str, largura_cm: str, altura_cm: str, comprimento_cm: str, peso_g: str, package_type: str) -> Dict:
-        """Atualiza dimensões declaradas (SELLER_PACKAGE_*).
-
-        Em itens FULL o Mercado Livre mede o produto no galpão e ignora a alteração
-        (a API responde 200 mas não aplica). Por isso detectamos o logistic_type e
-        verificamos a persistência relendo os atributos depois da escrita.
-        """
-        body = self._get(f"/items/{item_id}")
-        if not body:
-            return {"erro": "Anúncio não encontrado"}
-
-        logistic = (body.get("shipping") or {}).get("logistic_type")
-        if logistic == "fulfillment":
-            return {
-                "erro": "Dimensões controladas pelo Mercado Livre (Full). O galpão mede o produto fisicamente e a alteração não é aplicada.",
-                "locked": True,
-                "logistic_type": logistic,
-            }
-
-        updates = {
-            "SELLER_PACKAGE_WIDTH": {"value_name": f"{largura_cm} cm"},
-            "SELLER_PACKAGE_HEIGHT": {"value_name": f"{altura_cm} cm"},
-            "SELLER_PACKAGE_LENGTH": {"value_name": f"{comprimento_cm} cm"},
-            "SELLER_PACKAGE_WEIGHT": {"value_name": f"{peso_g} g"},
-            "SELLER_PACKAGE_TYPE": {"value_name": package_type},
-        }
-        attrs = self._merge_attribute_values(body.get("attributes") or [], updates)
-        resp = self._request_json("PUT", f"/items/{item_id}", {"attributes": attrs})
-        if not resp or resp.get("erro"):
-            return resp or {"erro": "Falha ao atualizar dimensões"}
-
-        # Reler para confirmar que o ML realmente aplicou (a resposta 200 não garante).
-        confere = self._get(f"/items/{item_id}", {"attributes": "attributes"}) or {}
-        atuais = {a.get("id"): a.get("value_name") for a in (confere.get("attributes") or [])}
-        esperado = {
-            "SELLER_PACKAGE_WIDTH": self._num(largura_cm),
-            "SELLER_PACKAGE_HEIGHT": self._num(altura_cm),
-            "SELLER_PACKAGE_LENGTH": self._num(comprimento_cm),
-            "SELLER_PACKAGE_WEIGHT": self._num(peso_g),
-        }
-        aplicado = all(self._num(atuais.get(k)) == v for k, v in esperado.items() if v is not None)
-        if not aplicado:
-            return {
-                "erro": "O Mercado Livre não aplicou as dimensões neste anúncio (a logística pode estar travando a edição).",
-                "aplicado": False,
-                "logistic_type": logistic,
-            }
-        return {"ok": True, "aplicado": True, "logistic_type": logistic}
-
-    def atualizar_imagens(self, item_id: str, pictures: List[Dict[str, str]]) -> Dict:
-        payload = []
-        for picture in pictures:
-            if picture.get("id"):
-                payload.append({"id": picture["id"]})
-            elif picture.get("source"):
-                payload.append({"source": picture["source"]})
-        return self._request_json("PUT", f"/items/{item_id}", {"pictures": payload}) or {"erro": "Falha ao atualizar imagens"}
-
-    def upload_imagem_e_atualizar(self, item_id: str, files: List[Dict[str, Any]], existing_picture_ids: List[str]) -> Dict:
-        uploaded = []
-        for file in files:
-            resp = self._post_multipart("/pictures/items/upload", file["name"], file["bytes"], file.get("mime"))
-            if not isinstance(resp, dict) or resp.get("erro"):
-                return resp or {"erro": f"Falha no upload de {file['name']}"}
-            source = resp.get("secure_url") or resp.get("url")
-            if source:
-                uploaded.append({"source": source})
-        final_pictures = [{"id": pic_id} for pic_id in existing_picture_ids if pic_id] + uploaded
-        result = self.atualizar_imagens(item_id, final_pictures)
-        result["uploaded"] = uploaded
-        return result
-
-    def listar_anuncios(self, status: str = "active", offset: int = 0, limit: int = 50) -> Dict:
-        """Lista anúncios do vendedor (uma página). status: active|paused|closed|under_review."""
-        if not self.user_id:
-            return {"erro": "ML_USER_ID não configurado", "anuncios": [], "total": 0}
-
-        params = {"offset": offset, "limit": min(limit, 100)}
-        if status and status != "todos":
-            params["status"] = status
-        busca = self._get(f"/users/{self.user_id}/items/search", params)
-        if busca is None:
-            return {"erro": "Falha ao consultar o Mercado Livre (token/conexão)", "anuncios": [], "total": 0}
-
-        ids = busca.get("results", [])
-        total = (busca.get("paging") or {}).get("total", len(ids))
-
-        anuncios: List[Dict] = []
-        # multiget em lotes de 20
-        atributos = "id,title,price,original_price,currency_id,available_quantity,sold_quantity,status,listing_type_id,seller_custom_field,attributes,shipping,thumbnail,permalink,category_id,pictures,sale_terms,tags,date_created"
-        for i in range(0, len(ids), 20):
-            lote = ids[i:i + 20]
-            res = self._get("/items", {"ids": ",".join(lote), "attributes": atributos})
-            if not res:
-                continue
-            for entry in res:
-                if entry.get("code") == 200 and entry.get("body"):
-                    anuncios.append(self._simplificar_item(entry["body"]))
-
-        custos_frete = self._custos_frete_gratis([a["id"] for a in anuncios if a.get("frete_gratis")])
-        for anuncio in anuncios:
-            frete = custos_frete.get(str(anuncio.get("id")))
-            if frete:
-                anuncio["frete_custo"] = frete.get("valor")
-                anuncio["frete_moeda"] = frete.get("moeda")
-
-        return {"total": total, "offset": offset, "limit": limit, "anuncios": anuncios}
 
     # ---------- overrides cache-first ----------
     def obter_anuncio_completo(self, item_id: str, force_refresh: bool = False) -> Dict:
