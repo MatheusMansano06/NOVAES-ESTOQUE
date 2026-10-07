@@ -1,4 +1,4 @@
-"""Mudança do "Vai pro FULL" por operador vira pedido pendente: bloqueia baixa/balanço até o master decidir."""
+"""Mudança do "Vai pro FULL" vale na hora para qualquer operador e fica registrada no histórico."""
 
 import uuid
 
@@ -20,7 +20,7 @@ OPERADOR = {"x-operator-role": "operador", "x-operator-name": "Joao"}
 MASTER = {"x-operator-role": "master"}
 
 
-def test_operador_pede_master_aprova():
+def test_operador_altera_direto_e_fica_no_historico():
     db = SessionLocal()
     e = EmbaleFU(nome_embalde="teste", arquivo_original="t.pdf", arquivo_uuid=f"t-{uuid.uuid4()}")
     db.add(e)
@@ -32,22 +32,12 @@ def test_operador_pede_master_aprova():
     db.close()
     try:
         r = cliente.post(f"/e/{eid}/i/{iid}/qtd", json={"quantidade_full": 80}, headers=OPERADOR).json()
-        assert r["pendente"] is True and r["quantidade_full"] == 100  # não aplicou
-
-        # bloqueado até decidir (antes de chamar a Olist)
-        b = cliente.post(f"/e/{eid}/i/{iid}/balancear", json={"quantidade_real": 50}, headers=OPERADOR)
-        assert b.status_code == 409
-
-        db = SessionLocal()
-        h = db.query(HistoricoFullEmbale).filter_by(item_id=iid, status="pendente").one()
-        hid = h.id
-        db.close()
-
-        assert cliente.post(f"/e/{eid}/h/{hid}/decidir", json={"aprovar": True}, headers=OPERADOR).status_code == 403
-        assert cliente.post(f"/e/{eid}/h/{hid}/decidir", json={"aprovar": True}, headers=MASTER).json()["status"] == "aprovado"
+        assert r["sucesso"] is True and r["quantidade_full"] == 80  # aplicou direto
 
         db = SessionLocal()
         assert db.get(ItemEmbaleFU, iid).quantidade_baixar == 80
+        h = db.query(HistoricoFullEmbale).filter_by(item_id=iid).one()
+        assert (h.status, h.quantidade_anterior, h.quantidade_nova, h.solicitante) == ("aprovado", 100, 80, "Joao")
         assert main._pedido_full_pendente(db, iid) is None
         db.close()
     finally:

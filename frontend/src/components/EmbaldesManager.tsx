@@ -146,6 +146,7 @@ export function EmbaldesManager({ modoSeparacao = false }: { modoSeparacao?: boo
   const [skuImg, setSkuImg] = useState<Record<string, string>>({})
   // Filtro do picker: mostrar só os itens que tiveram a qtd do FULL alterada
   const [soEditados, setSoEditados] = useState(false)
+  const [buscaItem, setBuscaItem] = useState('')
   const [soEmEspera, setSoEmEspera] = useState(false)
   const [ordemQtd, setOrdemQtd] = useState<'' | 'desc' | 'asc'>('')
   // Accordion para expandir/colapsar produtos
@@ -1443,7 +1444,7 @@ O estoque na Olist volta ao que era antes (vendas que caíram no meio são manti
                                 )}
                                 {it.tem_falta && !it.full_pendente && !jaBaixado && !naoAchado && !semEstoque && !emEspera && (
                                   <div style={{ fontSize: '0.82rem', color: '#c62828', fontWeight: 700 }}>
-                                    Falta estoque para o FULL: faça o Balanço, ou altere o Vai pro FULL (vai para aprovação).
+                                    Falta estoque para o FULL: faça o Balanço, ou altere o Vai pro FULL.
                                   </div>
                                 )}
 
@@ -1642,6 +1643,13 @@ O estoque na Olist volta ao que era antes (vendas que caíram no meio são manti
                                 </button>
                               )
                             })}
+                            <input
+                              type="search"
+                              value={buscaItem}
+                              onChange={(e) => setBuscaItem(e.target.value)}
+                              placeholder="🔎 Buscar por título ou SKU"
+                              style={{ padding: '0.4rem 0.9rem', borderRadius: '999px', border: '1px solid #ddd', fontSize: '0.85rem', minWidth: '230px' }}
+                            />
                             <button
                               onClick={() => carregarHistoricoFull(revisao.embale_id)}
                               style={{
@@ -1672,6 +1680,8 @@ O estoque na Olist volta ao que era antes (vendas que caíram no meio são manti
                           const itemsFiltrados = revisao.itens.filter((it) => {
                             const baixado = it.baixa_aplicada === 1 || !!itensBaixados[it.item_id]
                             const vinc = it.vinculado === 1 || !!it.olist_produto_id
+                            const termo = buscaItem.trim().toLowerCase()
+                            if (termo && !`${it.titulo_anuncio || ''} ${it.sku_inbound || ''}`.toLowerCase().includes(termo)) return false
                             if (filtroRevisao === 'vinculados') return vinc
                             if (filtroRevisao === 'nao_vinculados') return !vinc
                             if (filtroRevisao === 'baixados') return baixado

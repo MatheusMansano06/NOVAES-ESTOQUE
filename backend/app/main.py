@@ -4342,37 +4342,7 @@ async def ajustar_quantidade_full_embale(request: Request):
         mudou = abs(quantidade_full - quantidade_anterior) > 0.0001
         pendente = _pedido_full_pendente(db, item.id)
 
-        # Operador não muda o FULL direto: vira pedido pendente no histórico até o master aprovar.
-        if not _request_eh_master(request):
-            if pendente:
-                if not mudou:
-                    db.delete(pendente)  # voltou ao valor original: cancela o pedido
-                else:
-                    pendente.quantidade_nova = quantidade_full
-                    pendente.tipo = "aumento" if quantidade_full > quantidade_anterior else "reducao"
-                    pendente.criado_em = datetime.utcnow()
-            elif mudou:
-                db.add(HistoricoFullEmbale(
-                    embale_id=embale.id, item_id=item.id, titulo_anuncio=item.titulo_anuncio,
-                    sku_inbound=item.sku_inbound, quantidade_anterior=quantidade_anterior,
-                    quantidade_nova=quantidade_full,
-                    tipo="aumento" if quantidade_full > quantidade_anterior else "reducao",
-                    status="pendente", solicitante=_operador_contexto(request)["operador_nome"],
-                ))
-            db.commit()
-            if mudou:
-                _registrar_log_operacao(request, "quantidade_full_solicitada", "item_embale", item.id,
-                                        f"Pedido de mudança do FULL para {quantidade_full:g}",
-                                        {"embale_id": embale.id, "quantidade_anterior": quantidade_anterior,
-                                         "quantidade_nova": quantidade_full})
-            return JSONResponse({
-                "sucesso": True, "pendente": mudou, "item_id": item.id,
-                "quantidade_full": quantidade_anterior,
-                "mensagem": (f"Pedido enviado: {quantidade_anterior:g} -> {quantidade_full:g}. Aguarda o administrador aprovar; nada é retirado até lá."
-                             if mudou else "Pedido de mudança cancelado."),
-            })
-
-        if pendente:  # master mudou direto: o pedido do operador perde o sentido
+        if pendente:  # pedido antigo (fluxo de aprovação removido) perde o sentido
             pendente.status = "recusado"
             pendente.decidido_por = _operador_contexto(request)["operador_nome"]
             pendente.decidido_em = datetime.utcnow()
