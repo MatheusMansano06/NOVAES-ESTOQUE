@@ -21,14 +21,16 @@ import { CalculadoraTikTok } from './components/CalculadoraTikTok'
 import { CentralDevolucoes } from './central/CentralDevolucoes'
 import { PlataformaSelecao, type Platform, LogoMercadoLivre, LogoShopee, LogoOperacao } from './components/PlataformaSelecao'
 import { LoginNVS } from './components/LoginNVS'
+import { DefinirPin } from './components/DefinirPin'
 import { DashboardShopee } from './components/DashboardShopee'
 import './platform-theme.css'
 import './dashboard-shopee.css'
 import { AppShell, type ShellNavGroup, type ShellStatusItem } from './components/AppShell'
 import {
+  avisarSeSessaoExpirou,
   baixarMultiplosOuPdfs,
-  buildOperadorHeaders,
   clearOperadorSessao,
+  EVENTO_SESSAO_EXPIRADA,
   getOperadorSessao,
   setOperadorSessao,
   type OperadorSessao,
@@ -44,7 +46,6 @@ async function fetchJsonNoCache(url: string, init?: RequestInit) {
     headers: {
       'Cache-Control': 'no-cache',
       'Pragma': 'no-cache',
-      ...buildOperadorHeaders(),
       ...((init?.headers as Record<string, string> | undefined) || {}),
     },
   })
@@ -241,6 +242,7 @@ function App() {
   const [operadoresLoading, setOperadoresLoading] = useState(false)
   const [operadorSelecionadoId, setOperadorSelecionadoId] = useState('')
   const [masterPin, setMasterPin] = useState('')
+  const [operadorPin, setOperadorPin] = useState('')
   const [loginLoading, setLoginLoading] = useState(false)
   const [loginErro, setLoginErro] = useState('')
 
@@ -395,84 +397,74 @@ function App() {
     }
   }
 
-  const entrarComoOperador = () => {
-    const operador = operadoresDisponiveis.find((item) => String(item.id) === operadorSelecionadoId)
-    if (!operador) {
-      setLoginErro('Selecione um operador para continuar.')
-      return
-    }
-    salvarSessaoOperador({
-      operadorId: operador.id,
-      operadorNome: operador.nome,
-      role: 'operador',
-    })
-    setLoginErro('')
-    setPagina('inicial')
-  }
-
-  const entrarComoMaster = async () => {
-    if (!masterPin.trim()) {
-      setLoginErro('Digite o PIN do master.')
-      return
-    }
-
+  // O servidor confere o PIN e grava o cookie de sessão; o localStorage só guarda o nome para a tela.
+  const entrar = async (corpo: Record<string, unknown>) => {
     setLoginLoading(true)
     setLoginErro('')
     try {
-      const res = await fetch(`${API_BASE}/api/operadores/master-login`, {
+      const res = await fetch(`${API_BASE}/api/sessao/entrar`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ pin: masterPin }),
+        body: JSON.stringify(corpo),
       })
       const data = await res.json()
-      if (!res.ok) throw new Error(data.erro || 'PIN inválido')
-
-      salvarSessaoOperador({
-        operadorId: null,
-        operadorNome: data.nome || 'MASTER',
-        role: 'master',
-      })
+      if (!res.ok) throw new Error(data.erro || 'Não foi possível entrar.')
+      salvarSessaoOperador({ operadorId: data.operadorId ?? null, operadorNome: data.operadorNome, role: data.role, trocarPin: data.trocarPin })
       setMasterPin('')
+      setOperadorPin('')
       setPagina('inicial')
     } catch (err: any) {
-      setLoginErro(err?.message || 'Falha ao entrar como master.')
+      setLoginErro(err?.message || 'Não foi possível entrar.')
     } finally {
       setLoginLoading(false)
     }
   }
 
+  const entrarComoOperador = () => {
+    if (!operadorSelecionadoId) return setLoginErro('Selecione um operador para continuar.')
+    if (!operadorPin.trim()) return setLoginErro('Digite o PIN de acesso.')
+    entrar({ operador_id: Number(operadorSelecionadoId), pin: operadorPin })
+  }
+
+  const entrarComoMaster = () => {
+    if (!masterPin.trim()) return setLoginErro('Digite o PIN do master.')
+    entrar({ master: true, pin: masterPin })
+  }
+
   const trocarOperador = () => {
+    fetch(`${API_BASE}/api/sessao/sair`, { method: 'POST' }).catch(() => {})
     salvarSessaoOperador(null)
     setPagina('bemvindo')
     setMasterPin('')
+    setOperadorPin('')
     setLoginErro('')
   }
 
   useEffect(() => {
+    const voltarAoLogin = () => {
+      salvarSessaoOperador(null)
+      setPagina('bemvindo')
+      setLoginErro('Sua sessão expirou. Entre novamente.')
+    }
+    window.addEventListener(EVENTO_SESSAO_EXPIRADA, voltarAoLogin)
+    return () => window.removeEventListener(EVENTO_SESSAO_EXPIRADA, voltarAoLogin)
+  }, [])
+
+  useEffect(() => {
     const originalFetch = window.fetch.bind(window)
 
+    // Todo fetch do app leva o cookie de sessão (em dev a API está em outra porta) e avisa em 401.
     window.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
-      const headers = new Headers(input instanceof Request ? input.headers : undefined)
-      const initHeaders = new Headers(init?.headers)
-
-      initHeaders.forEach((value, key) => {
-        headers.set(key, value)
-      })
-
-      Object.entries(buildOperadorHeaders()).forEach(([key, value]) => {
-        if (value) headers.set(key, value)
-      })
-
-      return originalFetch(input, {
-        ...(init || {}),
-        headers,
-      })
+      const res = await originalFetch(input, { credentials: 'include', ...(init || {}) })
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url
+      avisarSeSessaoExpirou(res.status, url)
+      return res
     }) as typeof window.fetch
 
     return () => {
       window.fetch = originalFetch
     }
-  }, [operadorSessao])
+  }, [])
 
   const loadIntegracoes = async () => {
     try {
@@ -1806,6 +1798,16 @@ function App() {
     </AppShell>
   )
 
+  if (operadorSessao?.trocarPin && pagina !== 'bemvindo') {
+    return (
+      <DefinirPin
+        nome={operadorSessao.operadorNome}
+        onDefinido={() => salvarSessaoOperador({ ...operadorSessao, trocarPin: false })}
+        onSair={trocarOperador}
+      />
+    )
+  }
+
   if (pagina === 'bemvindo') {
     return (
       <LoginNVS
@@ -1813,6 +1815,8 @@ function App() {
         operadorSelecionadoId={operadorSelecionadoId}
         onSelecionarOperador={setOperadorSelecionadoId}
         onEntrarComoOperador={entrarComoOperador}
+        operadorPin={operadorPin}
+        onOperadorPinChange={setOperadorPin}
         masterPin={masterPin}
         onMasterPinChange={setMasterPin}
         onEntrarComoMaster={entrarComoMaster}

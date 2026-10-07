@@ -99,6 +99,20 @@ export function OperadoresManager() {
     }
   }
 
+  const resetarPin = async (operador: OperadorItem) => {
+    if (!window.confirm(`Resetar o PIN de ${operador.nome}? No próximo acesso ele entra com o PIN inicial e define um novo.`)) return
+    setErro('')
+    setMensagem('')
+    try {
+      const res = await fetch(`${API_BASE}/api/operadores/${operador.id}/resetar-pin`, { method: 'POST' })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.erro || 'Falha ao resetar PIN')
+      setMensagem(data.mensagem)
+    } catch (err: any) {
+      setErro(err?.message || 'Falha ao resetar PIN')
+    }
+  }
+
   return (
     <div style={{ display: 'grid', gap: '1.5rem' }}>
       <section className="card">
@@ -141,8 +155,16 @@ export function OperadoresManager() {
 
           <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
             {operadores.map((operador) => (
-              <div key={operador.id} style={{ padding: '0.7rem 1rem', borderRadius: '999px', background: '#eef4ff', color: '#174ea6', fontWeight: 700 }}>
+              <div key={operador.id} style={{ padding: '0.5rem 0.6rem 0.5rem 1rem', borderRadius: '999px', background: '#eef4ff', color: '#174ea6', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
                 {operador.nome}
+                <button
+                  type="button"
+                  onClick={() => resetarPin(operador)}
+                  title="O operador volta ao PIN inicial e define um novo no próximo acesso"
+                  style={{ padding: '0.3rem 0.65rem', borderRadius: '999px', border: '1px solid #b9cdf5', background: '#fff', color: '#174ea6', fontSize: '0.78rem', fontWeight: 700, cursor: 'pointer' }}
+                >
+                  Resetar PIN
+                </button>
               </div>
             ))}
           </div>

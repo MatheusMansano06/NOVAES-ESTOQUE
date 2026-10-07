@@ -11,6 +11,8 @@ interface LoginNVSProps {
   operadorSelecionadoId: string
   onSelecionarOperador: (id: string) => void
   onEntrarComoOperador: () => void
+  operadorPin: string
+  onOperadorPinChange: (pin: string) => void
   masterPin: string
   onMasterPinChange: (pin: string) => void
   onEntrarComoMaster: () => void
@@ -85,6 +87,8 @@ export function LoginNVS({
   operadorSelecionadoId,
   onSelecionarOperador,
   onEntrarComoOperador,
+  operadorPin,
+  onOperadorPinChange,
   masterPin,
   onMasterPinChange,
   onEntrarComoMaster,
@@ -170,11 +174,29 @@ export function LoginNVS({
             </select>
           </label>
 
+          <label className="lg__campo">
+            <span>PIN de acesso</span>
+            <input
+              type="password"
+              inputMode="numeric"
+              pattern="[0-9]*"
+              maxLength={10}
+              autoComplete="current-password"
+              placeholder="PIN numérico"
+              value={operadorPin}
+              onChange={(e) => onOperadorPinChange(e.target.value.replace(/\D/g, ''))}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && operadorSelecionadoId && operadorPin) onEntrarComoOperador()
+              }}
+              disabled={bloqueado}
+            />
+          </label>
+
           <button
             type="button"
             className="lg__btn"
             onClick={onEntrarComoOperador}
-            disabled={bloqueado || !operadorSelecionadoId}
+            disabled={bloqueado || !operadorSelecionadoId || !operadorPin}
           >
             <span>{entrando ? 'Entrando...' : 'Continuar'}</span>
             <Seta />

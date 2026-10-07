@@ -68,7 +68,10 @@ def _req(path: str, metodo: str = "GET", corpo: Optional[Dict] = None) -> Option
     não pode derrubar o job por causa de uma chamada)."""
     url = f"{BACKEND_URL}{path}"
     data = json.dumps(corpo).encode("utf-8") if corpo is not None else None
-    headers = {"Accept": "application/json"}
+    # A API exige sessão: o monitor assina a própria, curta, com o SESSION_SECRET do processo.
+    from app import seguranca
+    token = seguranca.criar_sessao(None, "MONITOR", "operador", validade=300)
+    headers = {"Accept": "application/json", "Cookie": f"{seguranca.COOKIE}={token}"}
     if data:
         headers["Content-Type"] = "application/json"
     try:

@@ -6,18 +6,17 @@ from starlette.applications import Starlette
 from starlette.routing import Route
 from starlette.testclient import TestClient
 
-from app import main
+from app import main, seguranca
 from app.models import EmbaleFU, HistoricoFullEmbale, ItemEmbaleFU
 from database import SessionLocal
 
 app_teste = Starlette(routes=[
-    Route("/e/{embale_id}/i/{item_id}/qtd", main.ajustar_quantidade_full_embale, methods=["POST"]),
-    Route("/e/{embale_id}/i/{item_id}/balancear", main.balancear_item_embale, methods=["POST"]),
-    Route("/e/{embale_id}/h/{hist_id}/decidir", main.decidir_pedido_full_embale, methods=["POST"]),
+    Route("/api/e/{embale_id}/i/{item_id}/qtd", main.ajustar_quantidade_full_embale, methods=["POST"]),
+    Route("/api/e/{embale_id}/i/{item_id}/balancear", main.balancear_item_embale, methods=["POST"]),
+    Route("/api/e/{embale_id}/h/{hist_id}/decidir", main.decidir_pedido_full_embale, methods=["POST"]),
 ])
-cliente = TestClient(app_teste)
-OPERADOR = {"x-operator-role": "operador", "x-operator-name": "Joao"}
-MASTER = {"x-operator-role": "master"}
+cliente = TestClient(seguranca.ProtecaoApi(app_teste))
+OPERADOR = {"Cookie": f"{seguranca.COOKIE}={seguranca.criar_sessao(7, 'Joao', 'operador')}"}
 
 
 def test_operador_altera_direto_e_fica_no_historico():
@@ -31,7 +30,7 @@ def test_operador_altera_direto_e_fica_no_historico():
     eid, iid = e.id, it.id
     db.close()
     try:
-        r = cliente.post(f"/e/{eid}/i/{iid}/qtd", json={"quantidade_full": 80}, headers=OPERADOR).json()
+        r = cliente.post(f"/api/e/{eid}/i/{iid}/qtd", json={"quantidade_full": 80}, headers=OPERADOR).json()
         assert r["sucesso"] is True and r["quantidade_full"] == 80  # aplicou direto
 
         db = SessionLocal()

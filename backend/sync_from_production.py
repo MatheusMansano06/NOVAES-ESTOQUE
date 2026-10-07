@@ -1,4 +1,7 @@
+import getpass
+import http.cookiejar
 import json
+import os
 import shutil
 import sqlite3
 import urllib.request
@@ -12,9 +15,20 @@ DB_PATH = BACKEND_DIR / "estoque_virtual.db"
 SEED_PATH = BACKEND_DIR / "seed.db"
 BACKUP_DIR = BACKEND_DIR / "backups"
 
+# A API exige sessão: entra como master (PIN de MASTER_PIN ou digitado) e reusa o cookie.
+_cliente = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(http.cookiejar.CookieJar()))
+
+
+def entrar():
+    pin = os.getenv("MASTER_PIN") or getpass.getpass("PIN master da produção: ")
+    req = urllib.request.Request(BASE_URL + "/api/sessao/entrar", method="POST",
+                                 data=json.dumps({"master": True, "pin": pin}).encode(),
+                                 headers={"Content-Type": "application/json"})
+    _cliente.open(req, timeout=30)
+
 
 def fetch_json(path: str):
-    with urllib.request.urlopen(BASE_URL + path, timeout=60) as response:
+    with _cliente.open(BASE_URL + path, timeout=60) as response:
         return json.loads(response.read().decode("utf-8"))
 
 
@@ -312,6 +326,7 @@ def sync_embaldes(conn: sqlite3.Connection):
 
 
 def main():
+    entrar()
     notes = fetch_json("/api/notas-fiscais")
     vinculos = fetch_json("/api/olist/vinculos")
     apelidos = fetch_json("/api/apelidos-fornecedores")

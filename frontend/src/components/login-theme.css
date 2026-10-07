@@ -276,7 +276,20 @@
   cursor: pointer;
 }
 
-.lg__campo select:focus-visible {
+.lg__campo input {
+  width: 100%;
+  border: 1px solid #d6dfeb;
+  border-radius: 12px;
+  background: #fff;
+  padding: clamp(11px, 1.9vh, 15px) 16px;
+  font-family: inherit;
+  font-size: 1rem;
+  color: var(--tinta);
+  letter-spacing: 0.2em;
+}
+
+.lg__campo select:focus-visible,
+.lg__campo input:focus-visible {
   outline: 2px solid var(--azul);
   outline-offset: 1px;
 }

@@ -134,6 +134,7 @@ class Operador(Base):
     nome = Column(String(120), unique=True, index=True)
     ativo = Column(Integer, default=1)
     criado_em = Column(DateTime, default=datetime.utcnow)
+    pin_hash = Column(Text, nullable=True)  # None = ainda usa o PIN inicial e tem que trocar no 1º acesso
 
 
 class LogOperacao(Base):

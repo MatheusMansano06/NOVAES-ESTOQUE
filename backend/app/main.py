@@ -35,6 +35,7 @@ from app.models import (
     MLNotificacao, NegociacaoShopee, NegociacaoShopeeItem, CalculoTikTok
 )
 from app import negociacao_shopee as negoc
+from app import seguranca
 from app.utils.nfe_parser import NFeParsing
 from app.utils.nfe_pdf_generator import NFePDFGenerator
 from app.utils.embale_parser import extrair_items_embale_pdf
@@ -131,6 +132,11 @@ def _garantir_colunas_sqlite():
                     conn.exec_driver_sql(f"ALTER TABLE ml_item_cache ADD COLUMN {nome} {tipo}")
                     print(f"[DB] Coluna ml_item_cache.{nome} criada")
 
+            colunas_operadores = {row[1] for row in conn.exec_driver_sql("PRAGMA table_info(operadores)").fetchall()}
+            if colunas_operadores and "pin_hash" not in colunas_operadores:
+                conn.exec_driver_sql("ALTER TABLE operadores ADD COLUMN pin_hash TEXT")
+                print("[DB] Coluna operadores.pin_hash criada")
+
     except Exception as e:
         print(f"[DB] Aviso ao garantir colunas SQLite: {e}")
 
@@ -138,7 +144,6 @@ def _garantir_colunas_sqlite():
 _garantir_colunas_sqlite()
 
 OPERADORES_PADRAO = ["Rafael", "Wellington", "Cris", "Cristofer", "Nathan", "Luisa"]
-MASTER_PIN_PADRAO = os.getenv("MASTER_PIN", "1234")
 
 
 def _seed_operadores_padrao():
@@ -162,20 +167,12 @@ def _seed_operadores_padrao():
 
 
 def _operador_contexto(request: Request) -> dict:
-    headers = request.headers
-    operador_id = str(headers.get("x-operator-id") or "").strip()
-    operador_nome = str(headers.get("x-operator-name") or "").strip()
-    operador_role = str(headers.get("x-operator-role") or "operador").strip().lower() or "operador"
-
-    if operador_role == "master" and not operador_nome:
-        operador_nome = "MASTER"
-    if not operador_nome:
-        operador_nome = "Nao identificado"
-
+    """Identidade vem só da sessão assinada (seguranca.ProtecaoApi), nunca de header."""
+    sessao = request.scope.get("sessao") or {}
     return {
-        "operador_id": operador_id or None,
-        "operador_nome": operador_nome,
-        "operador_role": operador_role,
+        "operador_id": str(sessao["id"]) if sessao.get("id") is not None else None,
+        "operador_nome": sessao.get("nome") or "Nao identificado",
+        "operador_role": sessao.get("papel") or "operador",
     }
 
 
@@ -6885,15 +6882,116 @@ async def listar_operadores(request: Request):
         db.close()
 
 
-async def master_login_operadores(request: Request):
+def _sessao_publica(sessao: dict) -> dict:
+    return {"operadorId": sessao.get("id"), "operadorNome": sessao.get("nome"), "role": sessao.get("papel"),
+            "trocarPin": bool(sessao.get("trocar"))}
+
+
+def _responder_com_sessao(request: Request, operador_id, nome: str, papel: str, trocar_pin: bool = False):
+    token = seguranca.criar_sessao(operador_id, nome, papel, trocar_pin=trocar_pin)
+    resposta = JSONResponse(_sessao_publica({"id": operador_id, "nome": nome, "papel": papel, "trocar": trocar_pin}))
+    https = request.headers.get("x-forwarded-proto", request.url.scheme) == "https"
+    seguranca.gravar_cookie(resposta, token, https)
+    return resposta
+
+
+async def sessao_entrar(request: Request):
+    """POST {operador_id, pin} ou {master: true, pin} → grava o cookie de sessão."""
+    ip = seguranca.ip_cliente(request.headers)
+    if seguranca.login_bloqueado(ip):
+        return JSONResponse({"erro": "Muitas tentativas erradas. Aguarde 15 minutos."}, status_code=429)
     try:
         body = await request.json()
     except Exception:
         body = {}
     pin = str(body.get("pin") or "").strip()
-    if pin != MASTER_PIN_PADRAO:
-        return JSONResponse({"erro": "PIN inválido"}, status_code=401)
-    return JSONResponse({"sucesso": True, "nome": "MASTER", "role": "master"})
+
+    if body.get("master"):
+        if not seguranca.pin_confere(pin, seguranca.PIN_MASTER):
+            seguranca.registrar_falha(ip)
+            return JSONResponse({"erro": "PIN inválido"}, status_code=401)
+        seguranca.limpar_falhas(ip)
+        return _responder_com_sessao(request, None, "MASTER", "master")
+
+    db = SessionLocal()
+    try:
+        operador = db.query(Operador).filter(Operador.id == body.get("operador_id"), Operador.ativo == 1).first()
+        dados = (operador.id, operador.nome, operador.pin_hash) if operador else None
+    finally:
+        db.close()
+    if dados and dados[2]:
+        valido, trocar = seguranca.pin_confere_hash(pin, dados[2]), False
+    else:  # ainda sem PIN pessoal: entra com o PIN inicial e é obrigado a trocar
+        valido, trocar = bool(dados) and seguranca.pin_confere(pin, seguranca.PIN_OPERADOR), True
+    if not valido:
+        seguranca.registrar_falha(ip)
+        return JSONResponse({"erro": "Operador ou PIN inválido"}, status_code=401)
+    seguranca.limpar_falhas(ip)
+    return _responder_com_sessao(request, dados[0], dados[1], "operador", trocar_pin=trocar)
+
+
+async def sessao_trocar_pin(request: Request):
+    """POST {pin_novo, pin_atual?} — operador define o PIN pessoal (pin_atual dispensado no 1º acesso)."""
+    sessao = request.scope.get("sessao") or {}
+    if sessao.get("papel") != "operador" or sessao.get("id") is None:
+        return JSONResponse({"erro": "Só operadores têm PIN pessoal."}, status_code=400)
+    ip = seguranca.ip_cliente(request.headers)
+    if seguranca.login_bloqueado(ip):
+        return JSONResponse({"erro": "Muitas tentativas erradas. Aguarde 15 minutos."}, status_code=429)
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    pin_novo = str(body.get("pin_novo") or "").strip()
+    problema = seguranca.problema_no_pin_novo(pin_novo)
+    if problema:
+        return JSONResponse({"erro": problema}, status_code=400)
+    db = SessionLocal()
+    try:
+        operador = db.query(Operador).filter(Operador.id == sessao["id"], Operador.ativo == 1).first()
+        if not operador:
+            return JSONResponse({"erro": "Operador não encontrado"}, status_code=404)
+        if not sessao.get("trocar") and not seguranca.pin_confere_hash(str(body.get("pin_atual") or ""), operador.pin_hash):
+            seguranca.registrar_falha(ip)
+            return JSONResponse({"erro": "PIN atual incorreto"}, status_code=401)
+        operador.pin_hash = seguranca.hash_pin(pin_novo)
+        db.commit()
+        operador_id, nome = operador.id, operador.nome
+    finally:
+        db.close()
+    _registrar_log_operacao(request, "pin_definido", "operador", operador_id, f"{nome} definiu o PIN pessoal")
+    return _responder_com_sessao(request, operador_id, nome, "operador")
+
+
+async def resetar_pin_operador(request: Request):
+    """Master: operador esqueceu o PIN → volta ao PIN inicial e troca no próximo acesso."""
+    if not _request_eh_master(request):
+        return JSONResponse({"erro": "Acesso restrito ao master"}, status_code=403)
+    db = SessionLocal()
+    try:
+        operador = db.query(Operador).filter(Operador.id == int(request.path_params["operador_id"])).first()
+        if not operador:
+            return JSONResponse({"erro": "Operador não encontrado"}, status_code=404)
+        operador.pin_hash = None
+        db.commit()
+        nome = operador.nome
+    finally:
+        db.close()
+    _registrar_log_operacao(request, "pin_resetado", "operador", request.path_params["operador_id"], f"PIN de {nome} resetado")
+    return JSONResponse({"sucesso": True, "mensagem": f"PIN de {nome} resetado"})
+
+
+async def sessao_sair(request: Request):
+    resposta = JSONResponse({"sucesso": True})
+    seguranca.apagar_cookie(resposta)
+    return resposta
+
+
+async def sessao_atual(request: Request):
+    sessao = request.scope.get("sessao")
+    if not sessao:
+        return JSONResponse({"erro": "Sem sessão"}, status_code=401)
+    return JSONResponse(_sessao_publica(sessao))
 
 
 async def criar_operador(request: Request):
@@ -6980,7 +7078,11 @@ routes = [
     Route("/api/health", root, methods=["GET"]),
     Route("/api/operadores", listar_operadores, methods=["GET"]),
     Route("/api/operadores", criar_operador, methods=["POST"]),
-    Route("/api/operadores/master-login", master_login_operadores, methods=["POST"]),
+    Route("/api/sessao", sessao_atual, methods=["GET"]),
+    Route("/api/sessao/entrar", sessao_entrar, methods=["POST"]),
+    Route("/api/sessao/sair", sessao_sair, methods=["POST"]),
+    Route("/api/sessao/trocar-pin", sessao_trocar_pin, methods=["POST"]),
+    Route("/api/operadores/{operador_id:int}/resetar-pin", resetar_pin_operador, methods=["POST"]),
     Route("/api/operadores/historico", historico_operadores, methods=["GET"]),
     Route("/api/apelidos-fornecedores", apelidos_fornecedores, methods=["GET", "POST"]),
     Route("/api/notas-fiscais/{id:int}/frete", atualizar_frete_nota, methods=["POST"]),
@@ -7151,6 +7253,7 @@ if os.path.isdir(STATIC_DIR):
 app = Starlette(routes=routes, on_startup=[_on_startup])
 
 # Comprime respostas JSON/JS (egress era 57 GB/mês sem compressão)
+app.add_middleware(seguranca.ProtecaoApi)  # o mais interno: CORS e gzip continuam valendo no 401
 app.add_middleware(GZipMiddleware, minimum_size=1024)
 
 # Add CORS

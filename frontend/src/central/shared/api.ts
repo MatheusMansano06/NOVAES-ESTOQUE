@@ -1,4 +1,4 @@
-import { API_ORIGIN, buildOperadorHeaders } from "../../services/api";
+import { API_ORIGIN } from "../../services/api";
 
 /** Rotas da Central no backend do estoque. */
 export const BASE_API = `${API_ORIGIN}/api/central`;
@@ -11,7 +11,7 @@ export class ErroApi extends Error {
 }
 
 async function pedir<T>(caminho: string, init?: RequestInit): Promise<T> {
-  const r = await fetch(`${BASE_API}${caminho}`, { ...init, headers: { ...buildOperadorHeaders(), ...(init?.headers as Record<string, string> | undefined) } });
+  const r = await fetch(`${BASE_API}${caminho}`, init);
   const corpo = r.headers.get("content-type")?.includes("json") ? await r.json() : null;
   if (!r.ok) {
     const msg = corpo?.detail ?? corpo?.erro ?? `Falha ${r.status} ao chamar ${caminho}`;

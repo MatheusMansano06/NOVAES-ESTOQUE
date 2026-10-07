@@ -8,14 +8,25 @@ export interface OperadorSessao {
   operadorId?: number | null
   operadorNome: string
   role: 'operador' | 'master'
+  trocarPin?: boolean
 }
 
 const api: AxiosInstance = axios.create({
   baseURL: API_BASE_URL,
+  withCredentials: true, // cookie de sessão HttpOnly
   headers: {
     'Content-Type': 'application/json',
   },
 })
+
+/** Disparado em qualquer 401 da API: o App volta para a tela de login. */
+export const EVENTO_SESSAO_EXPIRADA = 'nvs:sessao-expirada'
+
+export function avisarSeSessaoExpirou(status: number, url: string) {
+  if (status === 401 && url.includes('/api/') && !url.includes('/api/sessao')) {
+    window.dispatchEvent(new Event(EVENTO_SESSAO_EXPIRADA))
+  }
+}
 
 export function getOperadorSessao(): OperadorSessao | null {
   try {
@@ -27,6 +38,7 @@ export function getOperadorSessao(): OperadorSessao | null {
       operadorId: parsed.operadorId ?? null,
       operadorNome: String(parsed.operadorNome),
       role: parsed.role === 'master' ? 'master' : 'operador',
+      trocarPin: Boolean(parsed.trocarPin),
     }
   } catch {
     return null
@@ -41,24 +53,9 @@ export function clearOperadorSessao() {
   localStorage.removeItem(OPERADOR_SESSION_KEY)
 }
 
-export function buildOperadorHeaders() {
-  const sessao = getOperadorSessao()
-  if (!sessao) return {}
-
-  return {
-    'x-operator-id': sessao.operadorId == null ? '' : String(sessao.operadorId),
-    'x-operator-name': sessao.operadorNome,
-    'x-operator-role': sessao.role,
-  }
-}
-
-api.interceptors.request.use((config) => {
-  const headers = buildOperadorHeaders()
-  config.headers = {
-    ...(config.headers ?? {}),
-    ...headers,
-  }
-  return config
+api.interceptors.response.use(undefined, (erro) => {
+  avisarSeSessaoExpirou(erro?.response?.status, `${API_BASE_URL}${erro?.config?.url ?? ''}`)
+  return Promise.reject(erro)
 })
 
 export interface VinculoSugestao {

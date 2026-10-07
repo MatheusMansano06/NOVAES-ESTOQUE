@@ -8,7 +8,7 @@ from app import main
 from app.models import EmbaleFU, HistoricoFullEmbale, ItemEmbaleFU
 from database import SessionLocal
 
-REQ = SimpleNamespace(headers={"x-operator-name": "Conferente"})
+REQ = SimpleNamespace(scope={"sessao": {"id": None, "nome": "Conferente", "papel": "operador"}})
 
 
 def test_full_reduzido_so_segura_original_se_marcado():
