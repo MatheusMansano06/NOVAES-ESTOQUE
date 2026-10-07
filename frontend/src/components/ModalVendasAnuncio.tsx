@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react'
-import { DifalPanel } from './DifalPanel'
+import { PainelDifal } from './PainelDifal'
 import type { UF, EntradaVenda } from './difal'
 
 const API_BASE = import.meta.env.VITE_API_URL ?? 'http://127.0.0.1:8000'
@@ -258,7 +258,7 @@ function CardVenda({ v }: { v: Venda }) {
   )
 }
 
-export function VendasAnuncioModal({ itemId, titulo, onClose }: { itemId: string; titulo?: string; onClose: () => void }) {
+export function ModalVendasAnuncio({ itemId, titulo, onClose }: { itemId: string; titulo?: string; onClose: () => void }) {
   const [dados, setDados] = useState<Resultado | null>(null)
   const [carregando, setCarregando] = useState(true)
   const [atualizando, setAtualizando] = useState(false)
@@ -469,7 +469,7 @@ export function VendasAnuncioModal({ itemId, titulo, onClose }: { itemId: string
 
         {/* Calculadora de DIFAL (usa a distribuição real por estado) */}
         {dados && entradasDifal.length > 0 && (
-          <DifalPanel
+          <PainelDifal
             entradas={entradasDifal}
             receitaTotal={dados.resumo.receita}
             vendasTotal={dados.total_vendas}

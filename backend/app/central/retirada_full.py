@@ -11,7 +11,7 @@ from database import SessionLocal
 from app.central.db import Base, Sessao
 from app.central.financeiro.custos import custo_do_sku
 from app.central.olist import servico as olist
-from app.integracoes_ml import ml
+from app.integracoes.mercado_livre import ml
 from app.models import MercadoLivreItemCache
 
 ETIQUETA = re.compile(r"^[A-Z]{4}\d{5}$")

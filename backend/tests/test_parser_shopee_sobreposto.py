@@ -3,7 +3,7 @@ acima do seguinte e com a qtd um dígito por linha. Antes lia 42 itens / 4522 de
 
 from pathlib import Path
 
-from app.utils.embale_parser import extrair_items_embale_pdf
+from app.utils.inbound_parser import extrair_items_embale_pdf
 
 PDF = Path(__file__).parent / "fixtures" / "shopee_picking_sobreposto.pdf"
 

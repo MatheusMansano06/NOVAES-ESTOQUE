@@ -183,7 +183,7 @@ def sincronizar_anuncios_ml():
     Assim a aba Anúncios serve do SQLite e só fala com a API quando o ML muda.
     """
     try:
-        from app.integracoes_ml import ml
+        from app.integracoes.mercado_livre import ml
     except Exception as e:
         logger.error(f"[JOB][ML] import falhou: {e}")
         return
@@ -229,7 +229,7 @@ def sincronizar_vendas_ml():
     então só depende deste job para ficar em dia (abertura instantânea).
     """
     try:
-        from app.integracoes_ml import ml
+        from app.integracoes.mercado_livre import ml
     except Exception as e:
         logger.error(f"[JOB][VENDAS] import falhou: {e}")
         return
@@ -425,7 +425,7 @@ def iniciar_scheduler():
         # Aquece o cache logo no boot, sem depender de next_run_time (que sofre
         # misfire) e sem bloquear o startup: dispara o sync numa thread daemon.
         try:
-            from app.integracoes_ml import ml
+            from app.integracoes.mercado_livre import ml
             ml._sync_catalogo_async("active")
             logger.info("[SCHEDULER] Sync inicial de anúncios ML disparado em background")
         except Exception as e:
@@ -440,7 +440,7 @@ def iniciar_scheduler():
 
             def _warm_vendas():
                 try:
-                    from app.integracoes_ml import ml as _ml
+                    from app.integracoes.mercado_livre import ml as _ml
                     if not _ml.user_id or not _ml.get_access_token():
                         return
                     db = SessionLocal()

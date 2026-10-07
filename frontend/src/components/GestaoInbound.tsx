@@ -96,7 +96,7 @@ interface KitInfo {
 type KitEstado = 'carregando' | 'nao' | KitInfo
 type KitBalanceModal = { item: ItemRevisao; kit: KitInfo }
 
-export function EmbaldesManager({ modoSeparacao = false }: { modoSeparacao?: boolean } = {}) {
+export function GestaoInbound({ modoSeparacao = false }: { modoSeparacao?: boolean } = {}) {
   const [inbounds, setInbounds] = useState<Inbound[]>([])
   const [loading, setLoading] = useState(false)
   const [message, setMessage] = useState('')

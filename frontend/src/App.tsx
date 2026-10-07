@@ -1,15 +1,13 @@
 import { type ReactNode, useState, useEffect, useRef } from 'react'
 import './App.css'
-import { ModalDetalhes } from './ModalDetalhes'
-import { ModalDetalhesNota } from './ModalDetalhesNota'
-import { ModalDetalhesNotaFiscal } from './ModalDetalhesNotaFiscal'
-import { FornecedoresManager } from './components/FornecedoresManager'
-import { EmbaldesManager } from './components/EmbaldesManager'
+import { ModalConferenciaProduto } from './components/ModalConferenciaProduto'
+import { GestaoFornecedores } from './components/GestaoFornecedores'
+import { GestaoInbound } from './components/GestaoInbound'
 import { HistoricoFull } from './components/HistoricoFull'
 import { DivergenciasFull } from './components/DivergenciasFull'
-import { AnunciosML } from './components/AnunciosML'
+import { AnunciosMercadoLivre } from './components/AnunciosMercadoLivre'
 import { Garimpador } from './components/Garimpador'
-import { OperadoresManager } from './components/OperadoresManager'
+import { GestaoOperadores } from './components/GestaoOperadores'
 import { ListaCompra } from './components/ListaCompra'
 import { RadarFull } from './components/RadarFull'
 import { DivergenciaDimensoes } from './components/DivergenciaDimensoes'
@@ -20,8 +18,8 @@ import { PaginaClassificacaoTipos, PaginaFiscalMlOlist } from './components/Dash
 import { CalculadoraTikTok } from './components/CalculadoraTikTok'
 import { CentralDevolucoes } from './central/CentralDevolucoes'
 import { PlataformaSelecao, type Platform, LogoMercadoLivre, LogoShopee, LogoOperacao } from './components/PlataformaSelecao'
-import { LoginNVS } from './components/LoginNVS'
-import { DefinirPin } from './components/DefinirPin'
+import { TelaLogin } from './components/TelaLogin'
+import { TelaDefinirPin } from './components/TelaDefinirPin'
 import { DashboardShopee } from './components/DashboardShopee'
 import './platform-theme.css'
 import './dashboard-shopee.css'
@@ -1723,7 +1721,7 @@ function App() {
   }
 
   // Filtrar navGroups: ML mostra anuncios/devolucoes, Shopee mostra só dashboard, Operacao mostra ferramentas/arquivados
-  const navGroups = navGroupsRaw.map(group => {
+  const navGroups = navGroupsRaw.map((group): ShellNavGroup => {
     if (group.label === 'Dashboard') {
       // Dashboard aparece em todas, mas item diferente por platform
       return {
@@ -1739,7 +1737,7 @@ function App() {
           { key: 'notas', label: 'Notas fiscais', icon: 'receipt', badge: notas.length, active: pagina === 'notas-fiscais', onClick: () => setPagina('notas-fiscais') },
           { key: 'fornecedores', label: 'Fornecedores', icon: 'users', active: pagina === 'fornecedores', onClick: () => setPagina('fornecedores') },
           ...(platform === 'ml' ? [
-            { key: 'full-sep', label: 'FULL', icon: 'box', badge: inboundsAtivos.length + divergencias.length, active: pagina === 'full-operacoes', onClick: () => setPagina('full-operacoes') }
+            { key: 'full-sep', label: 'FULL', icon: 'box' as const, badge: inboundsAtivos.length + divergencias.length, active: pagina === 'full-operacoes', onClick: () => setPagina('full-operacoes') }
           ] : [])
         ]
       }
@@ -1800,7 +1798,7 @@ function App() {
 
   if (operadorSessao?.trocarPin && pagina !== 'bemvindo') {
     return (
-      <DefinirPin
+      <TelaDefinirPin
         nome={operadorSessao.operadorNome}
         onDefinido={() => salvarSessaoOperador({ ...operadorSessao, trocarPin: false })}
         onSair={trocarOperador}
@@ -1810,7 +1808,7 @@ function App() {
 
   if (pagina === 'bemvindo') {
     return (
-      <LoginNVS
+      <TelaLogin
         operadores={operadoresDisponiveis}
         operadorSelecionadoId={operadorSelecionadoId}
         onSelecionarOperador={setOperadorSelecionadoId}
@@ -2736,7 +2734,7 @@ function App() {
             )}
 
             {produtoSelecionado && (
-              <ModalDetalhesNota
+              <ModalConferenciaProduto
                 isOpen={modalOpen}
                 onClose={() => setModalOpen(false)}
                 produto={produtoSelecionado}
@@ -2977,7 +2975,7 @@ function App() {
         </main>
 
         {produtoSelecionado && (
-          <ModalDetalhesNota
+          <ModalConferenciaProduto
             isOpen={modalOpen}
             onClose={() => setModalOpen(false)}
             produto={produtoSelecionado}
@@ -3086,7 +3084,7 @@ function App() {
     return renderComShell(
       'Central de fornecedores',
       'Visao historica de fornecedores, catalogo e margens cruzadas.',
-      <FornecedoresManager
+      <GestaoFornecedores
         onVoltar={voltarParaInicial}
       />
     )
@@ -3097,7 +3095,7 @@ function App() {
     return renderComShell(
       'Painel Mercado Livre',
       'Acompanhe anuncios, estoque, imagens, precificacao e dimensoes.',
-      <AnunciosML onVoltar={voltarParaInicial} />
+      <AnunciosMercadoLivre onVoltar={voltarParaInicial} />
     )
   }
 
@@ -4114,8 +4112,8 @@ function App() {
         </div>
 
         <main className="container main-content">
-          {abaFull === 'separacao' && <EmbaldesManager modoSeparacao={true} />}
-          {abaFull === 'inbound' && <EmbaldesManager />}
+          {abaFull === 'separacao' && <GestaoInbound modoSeparacao={true} />}
+          {abaFull === 'inbound' && <GestaoInbound />}
           {abaFull === 'historico' && <HistoricoFull />}
           {abaFull === 'divergencias' && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
@@ -4222,7 +4220,7 @@ function App() {
           </div>
         </header>
         <main className="container main-content">
-          <OperadoresManager />
+          <GestaoOperadores />
         </main>
       </div>
     )

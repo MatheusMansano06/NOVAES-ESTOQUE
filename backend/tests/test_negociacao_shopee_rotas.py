@@ -9,7 +9,7 @@ from starlette.applications import Starlette
 from starlette.routing import Route
 from starlette.testclient import TestClient
 
-from app import main
+from app.rotas import shopee
 from app import negociacao_shopee as negoc
 from app.models import NegociacaoShopee, NegociacaoShopeeItem
 from database import SessionLocal
@@ -17,12 +17,12 @@ from database import SessionLocal
 from tests.test_negociacao_shopee import CABECALHO, PRODUTOS
 
 app_teste = Starlette(routes=[
-    Route("/api/negociacoes-shopee/bi", main.negoc_bi, methods=["GET"]),
-    Route("/api/negociacoes-shopee", main.negoc_listar, methods=["GET"]),
-    Route("/api/negociacoes-shopee", main.negoc_criar, methods=["POST"]),
-    Route("/api/negociacoes-shopee/{id:int}", main.negoc_detalhe, methods=["GET"]),
-    Route("/api/negociacoes-shopee/{id:int}/arquivo/{idx:int}", main.negoc_arquivo, methods=["GET"]),
-    Route("/api/negociacoes-shopee/{id:int}/reprocessar", main.negoc_reprocessar, methods=["POST"]),
+    Route("/api/negociacoes-shopee/bi", shopee.negoc_bi, methods=["GET"]),
+    Route("/api/negociacoes-shopee", shopee.negoc_listar, methods=["GET"]),
+    Route("/api/negociacoes-shopee", shopee.negoc_criar, methods=["POST"]),
+    Route("/api/negociacoes-shopee/{id:int}", shopee.negoc_detalhe, methods=["GET"]),
+    Route("/api/negociacoes-shopee/{id:int}/arquivo/{idx:int}", shopee.negoc_arquivo, methods=["GET"]),
+    Route("/api/negociacoes-shopee/{id:int}/reprocessar", shopee.negoc_reprocessar, methods=["POST"]),
 ])
 cliente = TestClient(app_teste)
 

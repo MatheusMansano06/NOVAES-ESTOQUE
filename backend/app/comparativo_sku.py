@@ -5,7 +5,7 @@ import threading
 import time
 from typing import Any, Dict, List, Optional
 
-from app.integracoes_shopee import shopee
+from app.integracoes.shopee import shopee
 from app.models import CalculoTikTok, CustoProduto, MercadoLivreItemCache
 
 # Tabela Shopee BR (CNPJ) por faixa de preço — vigente desde 01/10/2026, sem teto de comissão.
@@ -98,7 +98,7 @@ _TIPOS_PROMO_ML = {"custom": "desconto próprio", "price_discount": "desconto", 
 def _preco_ml(item_id: str) -> Optional[dict]:
     """Preço que o comprador paga agora (inclui Central de Promoções) via /items/{id}/sale_price."""
     try:
-        from app.integracoes_ml import ml
+        from app.integracoes.mercado_livre import ml
         sp = ml._get(f"/items/{item_id}/sale_price", {"quantity": 1}) or {}
     except Exception:
         return None
@@ -151,7 +151,7 @@ def comparar(db, skus: List[str]) -> List[dict]:
             tarifa = ml_row.tarifa_valor or 0
             if vivo:
                 try:
-                    from app.integracoes_ml import ml as ml_api
+                    from app.integracoes.mercado_livre import ml as ml_api
                     v, _, _ = ml_api._tarifa_para(preco, ml_row.categoria_id, ml_row.listing_type_id)
                     if v is not None:
                         tarifa = v

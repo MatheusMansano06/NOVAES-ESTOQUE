@@ -124,6 +124,24 @@ def produtos_quebrados(dias: int = 30, fatura: str | None = None) -> dict:
     }
 
 
+def quebrados_lista(dias: int = 30, fatura: str | None = None) -> dict:
+    """Devoluções que compõem o card Mercadoria quebrada (mesmo período e mesma regra de `perda`): soma bate com o card."""
+    ini, fim, _, _ = _periodo(dias, fatura)
+    saida = []
+    for l in linhas():
+        if not ini <= l["aberta_em"].date() <= fim:
+            continue
+        origem, valor = perda(l)
+        if not origem:
+            continue
+        saida.append({"id": l["id"], "plataforma": l["plataforma"], "pedido": l["pedido"], "origem": origem, "motivo": l["motivo"],
+                      "valor": valor, "aberta_em": l["aberta_em"].isoformat(),
+                      "itens": [{"sku": i.get("sku"), "nome": i.get("nome"), "imagem": i.get("imagem"),
+                                 "quantidade": i.get("quantidade") or 1} for i in l["itens"]]})
+    saida.sort(key=lambda x: x["aberta_em"], reverse=True)
+    return {"inicio": ini.isoformat(), "fim": fim.isoformat(), "devolucoes": saida}
+
+
 def _recuperado(linha: dict) -> float:
     """Estimado: mediação ganha tira a cobrança do frete; com cobertura, o ML também paga o produto."""
     if linha.get("resultado_mediacao") != "ganha":

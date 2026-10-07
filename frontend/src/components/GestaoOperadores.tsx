@@ -33,7 +33,7 @@ function fmtDataHora(valor?: string | null) {
   return Number.isNaN(dt.getTime()) ? valor : dt.toLocaleString('pt-BR')
 }
 
-export function OperadoresManager() {
+export function GestaoOperadores() {
   const [operadores, setOperadores] = useState<OperadorItem[]>([])
   const [historico, setHistorico] = useState<OperadorHistorico[]>([])
   const [loading, setLoading] = useState(true)

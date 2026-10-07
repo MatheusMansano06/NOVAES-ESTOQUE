@@ -27,7 +27,7 @@ load_dotenv()
 # Diretório de dados persistentes. Em produção (Railway) aponta para o volume
 # (OLIST_DATA_DIR=/data) p/ o token OAuth sobreviver a redeploys; local usa
 # a própria pasta backend/.
-_DATA_DIR = os.getenv("OLIST_DATA_DIR") or os.path.join(os.path.dirname(__file__), "..")
+_DATA_DIR = os.getenv("OLIST_DATA_DIR") or os.path.join(os.path.dirname(__file__), "..", "..")
 os.makedirs(_DATA_DIR, exist_ok=True)
 
 # Caminho para armazenar o token de forma persistente

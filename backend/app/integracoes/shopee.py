@@ -29,7 +29,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 _BASE_DIR = os.path.abspath(os.path.dirname(__file__))
-_DEFAULT_DATA_DIR = os.path.abspath(os.path.join(_BASE_DIR, ".."))
+_DEFAULT_DATA_DIR = os.path.abspath(os.path.join(_BASE_DIR, "..", ".."))
 _DATA_DIR = os.path.abspath(os.getenv("SHOPEE_DATA_DIR") or _DEFAULT_DATA_DIR)
 os.makedirs(_DATA_DIR, exist_ok=True)
 TOKEN_FILE = os.path.abspath(os.path.join(_DATA_DIR, "shopee_token.json"))

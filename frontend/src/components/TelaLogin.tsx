@@ -82,7 +82,7 @@ const VANTAGENS = [
   { icone: <IconeLucro />, titulo: 'Operação', complemento: 'com mais lucro' },
 ]
 
-export function LoginNVS({
+export function TelaLogin({
   operadores,
   operadorSelecionadoId,
   onSelecionarOperador,

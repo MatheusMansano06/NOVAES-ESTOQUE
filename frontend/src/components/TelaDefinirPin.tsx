@@ -10,7 +10,7 @@ interface DefinirPinProps {
 }
 
 /** Primeiro acesso com o PIN inicial: o operador escolhe o PIN pessoal antes de usar o sistema. */
-export function DefinirPin({ nome, onDefinido, onSair }: DefinirPinProps) {
+export function TelaDefinirPin({ nome, onDefinido, onSair }: DefinirPinProps) {
   const [pin, setPin] = useState('')
   const [confirmacao, setConfirmacao] = useState('')
   const [erro, setErro] = useState('')

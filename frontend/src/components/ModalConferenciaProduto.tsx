@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import './ModalDetalhes.css'
+import './ModalConferenciaProduto.css'
 
 const API_BASE = import.meta.env.VITE_API_URL ?? 'http://127.0.0.1:8000'
 
@@ -32,7 +32,7 @@ interface ModalDetalhesNotaProps {
   onDivergenciaConfirmada?: (qtdConfirmada: number) => void
 }
 
-export function ModalDetalhesNota({
+export function ModalConferenciaProduto({
   isOpen,
   onClose,
   produto,

@@ -6,14 +6,15 @@ from starlette.applications import Starlette
 from starlette.routing import Route
 from starlette.testclient import TestClient
 
-from app import main, seguranca
+from app import seguranca
+from app.rotas import inbound
 from app.models import EmbaleFU, HistoricoFullEmbale, ItemEmbaleFU
 from database import SessionLocal
 
 app_teste = Starlette(routes=[
-    Route("/api/e/{embale_id}/i/{item_id}/qtd", main.ajustar_quantidade_full_embale, methods=["POST"]),
-    Route("/api/e/{embale_id}/i/{item_id}/balancear", main.balancear_item_embale, methods=["POST"]),
-    Route("/api/e/{embale_id}/h/{hist_id}/decidir", main.decidir_pedido_full_embale, methods=["POST"]),
+    Route("/api/e/{embale_id}/i/{item_id}/qtd", inbound.ajustar_quantidade_full_embale, methods=["POST"]),
+    Route("/api/e/{embale_id}/i/{item_id}/balancear", inbound.balancear_item_embale, methods=["POST"]),
+    Route("/api/e/{embale_id}/h/{hist_id}/decidir", inbound.decidir_pedido_full_embale, methods=["POST"]),
 ])
 cliente = TestClient(seguranca.ProtecaoApi(app_teste))
 OPERADOR = {"Cookie": f"{seguranca.COOKIE}={seguranca.criar_sessao(7, 'Joao', 'operador')}"}
@@ -37,7 +38,7 @@ def test_operador_altera_direto_e_fica_no_historico():
         assert db.get(ItemEmbaleFU, iid).quantidade_baixar == 80
         h = db.query(HistoricoFullEmbale).filter_by(item_id=iid).one()
         assert (h.status, h.quantidade_anterior, h.quantidade_nova, h.solicitante) == ("aprovado", 100, 80, "Joao")
-        assert main._pedido_full_pendente(db, iid) is None
+        assert inbound._pedido_full_pendente(db, iid) is None
         db.close()
     finally:
         db = SessionLocal()

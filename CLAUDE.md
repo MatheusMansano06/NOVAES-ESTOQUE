@@ -11,18 +11,19 @@ Sistema web moderno para processamento de Notas Fiscais Eletrônicas (NF-e) com 
 - **Parser NF-e**: nfelib (XML) + pytesseract (OCR para PDF)
 - **API**: RESTful com CORS habilitado
 
-**Estrutura**:
+**Estrutura** (detalhe no README):
 ```
-backend/
-├── app/
-│   ├── main.py          # FastAPI app + endpoints
-│   ├── models.py        # SQLAlchemy models
-│   ├── schemas.py       # Pydantic schemas
-│   └── utils/
-│       └── nfe_parser.py # Parsing de NF-e
-├── database.py          # Config SQLAlchemy
-└── requirements.txt
+backend/app/
+├── main.py          # só monta o app (rotas + middlewares + frontend)
+├── seguranca.py     # login por PIN, sessão assinada, rotas públicas
+├── rotas/<area>.py  # handlers por área; compartilhado em rotas/comum.py
+├── integracoes/     # mercado_livre.py, olist.py, shopee.py
+├── central/         # Central de Devoluções
+├── models.py · jobs.py · utils/
 ```
+Rota nova: no módulo da área, usando `Route` de `app.rotas.comum` (roda em thread).
+Rota chamada por fora (webhook/callback) precisa entrar nas públicas de `seguranca.py`.
+Criou/removeu rota de propósito: `python -m tests.test_rotas_registradas` regenera o retrato.
 
 ### Frontend
 - **Framework**: React 18 + TypeScript
@@ -30,19 +31,9 @@ backend/
 - **Styling**: CSS puro + layout grid/flexbox
 - **HTTP Client**: Axios
 
-**Estrutura**:
-```
-frontend/
-├── src/
-│   ├── App.tsx                 # Root component
-│   ├── components/
-│   │   ├── UploadNFe.tsx      # Upload form
-│   │   └── NotaFiscalList.tsx # List component
-│   ├── services/
-│   │   └── api.ts             # API client
-│   └── main.tsx
-└── index.html
-```
+**Estrutura**: `src/App.tsx` (navegação), `src/components/` (telas: GestaoInbound,
+AnunciosMercadoLivre, TelaLogin...), `src/central/` (Devoluções), `src/services/api.ts`.
+Todo `fetch` passa pelo wrapper do App (cookie de sessão + 401 volta ao login).
 
 ## 🔄 Fases do Projeto
 

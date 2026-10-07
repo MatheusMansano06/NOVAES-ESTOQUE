@@ -18,7 +18,6 @@ class NFePDFGenerator:
             Bytes do PDF gerado ou None se houver erro
         """
         try:
-            # Parse XML
             root = ET.fromstring(xml_content)
             ns = {'nfe': 'http://www.portalfiscal.inf.br/nfe'}
 

@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, Fragment } from 'react'
-import '../negociacao-shopee.css'
+import './NegociacaoShopee.css'
 
 const API_BASE = import.meta.env.VITE_API_URL ?? 'http://127.0.0.1:8000'
 const ROTA = `${API_BASE}/api/negociacoes-shopee`

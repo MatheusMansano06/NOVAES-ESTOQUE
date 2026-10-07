@@ -1,11 +1,11 @@
-"""Chamadas ao ML da Central. O token é o do estoque (app.integracoes_ml): refresh de uso único sob um lock só."""
+"""Chamadas ao ML da Central. O token é o do estoque (app.integracoes.mercado_livre): refresh de uso único sob um lock só."""
 
 import os
 import time
 
 import httpx
 
-from app.integracoes_ml import TOKEN_FILE, ml as _ml
+from app.integracoes.mercado_livre import TOKEN_FILE, ml as _ml
 
 API = "https://api.mercadolibre.com"
 USER_ID = _ml.user_id

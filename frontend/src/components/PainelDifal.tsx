@@ -7,7 +7,7 @@ import {
 const brl = (v: number) => Number(v).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
 const pc = (v: number) => Number(v).toFixed(1).replace('.', ',') + '%'
 
-export function DifalPanel({ entradas, receitaTotal, vendasTotal, vendasLocalizadas, expandido: expandidoInicialmente = false, onToggleExpandido }: {
+export function PainelDifal({ entradas, receitaTotal, vendasTotal, vendasLocalizadas, expandido: expandidoInicialmente = false, onToggleExpandido }: {
   entradas: EntradaVenda[]
   receitaTotal: number
   vendasTotal: number

@@ -143,7 +143,7 @@ interface FornecedoresManagerProps {
   onVoltar: () => void
 }
 
-export function FornecedoresManager({ onVoltar }: FornecedoresManagerProps) {
+export function GestaoFornecedores({ onVoltar }: FornecedoresManagerProps) {
   const [notas, setNotas] = useState<NotaFiscal[]>([])
   const [fornecedores, setFornecedores] = useState<Fornecedor[]>([])
   const [carregando, setCarregando] = useState(true)
@@ -851,4 +851,4 @@ export function FornecedoresManager({ onVoltar }: FornecedoresManagerProps) {
   )
 }
 
-export default FornecedoresManager
+export default GestaoFornecedores

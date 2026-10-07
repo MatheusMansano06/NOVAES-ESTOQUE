@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, type CSSProperties } from 'react'
 import { Precificador, type PricingSnapshot, loadPricingSummaryMap, loadPriceHistory } from './Precificador'
-import { MLAnuncioEditorModal } from './MLAnuncioEditorModal'
-import { VendasAnuncioModal } from './VendasAnuncioModal'
+import { ModalEditarAnuncio } from './ModalEditarAnuncio'
+import { ModalVendasAnuncio } from './ModalVendasAnuncio'
 
 const API_BASE = import.meta.env.VITE_API_URL ?? 'http://127.0.0.1:8000'
 const PAGE_SIZE_OPTIONS = [10, 20, 30, 40, 50] as const
@@ -170,7 +170,7 @@ function montarResumoMargem(anuncio: Anuncio, resumo?: PricingSnapshot, live?: L
   }
 }
 
-export function AnunciosML({ onVoltar }: Props) {
+export function AnunciosMercadoLivre({ onVoltar }: Props) {
   const [aba, setAba] = useState('active')
   const [anuncios, setAnuncios] = useState<Anuncio[]>([])
   const [total, setTotal] = useState(0)
@@ -470,7 +470,7 @@ export function AnunciosML({ onVoltar }: Props) {
       )}
 
       {editando && (
-        <MLAnuncioEditorModal
+        <ModalEditarAnuncio
           anuncio={editando.anuncio}
           mode={editando.mode}
           onClose={() => setEditando(null)}
@@ -497,7 +497,7 @@ export function AnunciosML({ onVoltar }: Props) {
         />
       )}
       {vendasAnuncio && (
-        <VendasAnuncioModal
+        <ModalVendasAnuncio
           itemId={vendasAnuncio.id}
           titulo={vendasAnuncio.titulo}
           onClose={() => setVendasAnuncio(null)}
@@ -1418,4 +1418,4 @@ function CategoriaPickerModal({ anuncio, onClose, onMsg, onDone }: { anuncio: An
   )
 }
 
-export default AnunciosML
+export default AnunciosMercadoLivre

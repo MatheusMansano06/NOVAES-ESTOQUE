@@ -6,7 +6,7 @@ import httpx
 from starlette.applications import Starlette
 from starlette.responses import JSONResponse
 
-from app.main import Route
+from app.rotas.comum import Route
 
 
 async def _lenta(request):

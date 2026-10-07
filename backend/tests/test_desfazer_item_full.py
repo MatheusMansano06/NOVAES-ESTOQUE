@@ -1,6 +1,6 @@
 """Cálculo do desfazer baixa/balanço do inbound FULL (desfaz pela diferença, não por valor absoluto)."""
 
-from app.main import _movimentos_desfazer as f
+from app.rotas.inbound import _movimentos_desfazer as f
 
 
 def test_desfazer_baixa_balanco_e_kit():

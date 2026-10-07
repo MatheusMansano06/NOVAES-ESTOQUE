@@ -1,4 +1,4 @@
-"""Chamadas à Olist da Central. O token OAuth é o do estoque (app.integracoes_olist), renovado lá sob lock."""
+"""Chamadas à Olist da Central. O token OAuth é o do estoque (app.integracoes.olist), renovado lá sob lock."""
 
 import os
 import threading
@@ -7,7 +7,7 @@ from collections import deque
 
 import httpx
 
-from app.integracoes_olist import olist as _olist
+from app.integracoes.olist import olist as _olist
 
 API = "https://api.tiny.com.br/public-api/v3"
 LIMITE_POR_MINUTO = 100  # a Olist libera 120 req/min; fica abaixo com folga

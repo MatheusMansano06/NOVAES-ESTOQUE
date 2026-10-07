@@ -156,7 +156,7 @@ async def conferencia_buscar(request: Request):
 
 async def conferencia_registrar(request: Request):
     resultado = await run_in_threadpool(conferencia.registrar, _id(request), _constatacao(await _corpo(request)))
-    from app.main import _registrar_log_operacao  # import tardio: main.py importa este módulo, evita ciclo
+    from app.rotas.comum import _registrar_log_operacao  # import tardio: comum importa o app, evita ciclo
     await run_in_threadpool(
         _registrar_log_operacao, request, "conferencia_devolucao", "devolucao", _id(request),
         f"{resultado['plataforma']} · classe {resultado['classe']}",
@@ -338,6 +338,13 @@ async def operadores_atividade(request: Request):
     return await run_in_threadpool(_operadores_atividade, dia)
 
 
+async def quebrados_lista(request: Request):
+    fatura = _q(request, "fatura")
+    if fatura and not re.fullmatch(r"\d{4}-\d{2}-01", fatura):
+        raise ValueError(f"Parâmetro fatura inválido: {fatura!r}")
+    return await run_in_threadpool(bi.quebrados_lista, _q(request, "dias", 30, int, 1, 365), fatura)
+
+
 async def produtos_quebrados(request: Request):
     fatura = _q(request, "fatura")
     if fatura and not re.fullmatch(r"\d{4}-\d{2}-01", fatura):
@@ -459,6 +466,7 @@ rotas = [
     _rota("/conferencia/{id:int}/chamado-manual", conferencia_chamado_manual, "POST"),
     _rota("/conferencia/{id:int}/chamado-manual/aberto", conferencia_chamado_aberto, "POST"),
     _rota("/conferencia/{id:int}/evidencias", conferencia_evidencia, "POST"),
+    _rota("/conferencia/evidencias/{id:int}", conferencia_excluir_evidencia, "DELETE"),
     _rota("/mediacoes/{id:int}/motivos", mediacoes_motivos),
     _rota("/shopee/disputa/{return_sn}", shopee_campos_disputa),
     _rota("/mediacoes/{id:int}/contestar", mediacoes_contestar, "POST"),
@@ -466,7 +474,6 @@ rotas = [
     _rota("/mediacoes/pendentes-revisao", mediacoes_pendentes_revisao),
     _rota("/mediacoes/{id:int}", mediacoes_historico),
     _rota("/mercado-livre/sincronizar", ml_sincronizar, "POST"),
-    _rota("/conferencia/evidencias/{id:int}", conferencia_excluir_evidencia, "DELETE"),
     _rota("/shopee/sincronizar", shopee_sincronizar, "POST"),
     _rota("/shopee/sincronizar-falha-entrega", shopee_sincronizar_falha_entrega, "POST"),
     _rota("/olist/pedidos/{numero}", olist_pedido),
@@ -477,6 +484,7 @@ rotas = [
     _rota("/operacao/ultimas", operacao_ultimas),
     _rota("/operadores/atividade", operadores_atividade),
     _rota("/produtos-quebrados", produtos_quebrados),
+    _rota("/bi/quebrados", quebrados_lista),
     _rota("/custos/{sku}/historico", custo_historico),
     _rota("/custos/{sku}", custo_registrar, "POST"),
     _rota("/respostas-prontas", respostas_prontas_listar),

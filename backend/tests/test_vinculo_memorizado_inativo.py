@@ -2,7 +2,8 @@
 
 from types import SimpleNamespace
 
-from app import main
+from app.integracoes.olist import olist
+from app.rotas import inbound
 
 
 class _Db:
@@ -26,18 +27,18 @@ def _item(msg="Vinculado via SKU X"):
 
 def test_solta_so_memorizado_inativo(monkeypatch):
     situacao = {"v": "E"}
-    monkeypatch.setattr(main.olist, "obter_detalhes_completo", lambda pid: {"situacao": situacao["v"]})
+    monkeypatch.setattr(olist, "obter_detalhes_completo", lambda pid: {"situacao": situacao["v"]})
 
     db, it = _Db(), _item()
-    main._descartar_vinculo_memorizado_inativo(db, it)
+    inbound._descartar_vinculo_memorizado_inativo(db, it)
     assert it.olist_produto_id is None and it.validado == 0 and db.apagados == 1
 
     situacao["v"] = "A"  # ativo: mantém
     db, it = _Db(), _item()
-    main._descartar_vinculo_memorizado_inativo(db, it)
+    inbound._descartar_vinculo_memorizado_inativo(db, it)
     assert it.olist_produto_id == "9" and db.apagados == 0
 
     situacao["v"] = "E"  # manual (sem a mensagem da memória): não reconfere
     db, it = _Db(), _item(msg=None)
-    main._descartar_vinculo_memorizado_inativo(db, it)
+    inbound._descartar_vinculo_memorizado_inativo(db, it)
     assert it.olist_produto_id == "9"

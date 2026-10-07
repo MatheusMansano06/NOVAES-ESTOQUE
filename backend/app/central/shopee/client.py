@@ -1,10 +1,10 @@
-"""Chamadas à Shopee da Central. Token e shop_id são os do estoque (app.integracoes_shopee), renovados lá sob lock."""
+"""Chamadas à Shopee da Central. Token e shop_id são os do estoque (app.integracoes.shopee), renovados lá sob lock."""
 
 import time
 
 import httpx
 
-from app.integracoes_shopee import assinar, shopee as _shopee
+from app.integracoes.shopee import assinar, shopee as _shopee
 
 # Sem User-Agent explícito parte da borda da Shopee responde 403 antes da API.
 _http = httpx.Client(base_url=_shopee.host, timeout=20, headers={"User-Agent": "NVS-Estoque/1.0"})

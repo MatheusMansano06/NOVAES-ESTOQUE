@@ -68,7 +68,7 @@ function getAttr(attributes: AttributeRow[], id: string) {
   return attributes.find(a => a.id === id)?.value_name || ''
 }
 
-export function MLAnuncioEditorModal({ anuncio, mode, onClose, onUpdated }: Props) {
+export function ModalEditarAnuncio({ anuncio, mode, onClose, onUpdated }: Props) {
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
