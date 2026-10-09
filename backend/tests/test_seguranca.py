@@ -58,6 +58,12 @@ def test_login_master_grava_cookie_e_libera_api():
     assert c.get("/api/embaldes?limit=1").status_code == 401
 
 
+def test_pin_errado_nao_entra_e_forca_bruta_bloqueia():
+    c = _cliente()
+    for _ in range(5):
+        assert c.post("/api/sessao/entrar", json={"master": True, "pin": "000000"}).status_code == 401
+    assert _entrar_master(c).status_code == 429  # bloqueado mesmo com o PIN certo
+
 
 @pytest.fixture
 def operador_temp():
@@ -72,8 +78,6 @@ def operador_temp():
     db.query(Operador).filter(Operador.id == oid).delete()
     db.commit()
     db.close()
-
-
 
 
 def test_token_adulterado_ou_vencido_e_recusado():

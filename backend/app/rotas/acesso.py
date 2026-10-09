@@ -55,12 +55,19 @@ def _responder_com_sessao(request: Request, operador_id, nome: str, papel: str, 
 
 
 async def sessao_entrar(request: Request):
-    """POST {operador_id} ou {master: true} → grava o cookie de sessão. Sem PIN (acesso livre, decisão do dono)."""
+    """POST {operador_id} (sem PIN, acesso livre) ou {master: true, pin} → grava o cookie de sessão."""
+    ip = seguranca.ip_cliente(request.headers)
+    if seguranca.login_bloqueado(ip):
+        return JSONResponse({"erro": "Muitas tentativas erradas. Aguarde 15 minutos."}, status_code=429)
     try:
         body = await request.json()
     except Exception:
         body = {}
     if body.get("master"):
+        if not seguranca.pin_confere(str(body.get("pin") or "").strip(), seguranca.PIN_MASTER):
+            seguranca.registrar_falha(ip)
+            return JSONResponse({"erro": "PIN inválido"}, status_code=401)
+        seguranca.limpar_falhas(ip)
         return _responder_com_sessao(request, None, "MASTER", "master")
 
     db = SessionLocal()

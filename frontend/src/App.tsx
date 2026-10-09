@@ -239,6 +239,7 @@ function App() {
   const [operadoresDisponiveis, setOperadoresDisponiveis] = useState<OperadorOption[]>([])
   const [operadoresLoading, setOperadoresLoading] = useState(false)
   const [operadorSelecionadoId, setOperadorSelecionadoId] = useState('')
+  const [masterPin, setMasterPin] = useState('')
   const [loginLoading, setLoginLoading] = useState(false)
   const [loginErro, setLoginErro] = useState('')
 
@@ -406,7 +407,8 @@ function App() {
       const data = await res.json()
       if (!res.ok) throw new Error(data.erro || 'Não foi possível entrar.')
       salvarSessaoOperador({ operadorId: data.operadorId ?? null, operadorNome: data.operadorNome, role: data.role, trocarPin: data.trocarPin })
-      setPagina('inicial')
+      setMasterPin('')
+        setPagina('inicial')
     } catch (err: any) {
       setLoginErro(err?.message || 'Não foi possível entrar.')
     } finally {
@@ -420,13 +422,15 @@ function App() {
   }
 
   const entrarComoMaster = () => {
-    entrar({ master: true })
+    if (!masterPin.trim()) return setLoginErro('Digite o PIN do master.')
+    entrar({ master: true, pin: masterPin })
   }
 
   const trocarOperador = () => {
     fetch(`${API_BASE}/api/sessao/sair`, { method: 'POST' }).catch(() => {})
     salvarSessaoOperador(null)
     setPagina('bemvindo')
+    setMasterPin('')
     setLoginErro('')
   }
 
@@ -1805,6 +1809,8 @@ function App() {
         operadorSelecionadoId={operadorSelecionadoId}
         onSelecionarOperador={setOperadorSelecionadoId}
         onEntrarComoOperador={entrarComoOperador}
+        masterPin={masterPin}
+        onMasterPinChange={setMasterPin}
         onEntrarComoMaster={entrarComoMaster}
         carregandoOperadores={operadoresLoading}
         entrando={loginLoading}
