@@ -239,8 +239,6 @@ function App() {
   const [operadoresDisponiveis, setOperadoresDisponiveis] = useState<OperadorOption[]>([])
   const [operadoresLoading, setOperadoresLoading] = useState(false)
   const [operadorSelecionadoId, setOperadorSelecionadoId] = useState('')
-  const [masterPin, setMasterPin] = useState('')
-  const [operadorPin, setOperadorPin] = useState('')
   const [loginLoading, setLoginLoading] = useState(false)
   const [loginErro, setLoginErro] = useState('')
 
@@ -408,8 +406,6 @@ function App() {
       const data = await res.json()
       if (!res.ok) throw new Error(data.erro || 'Não foi possível entrar.')
       salvarSessaoOperador({ operadorId: data.operadorId ?? null, operadorNome: data.operadorNome, role: data.role, trocarPin: data.trocarPin })
-      setMasterPin('')
-      setOperadorPin('')
       setPagina('inicial')
     } catch (err: any) {
       setLoginErro(err?.message || 'Não foi possível entrar.')
@@ -420,21 +416,17 @@ function App() {
 
   const entrarComoOperador = () => {
     if (!operadorSelecionadoId) return setLoginErro('Selecione um operador para continuar.')
-    if (!operadorPin.trim()) return setLoginErro('Digite o PIN de acesso.')
-    entrar({ operador_id: Number(operadorSelecionadoId), pin: operadorPin })
+    entrar({ operador_id: Number(operadorSelecionadoId) })
   }
 
   const entrarComoMaster = () => {
-    if (!masterPin.trim()) return setLoginErro('Digite o PIN do master.')
-    entrar({ master: true, pin: masterPin })
+    entrar({ master: true })
   }
 
   const trocarOperador = () => {
     fetch(`${API_BASE}/api/sessao/sair`, { method: 'POST' }).catch(() => {})
     salvarSessaoOperador(null)
     setPagina('bemvindo')
-    setMasterPin('')
-    setOperadorPin('')
     setLoginErro('')
   }
 
@@ -1813,10 +1805,6 @@ function App() {
         operadorSelecionadoId={operadorSelecionadoId}
         onSelecionarOperador={setOperadorSelecionadoId}
         onEntrarComoOperador={entrarComoOperador}
-        operadorPin={operadorPin}
-        onOperadorPinChange={setOperadorPin}
-        masterPin={masterPin}
-        onMasterPinChange={setMasterPin}
         onEntrarComoMaster={entrarComoMaster}
         carregandoOperadores={operadoresLoading}
         entrando={loginLoading}

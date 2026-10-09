@@ -1,4 +1,3 @@
-import { useState } from 'react'
 import './login-theme.css'
 
 export interface OperadorOpcao {
@@ -11,10 +10,6 @@ interface LoginNVSProps {
   operadorSelecionadoId: string
   onSelecionarOperador: (id: string) => void
   onEntrarComoOperador: () => void
-  operadorPin: string
-  onOperadorPinChange: (pin: string) => void
-  masterPin: string
-  onMasterPinChange: (pin: string) => void
   onEntrarComoMaster: () => void
   carregandoOperadores?: boolean
   entrando?: boolean
@@ -87,18 +82,11 @@ export function TelaLogin({
   operadorSelecionadoId,
   onSelecionarOperador,
   onEntrarComoOperador,
-  operadorPin,
-  onOperadorPinChange,
-  masterPin,
-  onMasterPinChange,
   onEntrarComoMaster,
   carregandoOperadores = false,
   entrando = false,
   erro,
 }: LoginNVSProps) {
-  // O mockup mostra só o botão de master; o PIN aparece quando ele é aberto.
-  const [masterAberto, setMasterAberto] = useState(false)
-
   const bloqueado = carregandoOperadores || entrando
 
   return (
@@ -174,29 +162,11 @@ export function TelaLogin({
             </select>
           </label>
 
-          <label className="lg__campo">
-            <span>PIN de acesso</span>
-            <input
-              type="password"
-              inputMode="numeric"
-              pattern="[0-9]*"
-              maxLength={10}
-              autoComplete="current-password"
-              placeholder="PIN numérico"
-              value={operadorPin}
-              onChange={(e) => onOperadorPinChange(e.target.value.replace(/\D/g, ''))}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' && operadorSelecionadoId && operadorPin) onEntrarComoOperador()
-              }}
-              disabled={bloqueado}
-            />
-          </label>
-
           <button
             type="button"
             className="lg__btn"
             onClick={onEntrarComoOperador}
-            disabled={bloqueado || !operadorSelecionadoId || !operadorPin}
+            disabled={bloqueado || !operadorSelecionadoId}
           >
             <span>{entrando ? 'Entrando...' : 'Continuar'}</span>
             <Seta />
@@ -208,36 +178,16 @@ export function TelaLogin({
             <i aria-hidden="true" />
           </div>
 
-          {!masterAberto ? (
-            <button
-              type="button"
-              className="lg__btn lg__btn--fantasma"
-              onClick={() => setMasterAberto(true)}
-            >
-              <IconeCadeado />
-              <span>Acesso master</span>
-              <Seta />
-            </button>
-          ) : (
-            <div className="lg__master">
-              <input
-                type="password"
-                inputMode="numeric"
-                pattern="[0-9]*"
-                maxLength={10}
-                autoFocus
-                placeholder="PIN numérico"
-                value={masterPin}
-                onChange={(e) => onMasterPinChange(e.target.value.replace(/\D/g, ''))}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' && masterPin) onEntrarComoMaster()
-                }}
-              />
-              <button type="button" onClick={onEntrarComoMaster} disabled={entrando || !masterPin}>
-                {entrando ? '...' : 'Entrar'}
-              </button>
-            </div>
-          )}
+          <button
+            type="button"
+            className="lg__btn lg__btn--fantasma"
+            onClick={onEntrarComoMaster}
+            disabled={bloqueado}
+          >
+            <IconeCadeado />
+            <span>Acesso master</span>
+            <Seta />
+          </button>
 
           {erro && <p className="lg__erro">{erro}</p>}
 

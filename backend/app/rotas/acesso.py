@@ -55,38 +55,23 @@ def _responder_com_sessao(request: Request, operador_id, nome: str, papel: str, 
 
 
 async def sessao_entrar(request: Request):
-    """POST {operador_id, pin} ou {master: true, pin} → grava o cookie de sessão."""
-    ip = seguranca.ip_cliente(request.headers)
-    if seguranca.login_bloqueado(ip):
-        return JSONResponse({"erro": "Muitas tentativas erradas. Aguarde 15 minutos."}, status_code=429)
+    """POST {operador_id} ou {master: true} → grava o cookie de sessão. Sem PIN (acesso livre, decisão do dono)."""
     try:
         body = await request.json()
     except Exception:
         body = {}
-    pin = str(body.get("pin") or "").strip()
-
     if body.get("master"):
-        if not seguranca.pin_confere(pin, seguranca.PIN_MASTER):
-            seguranca.registrar_falha(ip)
-            return JSONResponse({"erro": "PIN inválido"}, status_code=401)
-        seguranca.limpar_falhas(ip)
         return _responder_com_sessao(request, None, "MASTER", "master")
 
     db = SessionLocal()
     try:
         operador = db.query(Operador).filter(Operador.id == body.get("operador_id"), Operador.ativo == 1).first()
-        dados = (operador.id, operador.nome, operador.pin_hash) if operador else None
+        dados = (operador.id, operador.nome) if operador else None
     finally:
         db.close()
-    if dados and dados[2]:
-        valido, trocar = seguranca.pin_confere_hash(pin, dados[2]), False
-    else:  # ainda sem PIN pessoal: entra com o PIN inicial e é obrigado a trocar
-        valido, trocar = bool(dados) and seguranca.pin_confere(pin, seguranca.PIN_OPERADOR), True
-    if not valido:
-        seguranca.registrar_falha(ip)
-        return JSONResponse({"erro": "Operador ou PIN inválido"}, status_code=401)
-    seguranca.limpar_falhas(ip)
-    return _responder_com_sessao(request, dados[0], dados[1], "operador", trocar_pin=trocar)
+    if not dados:
+        return JSONResponse({"erro": "Operador inválido"}, status_code=401)
+    return _responder_com_sessao(request, dados[0], dados[1], "operador")
 
 
 async def sessao_trocar_pin(request: Request):

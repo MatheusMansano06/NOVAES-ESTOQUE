@@ -58,12 +58,6 @@ def test_login_master_grava_cookie_e_libera_api():
     assert c.get("/api/embaldes?limit=1").status_code == 401
 
 
-def test_pin_errado_nao_entra_e_forca_bruta_bloqueia():
-    c = _cliente()
-    for _ in range(5):
-        assert c.post("/api/sessao/entrar", json={"master": True, "pin": "000000"}).status_code == 401
-    assert _entrar_master(c).status_code == 429  # bloqueado mesmo com o PIN certo
-
 
 @pytest.fixture
 def operador_temp():
@@ -80,35 +74,6 @@ def operador_temp():
     db.close()
 
 
-def test_primeiro_acesso_obriga_a_definir_pin_pessoal(operador_temp):
-    c = _cliente()
-    r = c.post("/api/sessao/entrar", json={"operador_id": operador_temp, "pin": seguranca.PIN_OPERADOR})
-    assert r.status_code == 200 and r.json()["trocarPin"] is True
-    bloqueada = c.get("/api/embaldes?limit=1")
-    assert bloqueada.status_code == 403 and bloqueada.json()["trocar_pin"] is True
-    for fraco in (seguranca.PIN_OPERADOR, "1111", "4567", "12"):
-        assert c.post("/api/sessao/trocar-pin", json={"pin_novo": fraco}).status_code == 400, fraco
-    r = c.post("/api/sessao/trocar-pin", json={"pin_novo": "5829"})
-    assert r.status_code == 200 and r.json()["trocarPin"] is False
-    assert c.get("/api/embaldes?limit=1").status_code == 200
-    assert c.post("/api/operadores", json={"nome": "X"}).status_code == 403  # operador não vira master
-
-    novo = _cliente()
-    assert novo.post("/api/sessao/entrar", json={"operador_id": operador_temp, "pin": seguranca.PIN_OPERADOR}).status_code == 401
-    assert novo.post("/api/sessao/entrar", json={"operador_id": operador_temp, "pin": "5829"}).json()["trocarPin"] is False
-
-
-def test_master_reseta_pin_esquecido(operador_temp):
-    c = _cliente()
-    c.post("/api/sessao/entrar", json={"operador_id": operador_temp, "pin": seguranca.PIN_OPERADOR})
-    c.post("/api/sessao/trocar-pin", json={"pin_novo": "5829"})
-    assert c.post(f"/api/operadores/{operador_temp}/resetar-pin").status_code == 403  # operador não reseta
-
-    m = _cliente()
-    _entrar_master(m)
-    assert m.post(f"/api/operadores/{operador_temp}/resetar-pin").status_code == 200
-    r = _cliente().post("/api/sessao/entrar", json={"operador_id": operador_temp, "pin": seguranca.PIN_OPERADOR})
-    assert r.status_code == 200 and r.json()["trocarPin"] is True
 
 
 def test_token_adulterado_ou_vencido_e_recusado():
