@@ -592,12 +592,14 @@ class OlistIntegration:
         ids: List[str] = []
         if id_preferencial:
             ids.append(str(id_preferencial))
-        for p in (self._buscar_por_codigo_api(codigo) or []):
+        # A v2 'pesquisa' e por TEXTO (nome contem): "BALACLAVA" trazia o kit
+        # "Capuz Balaclava + Manguito". So vale candidato com o MESMO codigo.
+        alvo = self._normalizar_sku_busca(codigo)
+        candidatos = (self._buscar_por_codigo_api(codigo) or []) + (self._buscar_por_codigo_v2(codigo) or [])
+        for p in candidatos:
             pid = str(p.get("id") or "")
-            if pid and pid not in ids:
-                ids.append(pid)
-        for p in (self._buscar_por_codigo_v2(codigo) or []):
-            pid = str(p.get("id") or "")
+            if self._normalizar_sku_busca(p.get("sku") or "") != alvo:
+                continue
             if pid and pid not in ids:
                 ids.append(pid)
         for pid in ids:
