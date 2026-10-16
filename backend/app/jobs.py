@@ -312,6 +312,24 @@ def _devolver_memoria() -> None:
         pass  # fora do Linux (Windows local) não há glibc
 
 
+def _compactar_banco() -> None:
+    """Zera payments_json (nunca lido) e compacta o SQLite. O banco tinha ~1,3 GB
+    e o cache de disco do Linux conta como RAM no Railway (a RAM acompanhava o
+    tamanho do arquivo). VACUUM trava o banco por ~1 min, por isso roda de madrugada."""
+    # ponytail: one-shot; depois de rodar em produção pode sair (só custa um UPDATE vazio).
+    from database import engine
+    if engine.url.get_backend_name() != "sqlite":
+        return
+    with engine.connect().execution_options(isolation_level="AUTOCOMMIT") as con:
+        n = con.exec_driver_sql(
+            "UPDATE ml_venda_cache SET payments_json = NULL WHERE payments_json IS NOT NULL"
+        ).rowcount
+        if n:
+            con.exec_driver_sql("VACUUM")
+            con.exec_driver_sql("PRAGMA wal_checkpoint(TRUNCATE)")
+        logger.info(f"[SCHEDULER] compactar_banco: {n} vendas limpas" + (", VACUUM feito" if n else ""))
+
+
 def iniciar_scheduler():
     """
     Inicia o scheduler com a tarefa diária às 8am
@@ -425,6 +443,12 @@ def iniciar_scheduler():
             logger.info(f"[SCHEDULER] Job 'monitor_estoque' agendado (fuso {tz_monitor}): "
                         f"seg-sex 8h-18h, sáb 8h/12h/18h, dom não roda")
 
+        scheduler.add_job(
+            _compactar_banco, 'cron', hour=2, minute=0, timezone=_fuso_monitor(),
+            next_run_time=datetime.now() + timedelta(minutes=5),
+            id='compactar_banco', name='Limpa payments_json e compacta o SQLite',
+            max_instances=1, coalesce=True, misfire_grace_time=3600,
+        )
         # RAM ociosa subia de 0,5 para 2 GB depois dos syncs e não voltava: o
         # glibc segura o que o Python libera. Memória é o maior custo no Railway.
         scheduler.add_job(

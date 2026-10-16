@@ -572,7 +572,7 @@ class MLIntegration:
             row.payment_type = pay["payment_type"]
             row.payment_method_id = pay["payment_method_id"]
             row.installments = pay["installments"]
-            row.payments_json = self._json_dump(order.get("payments"))
+            # payments_json não é gravado: nunca era lido e era ~45% do banco (os campos usados estão acima).
             row.shipment_id = str(shipping_id) if shipping_id else None
             row.tags_json = self._json_dump(tags)
             row.synced_at = self._utcnow()
