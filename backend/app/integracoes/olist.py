@@ -1426,7 +1426,7 @@ class OlistIntegration:
     def obter_imagem_produto(self, produto_id: str) -> Optional[str]:
         """Retorna a URL da 1a imagem do produto na Olist (campo 'anexos').
         Usado para mostrar a foto direto da Olist na Lista de Separação / Histórico.
-        Retorna None se não houver imagem ou der erro (foto é opcional)."""
+        Retorna "" se o produto não tiver imagem e None se der erro (foto é opcional)."""
         if not produto_id:
             return None
         token = self.get_access_token()
@@ -1452,7 +1452,7 @@ class OlistIntegration:
                             u = str(a or "").strip()
                         if u:
                             return u.replace("http://", "https://")
-            return None
+            return ""  # produto sem foto (≠ None = erro): quem chama pode cachear
         except Exception as e:
             print(f"[OLIST] Sem imagem para produto {produto_id}: {e}")
             return None

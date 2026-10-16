@@ -319,6 +319,7 @@ export function ModalVendasAnuncio({ itemId, titulo, onClose }: { itemId: string
     const loc = dados.envio_localizados ?? 0
     if (loc >= dados.total_vendas) return
     const t = setInterval(async () => {
+      if (document.hidden) return  // aba escondida: não consome tentativa nem banda
       const p = pollRef.current
       if (p.tentativas >= 60 || (p.ultimo === loc && p.tentativas >= 5)) { clearInterval(t); return }
       p.tentativas += 1; p.ultimo = loc

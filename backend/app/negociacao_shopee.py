@@ -17,7 +17,6 @@ import json
 import unicodedata
 from typing import Any, Dict, List, Optional
 
-import openpyxl
 
 ABA = "Pontual"          # prefixo; o nome completo tem acento e já veio variando
 LINHA_CABECALHO = 2
@@ -88,6 +87,7 @@ def _conferir_cabecalho(ws) -> None:
 
 def ler_planilha(caminho: str) -> List[Dict[str, Any]]:
     """Uma linha por model, já tipada. `linha` é o índice para escrever de volta."""
+    import openpyxl  # tardio: pesado e só usado na planilha
     wb = openpyxl.load_workbook(caminho, read_only=True)
     try:
         ws = _aba_da_planilha(wb)
@@ -203,6 +203,7 @@ def montar(linhas: List[Dict[str, Any]], precos: Dict, estoques: Dict) -> Dict[s
 def escrever(origem: str, destino: str, itens: List[Dict[str, Any]]) -> int:
     """Grava AD/AE no arquivo. As fórmulas de matriz e os HYPERLINK sobrevivem
     porque o openpyxl só toca nas células que recebem valor."""
+    import openpyxl  # tardio: pesado e só usado na planilha
     wb = openpyxl.load_workbook(origem)
     try:
         ws = _aba_da_planilha(wb)

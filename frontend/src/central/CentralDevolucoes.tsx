@@ -56,7 +56,7 @@ function Central({ onVoltar }: { onVoltar: () => void }) {
   // Com o modal aberto não recarrega, para não mexer na conferência em andamento.
   useEffect(() => {
     if (codigo) return;
-    const t = setInterval(() => setVersao((v) => v + 1), 60_000);
+    const t = setInterval(() => { if (!document.hidden) setVersao((v) => v + 1); }, 60_000);
     return () => clearInterval(t);
   }, [codigo]);
 

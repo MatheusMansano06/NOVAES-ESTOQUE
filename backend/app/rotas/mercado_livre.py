@@ -2,6 +2,7 @@
 from starlette.responses import JSONResponse, RedirectResponse, HTMLResponse
 from starlette.requests import Request
 from database import SessionLocal
+from sqlalchemy.orm import load_only
 import json
 import re
 import time
@@ -392,7 +393,7 @@ def _ensure_date_created(db):
         faltando = db.query(MercadoLivreItemCache).filter(
             MercadoLivreItemCache.status == "active",
             MercadoLivreItemCache.date_created.is_(None),
-        ).all()
+        ).options(load_only(MercadoLivreItemCache.item_id, MercadoLivreItemCache.date_created)).all()
         ids = [r.item_id for r in faltando if r.item_id]
         if ids:
             mapa = ml._date_created_map(ids)
@@ -415,7 +416,12 @@ async def ml_divergencia_dimensoes(request: Request):
     from app.utils.divergencia_dimensoes import comparar
     db = SessionLocal()
     try:
-        linhas = db.query(MercadoLivreItemCache).filter(MercadoLivreItemCache.status == "active").all()
+        # Só as colunas usadas: carregar todos os *_json de cada anúncio inflava a RAM.
+        c = MercadoLivreItemCache
+        linhas = db.query(c).filter(c.status == "active").options(load_only(
+            c.item_id, c.titulo, c.sku, c.logistic_type, c.estoque_disponivel, c.vendidos,
+            c.permalink, c.thumbnail, c.attributes_json, c.synced_at,
+        )).all()
         itens = []
         for r in linhas:
             d = comparar(r.attributes_json)
@@ -466,7 +472,11 @@ async def radar_full(request: Request):
             db.rollback()
         dados = calcular_radar_full(ml, db, meta_dias=meta_dias, lead_time_dias=lead_time, horizonte=horizonte)
         if not dados.get("erro"):
-            _radar_cache[chave] = {"ts": time.time(), "data": dados}
+            agora = time.time()
+            # Uma entrada por combinação de parâmetros: sem poda, cresce sem limite.
+            for k in [k for k, v in _radar_cache.items() if agora - v["ts"] >= _RADAR_TTL_SEGUNDOS]:
+                del _radar_cache[k]
+            _radar_cache[chave] = {"ts": agora, "data": dados}
         dados["cache"] = {"hit": False, "idade_segundos": 0}
         return JSONResponse(dados, headers={"Cache-Control": "no-store"})
     except Exception as e:

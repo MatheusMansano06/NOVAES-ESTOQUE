@@ -597,7 +597,8 @@ def _preencher_imagens_olist(db, itens):
     porque foto é opcional e nunca pode travar a separação."""
     import concurrent.futures
 
-    faltando = [i for i in itens if i.olist_produto_id and not i.olist_imagem]
+    # None = nunca consultado; "" = consultado e sem foto (não reconsulta a cada abertura).
+    faltando = [i for i in itens if i.olist_produto_id and i.olist_imagem is None]
     if not faltando:
         return
     ids = {i.olist_produto_id for i in faltando}
@@ -619,7 +620,7 @@ def _preencher_imagens_olist(db, itens):
     mudou = False
     for i in faltando:
         img = mapa.get(i.olist_produto_id)
-        if img:
+        if img is not None:
             i.olist_imagem = img
             db.add(i)
             mudou = True

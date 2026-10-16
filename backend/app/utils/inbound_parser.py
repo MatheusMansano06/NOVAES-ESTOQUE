@@ -7,7 +7,6 @@ Usa extracao de tabela (pdfplumber) pois o PDF do ML e texto real,
 nao imagem escaneada.
 """
 
-import pdfplumber
 import re
 from typing import List
 
@@ -27,6 +26,7 @@ def extrair_items_embale_pdf(caminho_pdf: str) -> dict:
     ou {"erro": True, "mensagem": "..."} em caso de falha.
     """
     try:
+        import pdfplumber  # tardio: pesado e só usado no upload
         with pdfplumber.open(caminho_pdf) as pdf:
             texto_inicial = ""
             if pdf.pages:
