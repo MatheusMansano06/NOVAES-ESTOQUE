@@ -302,6 +302,16 @@ def _monitor_habilitado() -> bool:
     return bool(os.getenv("RAILWAY_ENVIRONMENT"))
 
 
+def _devolver_memoria() -> None:
+    import ctypes
+    import gc
+    gc.collect()
+    try:
+        ctypes.CDLL("libc.so.6").malloc_trim(0)
+    except OSError:
+        pass  # fora do Linux (Windows local) não há glibc
+
+
 def iniciar_scheduler():
     """
     Inicia o scheduler com a tarefa diária às 8am
@@ -414,6 +424,14 @@ def iniciar_scheduler():
             )
             logger.info(f"[SCHEDULER] Job 'monitor_estoque' agendado (fuso {tz_monitor}): "
                         f"seg-sex 8h-18h, sáb 8h/12h/18h, dom não roda")
+
+        # RAM ociosa subia de 0,5 para 2 GB depois dos syncs e não voltava: o
+        # glibc segura o que o Python libera. Memória é o maior custo no Railway.
+        scheduler.add_job(
+            _devolver_memoria, 'interval', minutes=5,
+            id='devolver_memoria', name='Devolve RAM livre ao sistema',
+            max_instances=1, coalesce=True,
+        )
 
         scheduler.start()
         logger.info("[SCHEDULER] Agendador iniciado com sucesso")
