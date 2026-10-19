@@ -132,6 +132,26 @@ async def resetar_pin_operador(request: Request):
     return JSONResponse({"sucesso": True, "mensagem": f"PIN de {nome} resetado"})
 
 
+async def excluir_operador(request: Request):
+    """Master: exclusão lógica (ativo=0) — some da lista e perde a sessão; o histórico fica."""
+    if not _request_eh_master(request):
+        return JSONResponse({"erro": "Acesso restrito ao master"}, status_code=403)
+    operador_id = int(request.path_params["operador_id"])
+    db = SessionLocal()
+    try:
+        operador = db.query(Operador).filter(Operador.id == operador_id, Operador.ativo == 1).first()
+        if not operador:
+            return JSONResponse({"erro": "Operador não encontrado"}, status_code=404)
+        operador.ativo = 0
+        db.commit()
+        nome = operador.nome
+    finally:
+        db.close()
+    seguranca.marcar_operador_ativo(operador_id, False)
+    _registrar_log_operacao(request, "operador_excluido", "operador", operador_id, f"Operador excluído: {nome}", {"nome": nome})
+    return JSONResponse({"sucesso": True, "mensagem": f"{nome} excluído"})
+
+
 async def sessao_sair(request: Request):
     resposta = JSONResponse({"sucesso": True})
     seguranca.apagar_cookie(resposta)
@@ -162,6 +182,7 @@ async def criar_operador(request: Request):
                 existente.ativo = 1
                 db.add(existente)
                 db.commit()
+                seguranca.marcar_operador_ativo(existente.id, True)
             _registrar_log_operacao(request, "operador_reativado", "operador", existente.id, f"Operador reativado: {existente.nome}", {"nome": existente.nome})
             return JSONResponse({"id": existente.id, "nome": existente.nome, "ativo": existente.ativo, "mensagem": "Operador reativado"})
 
@@ -233,6 +254,7 @@ rotas = [
     Route("/api/sessao/entrar", sessao_entrar, methods=["POST"]),
     Route("/api/sessao/sair", sessao_sair, methods=["POST"]),
     Route("/api/sessao/trocar-pin", sessao_trocar_pin, methods=["POST"]),
+    Route("/api/operadores/{operador_id:int}", excluir_operador, methods=["DELETE"]),
     Route("/api/operadores/{operador_id:int}/resetar-pin", resetar_pin_operador, methods=["POST"]),
     Route("/api/operadores/historico", historico_operadores, methods=["GET"]),
 ]

@@ -93,6 +93,31 @@ def ler_sessao(token: Optional[str]) -> Optional[dict]:
         return None
 
 
+_inativos: Optional[set] = None  # ids de operadores excluídos; carregado do banco no 1º uso
+
+
+def _carregar_inativos() -> set:
+    global _inativos
+    if _inativos is None:
+        from database import SessionLocal
+        from app.models import Operador
+        db = SessionLocal()
+        try:
+            _inativos = {i for (i,) in db.query(Operador.id).filter(Operador.ativo != 1)}
+        finally:
+            db.close()
+    return _inativos
+
+
+def operador_inativo(operador_id) -> bool:
+    return operador_id in _carregar_inativos()
+
+
+def marcar_operador_ativo(operador_id: int, ativo: bool) -> None:
+    # ponytail: estado em memória do processo; com vários workers, trocar por consulta ao banco
+    (_carregar_inativos().discard if ativo else _carregar_inativos().add)(operador_id)
+
+
 def pin_confere(pin: str, esperado: str) -> bool:
     return bool(esperado) and hmac.compare_digest(str(pin or "").encode(), esperado.encode())
 
@@ -201,6 +226,8 @@ class ProtecaoApi:
         if scope["type"] == "http" and scope["path"].startswith("/api/"):
             headers = {k.decode("latin-1"): v.decode("latin-1") for k, v in scope.get("headers", [])}
             sessao = ler_sessao(cookie_da_requisicao(headers))
+            if sessao and sessao.get("papel") == "operador" and operador_inativo(sessao.get("id")):
+                sessao = None  # operador excluído perde a sessão na hora
             scope["sessao"] = sessao
             publica = rota_publica(scope["method"], scope["path"])
             if sessao is None and not publica:

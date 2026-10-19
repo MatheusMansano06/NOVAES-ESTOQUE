@@ -113,6 +113,21 @@ export function GestaoOperadores() {
     }
   }
 
+  const excluirOperador = async (operador: OperadorItem) => {
+    if (!window.confirm(`Excluir ${operador.nome}? Ele sai da lista e perde o acesso na hora. O histórico de ações fica guardado.`)) return
+    setErro('')
+    setMensagem('')
+    try {
+      const res = await fetch(`${API_BASE}/api/operadores/${operador.id}`, { method: 'DELETE' })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.erro || 'Falha ao excluir operador')
+      setMensagem(data.mensagem)
+      await carregar()
+    } catch (err: any) {
+      setErro(err?.message || 'Falha ao excluir operador')
+    }
+  }
+
   return (
     <div style={{ display: 'grid', gap: '1.5rem' }}>
       <section className="card">
@@ -164,6 +179,15 @@ export function GestaoOperadores() {
                   style={{ padding: '0.3rem 0.65rem', borderRadius: '999px', border: '1px solid #b9cdf5', background: '#fff', color: '#174ea6', fontSize: '0.78rem', fontWeight: 700, cursor: 'pointer' }}
                 >
                   Resetar PIN
+                </button>
+                <button
+                  type="button"
+                  onClick={() => excluirOperador(operador)}
+                  title="Remove o operador e encerra o acesso dele"
+                  aria-label={`Excluir ${operador.nome}`}
+                  style={{ padding: '0.3rem 0.65rem', borderRadius: '999px', border: '1px solid #f3b4b4', background: '#fff', color: '#c62828', fontSize: '0.78rem', fontWeight: 700, cursor: 'pointer' }}
+                >
+                  Excluir
                 </button>
               </div>
             ))}

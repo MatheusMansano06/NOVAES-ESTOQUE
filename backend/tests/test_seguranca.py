@@ -87,3 +87,17 @@ def test_token_adulterado_ou_vencido_e_recusado():
     assert seguranca.ler_sessao(dados.replace("A", "B", 1) + "." + assinatura) is None
     assert seguranca.ler_sessao(token[:-2] + "xx") is None
     assert seguranca.ler_sessao(seguranca.criar_sessao(1, "Ana", "operador", validade=-1)) is None
+
+
+def test_master_exclui_operador_e_sessao_dele_cai(operador_temp):
+    op = _cliente()
+    assert op.post("/api/sessao/entrar", json={"operador_id": operador_temp}).status_code == 200
+    assert op.get("/api/sessao").status_code == 200
+    assert op.delete(f"/api/operadores/{operador_temp}").status_code == 403  # operador não exclui
+
+    m = _cliente()
+    _entrar_master(m)
+    assert m.delete(f"/api/operadores/{operador_temp}").status_code == 200
+    assert operador_temp not in [o["id"] for o in m.get("/api/operadores").json()["operadores"]]
+    assert op.get("/api/sessao").status_code == 401
+    assert op.post("/api/sessao/entrar", json={"operador_id": operador_temp}).status_code == 401
