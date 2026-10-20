@@ -329,6 +329,13 @@
   "kit_componentes_embale"
  ],
  [
+  "/api/embaldes/{embale_id}/itens/{item_id}/saldo",
+  [
+   "GET"
+  ],
+  "saldo_item_embale"
+ ],
+ [
   "/api/embaldes/{embale_id}/itens/{item_id}/balancear-kit",
   [
    "POST"

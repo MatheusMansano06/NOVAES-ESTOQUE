@@ -252,6 +252,25 @@ export function GestaoInbound({ modoSeparacao = false }: { modoSeparacao?: boole
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [modoSeparacao, revisao?.embale_id, sepIndex, soEditados, soEmEspera, ordemQtd])
 
+  // Saldo ao vivo: a revisão salva guarda o estoque da 1ª abertura; o item exibido
+  // relê a Olist ao aparecer e a cada 30s enquanto fica na tela.
+  useEffect(() => {
+    if (!modoSeparacao || !revisao) return
+    const lista = listaSeparacao(revisao.itens)
+    const it = lista[Math.min(sepIndex, lista.length - 1)]
+    if (!it || !it.olist_produto_id || it.baixa_aplicada === 1 || itensBaixados[it.item_id]) return
+    const embaleId = revisao.embale_id
+    const atualizar = () => api.get(`/embaldes/${embaleId}/itens/${it.item_id}/saldo`)
+      .then((r) => setRevisao((prev) => prev && prev.embale_id === embaleId
+        ? { ...prev, itens: prev.itens.map((x) => (x.item_id === it.item_id ? { ...x, ...r.data } : x)) }
+        : prev))
+      .catch(() => { /* mantém o último saldo */ })
+    atualizar()
+    const t = setInterval(atualizar, 30000)
+    return () => clearInterval(t)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [modoSeparacao, revisao?.embale_id, sepIndex, soEditados, soEmEspera, ordemQtd])
+
   // Baixa os componentes do kit na Olist (cada um vira uma saída). Retorna true se todos OK.
   const baixarKitComponentes = async (it: ItemRevisao, kit: KitInfo): Promise<boolean> => {
     if (!revisao) return false
