@@ -143,6 +143,9 @@ export function GestaoInbound({ modoSeparacao = false }: { modoSeparacao?: boole
   const [marcandoEmEspera, setMarcandoEmEspera] = useState<number | null>(null)
   // Modo "Lista de separação": um produto por vez, em tela cheia
   const [sepIndex, setSepIndex] = useState(0)
+  // Contador da leitura ao vivo do estoque Olist (item exibido na separação).
+  const [saldoLive, setSaldoLive] = useState<{ itemId: number | null; em: number | null; carregando: boolean }>({ itemId: null, em: null, carregando: false })
+  const [agora, setAgora] = useState(Date.now())
   const [skuImg, setSkuImg] = useState<Record<string, string>>({})
   // Filtro do picker: mostrar só os itens que tiveram a qtd do FULL alterada
   const [soEditados, setSoEditados] = useState(false)
@@ -260,14 +263,19 @@ export function GestaoInbound({ modoSeparacao = false }: { modoSeparacao?: boole
     const it = lista[Math.min(sepIndex, lista.length - 1)]
     if (!it || !it.olist_produto_id || it.baixa_aplicada === 1 || itensBaixados[it.item_id]) return
     const embaleId = revisao.embale_id
-    const atualizar = () => api.get(`/embaldes/${embaleId}/itens/${it.item_id}/saldo`)
-      .then((r) => setRevisao((prev) => prev && prev.embale_id === embaleId
-        ? { ...prev, itens: prev.itens.map((x) => (x.item_id === it.item_id ? { ...x, ...r.data } : x)) }
-        : prev))
-      .catch(() => { /* mantém o último saldo */ })
+    const atualizar = () => {
+      setSaldoLive((s) => ({ itemId: it.item_id, em: s.itemId === it.item_id ? s.em : null, carregando: true }))
+      api.get(`/embaldes/${embaleId}/itens/${it.item_id}/saldo`)
+        .then((r) => setRevisao((prev) => prev && prev.embale_id === embaleId
+          ? { ...prev, itens: prev.itens.map((x) => (x.item_id === it.item_id ? { ...x, ...r.data } : x)) }
+          : prev))
+        .catch(() => { /* mantém o último saldo */ })
+        .finally(() => setSaldoLive({ itemId: it.item_id, em: Date.now(), carregando: false }))
+    }
     atualizar()
     const t = setInterval(atualizar, 30000)
-    return () => clearInterval(t)
+    const tick = setInterval(() => setAgora(Date.now()), 1000)
+    return () => { clearInterval(t); clearInterval(tick) }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [modoSeparacao, revisao?.embale_id, sepIndex, soEditados, soEmEspera, ordemQtd])
 
@@ -1426,6 +1434,13 @@ O estoque na Olist volta ao que era antes (vendas que caíram no meio são manti
                                   <div style={{ background: '#f7f9fa', borderRadius: '8px', padding: '0.7rem' }}>
                                     <div style={{ fontSize: '0.72rem', color: '#666', textTransform: 'uppercase', fontWeight: 700 }}>Estoque Olist</div>
                                     <div style={{ fontSize: '1.2rem', fontWeight: 800, color: '#1a1a1a' }}>{naoAchado ? '—' : semEstoque ? '?' : it.estoque_atual}</div>
+                                    {saldoLive.itemId === it.item_id && !jaBaixado && (
+                                      <div aria-live="polite" style={{ fontSize: '0.72rem', fontWeight: 600, marginTop: '0.2rem', color: saldoLive.carregando ? '#1976D2' : '#2e7d32' }}>
+                                        {saldoLive.carregando
+                                          ? '🔄 atualizando…'
+                                          : `● ao vivo · próxima em ${Math.max(0, 30 - Math.floor((agora - (saldoLive.em || agora)) / 1000))}s`}
+                                      </div>
+                                    )}
                                   </div>
                                   <div style={{ background: '#f7f9fa', borderRadius: '8px', padding: '0.7rem' }}>
                                     <div style={{ fontSize: '0.72rem', color: '#666', textTransform: 'uppercase', fontWeight: 700 }}>Vai pro FULL</div>
