@@ -1662,7 +1662,7 @@ async def saldo_item_embale(request: Request):
         item_id = int(request.path_params.get("item_id"))
         item = db.query(ItemEmbaleFU).filter(
             ItemEmbaleFU.id == item_id,
-            ItemEmbaleFU.embale_id == int(request.path_params.get("embale_id")),
+            ItemEmbaleFU.embalde_id == int(request.path_params.get("embale_id")),
         ).first()
         if not item:
             return JSONResponse({"erro": "Item não encontrado neste inbound"}, status_code=404)

@@ -144,7 +144,7 @@ export function GestaoInbound({ modoSeparacao = false }: { modoSeparacao?: boole
   // Modo "Lista de separação": um produto por vez, em tela cheia
   const [sepIndex, setSepIndex] = useState(0)
   // Contador da leitura ao vivo do estoque Olist (item exibido na separação).
-  const [saldoLive, setSaldoLive] = useState<{ itemId: number | null; em: number | null; carregando: boolean }>({ itemId: null, em: null, carregando: false })
+  const [saldoLive, setSaldoLive] = useState<{ itemId: number | null; em: number | null; carregando: boolean; erro?: boolean }>({ itemId: null, em: null, carregando: false })
   const [agora, setAgora] = useState(Date.now())
   const [skuImg, setSkuImg] = useState<Record<string, string>>({})
   // Filtro do picker: mostrar só os itens que tiveram a qtd do FULL alterada
@@ -266,11 +266,13 @@ export function GestaoInbound({ modoSeparacao = false }: { modoSeparacao?: boole
     const atualizar = () => {
       setSaldoLive((s) => ({ itemId: it.item_id, em: s.itemId === it.item_id ? s.em : null, carregando: true }))
       api.get(`/embaldes/${embaleId}/itens/${it.item_id}/saldo`)
-        .then((r) => setRevisao((prev) => prev && prev.embale_id === embaleId
-          ? { ...prev, itens: prev.itens.map((x) => (x.item_id === it.item_id ? { ...x, ...r.data } : x)) }
-          : prev))
-        .catch(() => { /* mantém o último saldo */ })
-        .finally(() => setSaldoLive({ itemId: it.item_id, em: Date.now(), carregando: false }))
+        .then((r) => {
+          setRevisao((prev) => prev && prev.embale_id === embaleId
+            ? { ...prev, itens: prev.itens.map((x) => (x.item_id === it.item_id ? { ...x, ...r.data } : x)) }
+            : prev)
+          setSaldoLive({ itemId: it.item_id, em: Date.now(), carregando: false })
+        })
+        .catch(() => setSaldoLive({ itemId: it.item_id, em: Date.now(), carregando: false, erro: true }))
     }
     atualizar()
     const t = setInterval(atualizar, 30000)
@@ -1435,10 +1437,10 @@ O estoque na Olist volta ao que era antes (vendas que caíram no meio são manti
                                     <div style={{ fontSize: '0.72rem', color: '#666', textTransform: 'uppercase', fontWeight: 700 }}>Estoque Olist</div>
                                     <div style={{ fontSize: '1.2rem', fontWeight: 800, color: '#1a1a1a' }}>{naoAchado ? '—' : semEstoque ? '?' : it.estoque_atual}</div>
                                     {saldoLive.itemId === it.item_id && !jaBaixado && (
-                                      <div aria-live="polite" style={{ fontSize: '0.72rem', fontWeight: 600, marginTop: '0.2rem', color: saldoLive.carregando ? '#1976D2' : '#2e7d32' }}>
+                                      <div aria-live="polite" style={{ fontSize: '0.72rem', fontWeight: 600, marginTop: '0.2rem', color: saldoLive.carregando ? '#1976D2' : saldoLive.erro ? '#c62828' : '#2e7d32' }}>
                                         {saldoLive.carregando
                                           ? '🔄 atualizando…'
-                                          : `● ao vivo · próxima em ${Math.max(0, 30 - Math.floor((agora - (saldoLive.em || agora)) / 1000))}s`}
+                                          : `${saldoLive.erro ? '⚠️ falhou ao ler a Olist · tenta de novo' : '● ao vivo · próxima'} em ${Math.max(0, 30 - Math.floor((agora - (saldoLive.em || agora)) / 1000))}s`}
                                       </div>
                                     )}
                                   </div>
