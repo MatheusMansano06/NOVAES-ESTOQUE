@@ -406,6 +406,13 @@
   "encerrar_embale"
  ],
  [
+  "/api/ml/sonda",
+  [
+   "GET"
+  ],
+  "ml_sonda"
+ ],
+ [
   "/api/ml/status",
   [
    "GET"
@@ -797,6 +804,13 @@
    "GET"
   ],
   "imagem_quadrada"
+ ],
+ [
+  "/api/shopee/sonda",
+  [
+   "GET"
+  ],
+  "shopee_sonda"
  ],
  [
   "/api/shopee/status",

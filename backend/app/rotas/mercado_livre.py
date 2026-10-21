@@ -6,6 +6,9 @@ from sqlalchemy.orm import load_only
 import json
 import re
 import time
+import urllib.error
+import urllib.parse
+import urllib.request
 from typing import Any, Dict
 from datetime import datetime
 from app.models import MercadoLivreItemCache, MLNotificacao
@@ -15,6 +18,7 @@ from app.integracoes.mercado_livre import ml
 
 from app.rotas.comum import (
     Route,
+    _request_eh_master,
 )
 
 
@@ -607,7 +611,35 @@ async def ml_notificacoes_recentes(request: Request):
         db.close()
 
 
+async def ml_sonda(request: Request):
+    """GET /api/ml/sonda?path=/items/MLB1&... — GET cru na API do ML (só master, só leitura).
+    Para auditorias pontuais sem precisar de deploy por endpoint; devolve status + corpo."""
+    if not _request_eh_master(request):
+        return JSONResponse({"erro": "Só o master"}, status_code=403)
+    params = dict(request.query_params)
+    path = params.pop("path", "")
+    if not path.startswith("/") or "://" in path:
+        return JSONResponse({"erro": "path inválido"}, status_code=400)
+    token = ml.get_access_token()
+    if not token:
+        return JSONResponse({"erro": "ML desconectado"}, status_code=502)
+    url = f"{ml.API_BASE}{path}" + ("?" + urllib.parse.urlencode(params) if params else "")
+    req = urllib.request.Request(url, headers={"Authorization": f"Bearer {token}", "Accept": "application/json"})
+    ml._throttle()
+    try:
+        with urllib.request.urlopen(req, timeout=20) as r:
+            return JSONResponse({"status": r.status, "body": json.loads(r.read().decode("utf-8") or "null")})
+    except urllib.error.HTTPError as e:
+        bruto = e.read().decode("utf-8", errors="replace")[:2000]
+        try:
+            corpo = json.loads(bruto)
+        except ValueError:
+            corpo = bruto
+        return JSONResponse({"status": e.code, "body": corpo})
+
+
 rotas = [
+    Route("/api/ml/sonda", ml_sonda, methods=["GET"]),
     Route("/api/ml/status", ml_status, methods=["GET"]),
     Route("/api/ml/sync", ml_sync_cache, methods=["POST"]),
     Route("/api/ml/anuncios", ml_anuncios, methods=["GET"]),

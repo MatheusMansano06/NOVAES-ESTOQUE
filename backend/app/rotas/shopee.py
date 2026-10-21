@@ -13,6 +13,7 @@ from app.integracoes.shopee import shopee
 from app.rotas.comum import (
     Route,
     UPLOAD_DIR,
+    _request_eh_master,
 )
 
 
@@ -450,7 +451,22 @@ async def shopee_webhook(request: Request):
     return JSONResponse({"ok": True}, status_code=200)
 
 
+async def shopee_sonda(request: Request):
+    """GET /api/shopee/sonda?path=/api/v2/...&... — GET assinado cru na Shopee (só master, só leitura).
+    Parâmetro repetido (ex.: item_status) vira lista, como o chamar() espera."""
+    if not _request_eh_master(request):
+        return JSONResponse({"erro": "Só o master"}, status_code=403)
+    path = request.query_params.get("path", "")
+    if not path.startswith("/api/v2/"):
+        return JSONResponse({"erro": "path inválido"}, status_code=400)
+    params = {k: (v if len(v) > 1 else v[0])
+              for k in request.query_params.keys() if k != "path"
+              for v in [request.query_params.getlist(k)]}
+    return JSONResponse(shopee.chamar(path, params))
+
+
 rotas = [
+    Route("/api/shopee/sonda", shopee_sonda, methods=["GET"]),
     Route("/api/shopee/status", shopee_status, methods=["GET"]),
     Route("/api/shopee/loja", shopee_loja, methods=["GET"]),
     Route("/api/shopee/dashboard", shopee_dashboard, methods=["GET"]),
