@@ -230,22 +230,6 @@ def contar_logistica(ls: list[dict], full: dict[tuple[str, str], bool]) -> dict:
     return por
 
 
-SHOPEE_DISPUTA = {"SELLER_DISPUTE", "JUDGING"}
-SHOPEE_PERDIDA = {"ACCEPTED", "REFUND_PAID"}  # a Shopee decidiu pelo reembolso ao comprador
-SHOPEE_GANHA = {"CANCELLED", "CLOSED"}  # devolução encerrada sem reembolso
-
-
-def resultado_mediacao(l: dict, quem_abriu: dict) -> str | None:
-    """ML: vem da reclamação. Shopee: vem das marcas da disputa (shopee.normalizar.resultado_disputa); devolução
-    contestada pela Central sem marca ainda conta, pelo status."""
-    if l.get("resultado_mediacao") or l["plataforma"] != "shopee":
-        return l.get("resultado_mediacao")
-    if not l.get("contestada"):
-        return None
-    status = l.get("status_plataforma")
-    return "perdida" if status in SHOPEE_PERDIDA else "ganha" if status in SHOPEE_GANHA else "em_andamento"
-
-
 def _imagens(skus: list[dict]) -> None:
     """Completa a foto dos produtos do ML (a Shopee já manda no próprio item)."""
     fotos = catalogo.imagens(p["item_id"] for p in skus if not p["imagem"] and p["plataforma"] == "mercado_livre")
@@ -284,7 +268,7 @@ def resumo(dias: int = 30, fatura: str | None = None) -> dict:
     for l in atual:
         por_plataforma[l["plataforma"]].append(l)
         motivos[l["motivo"]] += 1
-        resultado = resultado_mediacao(l, quem_abriu)
+        resultado = l["mediacao"]
         if resultado:
             chave = (l["plataforma"], l["id_externo"])
             quem = "vendedor" if l["plataforma"] == "shopee" else quem_abriu.get(chave, "sem_info")

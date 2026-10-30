@@ -189,7 +189,7 @@
 .central-dev .interruptor input:checked + .interruptor-trilho { background: var(--azul); }
 .central-dev .interruptor input:checked + .interruptor-trilho::after { left: 16px; }
 .central-dev .interruptor input:focus-visible + .interruptor-trilho { outline: 2px solid var(--azul); outline-offset: 2px; }
-.central-dev .abas-operador { display: grid; grid-template-columns: repeat(5, 1fr); gap: 0.75rem; }
+.central-dev .abas-operador { display: grid; grid-template-columns: repeat(6, 1fr); gap: 0.75rem; }
 .central-dev .abas-operador button { border: 1px solid var(--linha); background: var(--papel); border-radius: var(--raio); padding: 0.7rem 0.9rem;
   text-align: left; display: grid; align-content: start; gap: 0.2rem; transition: border-color 0.15s; }
 .central-dev .abas-operador button:hover { border-color: var(--linha-forte); }

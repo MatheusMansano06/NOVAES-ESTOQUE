@@ -38,11 +38,14 @@ export interface LinhaOperacao extends Devolucao {
   atualizada_em: string;
   envio: Envio | null;
   envio_plataforma: string | null;
+  mediacao: "em_andamento" | "ganha" | "perdida" | "parcial" | null;
 }
 
 export interface Operacao {
   total: number;
   contagens: Record<Status, number>;
+  /** Mediações encerradas, de qualquer destino (o registro de ganhas e perdidas). */
+  mediacoes: Record<"ganha" | "perdida" | "parcial", number>;
   /** A caminho por plataforma e situação do envio (sempre as duas plataformas). */
   a_caminho: Record<Plataforma, Record<Envio, number>>;
   itens: LinhaOperacao[];

@@ -8,6 +8,19 @@ _AGUARDANDO = ("PENDING", "READY", "REQUEST", "NOT_START", "CREATED", "NEW", "IN
 
 STATUS = ("a_caminho", "aguardando_conferencia", "precisa_acao", "em_mediacao", "com_a_plataforma", "resolvida", "finalizada")
 FINAIS = ("encerrada", "cancelada")
+SHOPEE_PERDIDA = {"ACCEPTED", "REFUND_PAID"}  # a Shopee decidiu pelo reembolso ao comprador
+SHOPEE_GANHA = {"CANCELLED", "CLOSED"}  # devolução encerrada sem reembolso
+
+
+def resultado_mediacao(l: dict) -> str | None:
+    """em_andamento | ganha | perdida | parcial. ML: vem da reclamação. Shopee: vem das marcas da disputa
+    (shopee.normalizar.resultado_disputa); devolução contestada pela Central sem marca ainda conta, pelo status."""
+    if l.get("resultado_mediacao") or l["plataforma"] != "shopee":
+        return l.get("resultado_mediacao")
+    if not l.get("contestada"):
+        return None
+    st = l.get("status_plataforma")
+    return "perdida" if st in SHOPEE_PERDIDA else "ganha" if st in SHOPEE_GANHA else "em_andamento"
 
 
 def pendencias(conf: dict | None, contestada: bool) -> list[str]:

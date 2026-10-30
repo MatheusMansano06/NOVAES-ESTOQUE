@@ -12,7 +12,7 @@ from app.central.mercado_livre import catalogo
 from app.central.olist import servico as olist
 from app.central.db import Sessao
 
-from .regras import ENVIOS, STATUS, envio, envio_plataforma, pendencias, status
+from .regras import ENVIOS, STATUS, envio, envio_plataforma, pendencias, resultado_mediacao, status
 
 COLUNAS_CONF = ("classe", "lancamentos", "estoque_lancado_em", "contestar", "chamado_manual", "chamado_aberto_em",
                 "chamado_protocolo", "perda_produto", "frete_reverso", "conferida_em", "erro_nosso", "sku_recebido")
@@ -33,10 +33,12 @@ def linhas(desde: datetime | None = None) -> list[dict]:
             dev, conf = publico(d), confs.get(d.id)
             contestada = d.id in contestadas
             st = status(dev, conf, contestada, d.id in aceitas)
-            linhas.append({**dev, "conferencia": conf, "contestada": contestada,
-                           "status": st, "pendencias": pendencias(conf, contestada),
-                           "envio": envio(d.plataforma, d.bruto) if st == "a_caminho" else None,
-                           "envio_plataforma": envio_plataforma(d.plataforma, d.bruto) if st == "a_caminho" else None})
+            linha = {**dev, "conferencia": conf, "contestada": contestada,
+                     "status": st, "pendencias": pendencias(conf, contestada),
+                     "envio": envio(d.plataforma, d.bruto) if st == "a_caminho" else None,
+                     "envio_plataforma": envio_plataforma(d.plataforma, d.bruto) if st == "a_caminho" else None}
+            linha["mediacao"] = resultado_mediacao(linha)
+            linhas.append(linha)
     return linhas
 
 
@@ -57,13 +59,19 @@ def a_caminho_por_plataforma(ls: list[dict]) -> dict:
 
 
 def listar(status_filtro: str | None, plataforma: str | None, motivo: str | None, destino: str | None,
-           pagina: int, por_pagina: int, envio_filtro: str | None = None) -> dict:
-    base = [l for l in linhas() if (not motivo or l["motivo"] == motivo) and (not destino or l["destino"] == destino)]
+           pagina: int, por_pagina: int, envio_filtro: str | None = None, mediacao_filtro: str | None = None) -> dict:
+    por_motivo = [l for l in linhas() if not motivo or l["motivo"] == motivo]
+    todas = [l for l in por_motivo if not plataforma or l["plataforma"] == plataforma]
+    # Mediação encerrada conta qualquer destino: perdida com o produto que nem voltou também vira chamado manual.
+    mediacoes = {r: sum(l["mediacao"] == r for l in todas) for r in ("ganha", "perdida", "parcial")}
+    base = [l for l in por_motivo if not destino or l["destino"] == destino]
     a_caminho = a_caminho_por_plataforma(base)
     filtradas = [l for l in base if not plataforma or l["plataforma"] == plataforma]
     contagens = {s: 0 for s in STATUS}
     for l in filtradas:
         contagens[l["status"]] += 1
+    if mediacao_filtro:  # registro de mediações: ignora destino, como a contagem acima
+        filtradas = [l for l in todas if l["mediacao"] in mediacao_filtro.split(",")]
     if status_filtro:  # aceita vários separados por vírgula (ex.: histórico = resolvida,finalizada)
         filtradas = [l for l in filtradas if l["status"] in status_filtro.split(",")]
     if envio_filtro:
@@ -79,7 +87,7 @@ def listar(status_filtro: str | None, plataforma: str | None, motivo: str | None
         l["produto"] = item.get("nome") or olist.descricao_em_cache(l["pacote"] or l["pedido"])
         l["imagem"] = item.get("imagem") or fotos.get(item.get("item_id"))
         l["prejuizo"] = _prejuizo(l)
-    return {"total": len(filtradas), "contagens": contagens, "a_caminho": a_caminho, "itens": pagina_itens}
+    return {"total": len(filtradas), "contagens": contagens, "mediacoes": mediacoes, "a_caminho": a_caminho, "itens": pagina_itens}
 
 
 def atencao() -> dict:

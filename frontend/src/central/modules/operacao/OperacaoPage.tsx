@@ -15,10 +15,18 @@ const ABAS = [
   { id: "precisa_acao", nome: "Falta terminar", explica: "Já conferidos: falta lançar o estoque, contestar ou abrir chamado.", status: ["precisa_acao"] },
   { id: "a_caminho", nome: "A caminho", explica: "Ainda não chegaram. Nada a fazer por enquanto.", status: ["a_caminho"] },
   { id: "em_mediacao", nome: "Em mediação", explica: "A plataforma está decidindo. Só acompanhar.", status: ["em_mediacao"] },
+  // Filtra pelo resultado da mediação, não pelo status: o status de quem terminou já é "Concluídas".
+  { id: "mediacoes", nome: "Mediações encerradas", explica: "Ganhas e perdidas. A perdida vale abrir chamado manual.", status: [] },
   { id: "concluidas", nome: "Concluídas", explica: "Tudo feito. Ficam aqui para consulta.", status: ["resolvida", "finalizada"] },
 ] as const;
 type IdAba = (typeof ABAS)[number]["id"];
 const POR_PAGINA = 7;
+
+const RESULTADO: Record<string, string> = {
+  ganha: "Mediação ganha", perdida: "Mediação perdida", parcial: "Mediação parcial (perdeu parte)",
+};
+type Resultado = "" | "ganha" | "perdida";
+const FILTRO_RESULTADO: Record<Resultado, string> = { "": "ganha,perdida,parcial", ganha: "ganha", perdida: "perdida,parcial" };
 
 const PENDENCIA_TEXTO: Record<string, { situacao: string; botao: string }> = {
   lancar_estoque: { situacao: "Falta lançar o estoque na Olist", botao: "Lançar estoque" },
@@ -37,6 +45,7 @@ function lerBancada() {
 function acao(l: LinhaOperacao) {
   if (l.status === "a_caminho" && l.envio) return { situacao: ENVIO[l.envio], botao: "Ver detalhes", principal: false };
   if (l.pendencias.length) return { ...PENDENCIA_TEXTO[l.pendencias[0]], principal: true };
+  if (l.mediacao && RESULTADO[l.mediacao]) return { situacao: RESULTADO[l.mediacao], botao: "Ver detalhes", principal: false };
   if (l.status === "aguardando_conferencia") return { situacao: SITUACAO[l.status], botao: "Conferir agora", principal: true };
   if (l.status === "em_mediacao") return { situacao: SITUACAO[l.status], botao: "Acompanhar", principal: false };
   return { situacao: SITUACAO[l.status], botao: "Ver detalhes", principal: false };
@@ -50,18 +59,22 @@ export function OperacaoPage({ nav }: { nav: Navegacao }) {
   const [aba, setAba] = useState<IdAba>(inicial);
   const [plataforma, setPlataforma] = useState<Plataforma | "">(nav.filtroInicial?.plataforma ?? "");
   const [envio, setEnvio] = useState<Envio | "">(nav.filtroInicial?.envio ?? "");
+  const [resultado, setResultado] = useState<Resultado>("");
   const [pagina, setPagina] = useState(1);
 
   const atual = ABAS.find((a) => a.id === aba)!;
   const filtro = new URLSearchParams({ pagina: String(pagina), por_pagina: String(POR_PAGINA), destino: "vendedor", status: atual.status.join(",") });
   if (plataforma) filtro.set("plataforma", plataforma);
   if (aba === "a_caminho" && envio) filtro.set("envio", envio);
+  if (aba === "mediacoes") filtro.set("mediacao", FILTRO_RESULTADO[resultado]);
   const { dados, erro } = usarDados<Operacao>(`/operacao?${filtro}`, nav.versao);
   // Contagens de todas as abas, sem filtro de status (a resposta já traz a contagem por status).
   const { dados: todas } = usarDados<Operacao>(`/operacao?por_pagina=1&destino=vendedor${plataforma ? `&plataforma=${plataforma}` : ""}`, nav.versao);
   const contar = (ids: readonly string[]) => (todas ? ids.reduce((s, id) => s + (todas.contagens[id as Status] ?? 0), 0) : null);
+  const m = todas?.mediacoes;
+  const contarAba = (a: (typeof ABAS)[number]) => (a.id === "mediacoes" ? (m ? m.ganha + m.perdida + m.parcial : null) : contar(a.status));
 
-  useEffect(() => { setPagina(1); }, [aba, plataforma, envio]);
+  useEffect(() => { setPagina(1); }, [aba, plataforma, envio, resultado]);
 
   // Modo bancada: o foco volta sozinho para o campo, o leitor pode bipar a qualquer momento.
   useEffect(() => {
@@ -110,7 +123,7 @@ export function OperacaoPage({ nav }: { nav: Navegacao }) {
       <div className="abas-operador" role="tablist" aria-label="Grupos de devoluções">
         {ABAS.map((a) => (
           <button key={a.id} role="tab" aria-selected={aba === a.id} onClick={() => setAba(a.id)}>
-            <span className="aba-topo"><strong>{a.nome}</strong><span className="contagem">{contar(a.status) ?? "…"}</span></span>
+            <span className="aba-topo"><strong>{a.nome}</strong><span className="contagem">{contarAba(a) ?? "…"}</span></span>
             <span className="aba-explica">{a.explica}</span>
           </button>
         ))}
@@ -128,6 +141,13 @@ export function OperacaoPage({ nav }: { nav: Navegacao }) {
               <button type="button" aria-pressed={!envio} onClick={() => setEnvio("")}>Todos</button>
               <button type="button" aria-pressed={envio === "aguardando_postagem"} onClick={() => setEnvio("aguardando_postagem")}>Não postou</button>
               <button type="button" aria-pressed={envio === "postado"} onClick={() => setEnvio("postado")}>Postado</button>
+            </div>
+          )}
+          {aba === "mediacoes" && (
+            <div className="segmentos" role="group" aria-label="Resultado da mediação">
+              <button type="button" aria-pressed={!resultado} onClick={() => setResultado("")}>Todas</button>
+              <button type="button" aria-pressed={resultado === "ganha"} onClick={() => setResultado("ganha")}>Ganhas {m?.ganha ?? ""}</button>
+              <button type="button" aria-pressed={resultado === "perdida"} onClick={() => setResultado("perdida")}>Perdidas {m ? m.perdida + m.parcial : ""}</button>
             </div>
           )}
           <div className="segmentos" role="group" aria-label="Marketplace">

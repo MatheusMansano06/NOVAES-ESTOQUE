@@ -69,6 +69,8 @@ def test_fluxo_conferencia():
                         files={"arquivo": ("x.exe", b"MZ", "application/x-msdownload")}).status_code == 422
 
     assert cliente.get("/api/central/operacao?destino=vendedor").status_code == 200
+    reg = cliente.get("/api/central/operacao?mediacao=ganha,perdida,parcial").json()
+    assert reg["total"] == 0 and reg["mediacoes"] == {"ganha": 0, "perdida": 0, "parcial": 0}
     assert cliente.get("/api/central/operacao/atencao").status_code == 200
     assert cliente.get("/api/central/bi/resumo?dias=30").status_code == 200
     assert cliente.get("/api/central/bi/resumo?dias=0").status_code == 422
