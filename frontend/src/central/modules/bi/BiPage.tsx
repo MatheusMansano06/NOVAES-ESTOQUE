@@ -88,6 +88,7 @@ export function BiPage({ nav }: { nav: Navegacao }) {
   const { dados: r, erro } = usarDados<Resumo>(`/bi/resumo?${periodo.includes("-") ? `fatura=${periodo}` : `dias=${periodo}`}`, nav.versao);
   const dias = r?.dias ?? 30;
   const { dados: mensal } = usarDados<{ meses: Mes[] }>("/bi/mensal", nav.versao);
+  const [verQuebrados, setVerQuebrados] = useState(false);
   const [avisoMes, setAvisoMes] = useState<string | null>(null);
   async function refazer(fatura: string) {
     const nome = `${NOME_MES[Number(fatura.slice(5, 7)) - 1]}/${fatura.slice(2, 4)}`;
@@ -123,6 +124,7 @@ export function BiPage({ nav }: { nav: Navegacao }) {
         </select>
       </header>
       {erro && <p className="aviso erro">{erro}</p>}
+      {verQuebrados && <QuebradosModal periodo={periodo} onFechar={() => setVerQuebrados(false)} />}
 
       <section className="metricas">
         <Metrica rotulo="Custo total com devoluções" valor={reais(d?.custo_total)} v={d && a && variacao(d.custo_total, a.custo_total)} />
@@ -130,7 +132,7 @@ export function BiPage({ nav }: { nav: Navegacao }) {
                  nota="Estimado pelas mediações ganhas" />
         <Metrica rotulo="Frete reverso cobrado" valor={reais(d?.frete_cobrado)} v={d && a && variacao(d.frete_cobrado ?? 0, a.frete_cobrado ?? 0)} />
         <Metrica rotulo="Mercadoria quebrada" valor={reais(perdido(d))} v={d && a && variacao(perdido(d), perdido(a))}
-                 nota="Da bancada + do motivo da devolução" />
+                 nota="Da bancada + do motivo da devolução" onClick={() => setVerQuebrados(true)} />
         <Metrica rotulo="Taxa de recuperação" valor={`${(d?.taxa_recuperacao ?? 0).toLocaleString("pt-BR")}%`} />
       </section>
 
@@ -382,9 +384,57 @@ function somar(cs?: Celula[]): Celula {
                            { quantidade: 0, valor: 0, sem_custo: 0 });
 }
 
-function Metrica({ rotulo, valor, v, nota }: { rotulo: string; valor: string; v?: { texto: string; bom: boolean } | null | 0; nota?: string }) {
+interface Quebrada {
+  id: number; plataforma: Plataforma; pedido: string; origem: "bancada" | "motivo"; motivo: string; valor: number | null; aberta_em: string;
+  itens: { sku: string | null; nome: string | null; imagem: string | null; quantidade: number }[];
+}
+
+function QuebradosModal({ periodo, onFechar }: { periodo: string; onFechar: () => void }) {
+  const { dados, erro } = usarDados<{ inicio: string; fim: string; devolucoes: Quebrada[] }>(
+    `/bi/quebrados?${periodo.includes("-") ? `fatura=${periodo}` : `dias=${periodo}`}`, 0);
+  const total = dados?.devolucoes.reduce((t, d) => t + (d.valor ?? 0), 0) ?? 0;
   return (
-    <div className="metrica">
+    <div className="modal-fundo" onMouseDown={(e) => e.target === e.currentTarget && onFechar()}>
+      <div className="modal" role="dialog" aria-modal="true" aria-label="Mercadoria quebrada" tabIndex={-1}
+           onKeyDown={(e) => e.key === "Escape" && onFechar()}>
+        <header className="cabecalho" style={{ padding: "1rem 1.25rem" }}>
+          <div>
+            <h2>Mercadoria quebrada</h2>
+            <p className="sub">{dados ? `${dados.devolucoes.length} devoluções de ${diaMes(dados.inicio)} a ${diaMes(dados.fim)} · ${reais(total)}` : "Carregando…"}</p>
+          </div>
+          <button type="button" className="botao" onClick={onFechar}>Fechar</button>
+        </header>
+        <div className="tabela-area" style={{ padding: "0 1.25rem 1rem", overflow: "auto" }}>
+          {erro && <p className="aviso erro">{erro}</p>}
+          <table className="tabela compacta">
+            <thead><tr><th>Produto</th><th>Plataforma</th><th>Pedido</th><th>Origem</th><th className="num">Custo</th></tr></thead>
+            <tbody>
+              {dados?.devolucoes.map((d) => (
+                <tr key={d.id}>
+                  <td>{d.itens.map((i, k) => (
+                    <div key={k} className="qb-produto">
+                      {i.imagem ? <img src={i.imagem} alt="" loading="lazy" /> : <span className="qb-sem-foto" aria-hidden="true" />}
+                      <div><strong>{i.sku ?? "sem SKU"}</strong> <span className="sub">{i.quantidade} un.</span>
+                        <span className="sub qb-nome" title={i.nome ?? undefined}>{i.nome}</span></div>
+                    </div>))}</td>
+                  <td><LogoPlataforma plataforma={d.plataforma} tamanho={16} comNome /></td>
+                  <td>{d.pedido}<span className="sub"> {diaMes(d.aberta_em.slice(0, 10))}</span></td>
+                  <td>{d.origem === "bancada" ? "Conferida na bancada" : `Motivo: ${MOTIVO[d.motivo] ?? d.motivo}`}</td>
+                  <td className="num">{d.valor == null ? <span className="sub">sem custo</span> : reais(d.valor)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function Metrica({ rotulo, valor, v, nota, onClick }: { rotulo: string; valor: string; v?: { texto: string; bom: boolean } | null | 0; nota?: string; onClick?: () => void }) {
+  return (
+    <div className="metrica" {...(onClick ? { onClick, role: "button", tabIndex: 0, style: { cursor: "pointer" },
+      onKeyDown: (e: React.KeyboardEvent) => (e.key === "Enter" || e.key === " ") && onClick() } : {})}>
       <span className="metrica-rotulo">{rotulo}</span>
       <strong className="metrica-valor">{valor}</strong>
       <span className="metrica-rodape">
