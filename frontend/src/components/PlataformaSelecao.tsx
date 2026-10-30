@@ -160,6 +160,7 @@ export function PlataformaSelecao({
 }: PlataformaSelecaoProps) {
   const [conta, setConta] = useState<ContaML | null>(null)
   const [menuAberto, setMenuAberto] = useState(false)
+  const [shopeeConectada, setShopeeConectada] = useState(false)
 
   useEffect(() => {
     let ativo = true
@@ -167,6 +168,12 @@ export function PlataformaSelecao({
       .then((r) => r.json())
       .then((d) => {
         if (ativo && d && !d.erro) setConta(d)
+      })
+      .catch(() => {})
+    fetch(`${API_BASE}/api/shopee/status`, { cache: 'no-store' })
+      .then((r) => r.json())
+      .then((d) => {
+        if (ativo) setShopeeConectada(Boolean(d?.autorizado && !d?.expirado))
       })
       .catch(() => {})
     return () => {
@@ -313,9 +320,9 @@ export function PlataformaSelecao({
           <article className={`cop__card cop__card--shopee${atual === 'shopee' ? ' is-atual' : ''}`}>
             <span className="cop__card-bg" aria-hidden="true" />
             <div className="cop__card-corpo">
-              <span className="cop__status is-prep">
+              <span className={`cop__status${shopeeConectada ? ' is-ok' : ' is-prep'}`}>
                 <i aria-hidden="true" />
-                Em configuração
+                {shopeeConectada ? 'Conectado' : 'Em configuração'}
                 <Chevron />
               </span>
 
@@ -324,10 +331,12 @@ export function PlataformaSelecao({
                 Acompanhe pedidos, catálogo, repasses e performance da loja.
               </p>
 
-              <div className="cop__aviso">
-                <strong>Integração ainda não autorizada</strong>
-                <span>O webhook já responde. Falta conectar a conta para trazer os dados.</span>
-              </div>
+              {!shopeeConectada && (
+                <div className="cop__aviso">
+                  <strong>Integração ainda não autorizada</strong>
+                  <span>O webhook já responde. Falta conectar a conta para trazer os dados.</span>
+                </div>
+              )}
 
               <div className="cop__card-acoes">
                 <button className="cop__btn" onClick={() => onEscolher('shopee')}>
