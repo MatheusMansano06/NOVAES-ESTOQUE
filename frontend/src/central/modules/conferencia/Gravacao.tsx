@@ -211,7 +211,7 @@ export function PainelGravacao({ g, ativa, onEnviada }: { g: Gravacao; ativa: bo
               {g.estado === "gravando" && <><span className="gravacao-rec" aria-hidden="true" /><strong>Gravando</strong></>}
               {g.estado === "limite" && <strong>A gravação parou no limite de 20 minutos. O que foi filmado está guardado.</strong>}
             </p>
-            <p className="sub">Segure o produto parado por 3 segundos e a foto sai sozinha.</p>
+            <p className="sub">Mexa no produto à vontade. Quando parar por 3 segundos, a foto sai sozinha.</p>
             <div className="gravacao-progresso" role="progressbar" aria-label="Foto automática" aria-valuemin={0} aria-valuemax={100}
                  aria-valuenow={Math.round(g.progresso * 100)}>
               <span style={{ width: `${g.progresso * 100}%` }} />

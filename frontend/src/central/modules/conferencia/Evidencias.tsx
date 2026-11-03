@@ -7,6 +7,8 @@ interface Props {
   devolucaoId: number;
   evidencias: Evidencia[];
   exigidas: string[];
+  /** O vídeo e as fotos da gravação ainda estão subindo: nada está faltando. */
+  chegando: boolean;
   onEnviada: () => void;
 }
 
@@ -27,8 +29,8 @@ async function reduzir(f: File): Promise<File> {
   }
 }
 
-/** Celular: câmera nativa pelo input. Computador: webcam ao vivo para foto e vídeo. */
-export function Evidencias({ devolucaoId, evidencias, exigidas, onEnviada }: Props) {
+/** Fotos extras: o vídeo vem da gravação da bancada. Só a Shopee exige vídeo, e só nela, sem gravação, aparece o botão de vídeo. */
+export function Evidencias({ devolucaoId, evidencias, exigidas, chegando, onEnviada }: Props) {
   const [erro, setErro] = useState<string | null>(null);
   const [enviando, setEnviando] = useState(false);
   const [webcam, setWebcam] = useState(false);
@@ -68,7 +70,8 @@ export function Evidencias({ devolucaoId, evidencias, exigidas, onEnviada }: Pro
   }
 
   const tem = (tipo: string) => evidencias.some((ev) => ev.tipo === tipo);
-  const pendentes = exigidas.filter((t) => !tem(t));
+  const pendentes = chegando ? [] : exigidas.filter((t) => !tem(t));
+  const faltaVideo = pendentes.includes("video");
 
   return (
     <section className="evidencias" aria-labelledby="t-evidencias">
@@ -76,15 +79,18 @@ export function Evidencias({ devolucaoId, evidencias, exigidas, onEnviada }: Pro
       {pendentes.length > 0 && (
         <p className="aviso forte">Para contestar ou abrir o chamado falta: {pendentes.map((t) => (t === "video" ? "vídeo" : "foto")).join(" e ")}.</p>
       )}
+      {!faltaVideo && <p className="sub">Tire mais fotos aqui, se quiser.</p>}
       <div className="acoes-evidencia">
         <label className="botao">
           Tirar foto
           <input type="file" accept="image/jpeg,image/png,image/webp" capture="environment" onChange={escolher} hidden />
         </label>
-        <label className="botao">
-          Gravar vídeo
-          <input type="file" accept="video/mp4,video/webm,video/quicktime" capture="environment" onChange={escolher} hidden />
-        </label>
+        {faltaVideo && (
+          <label className="botao">
+            Gravar vídeo
+            <input type="file" accept="video/mp4,video/webm,video/quicktime" capture="environment" onChange={escolher} hidden />
+          </label>
+        )}
         <button type="button" className="botao" onClick={() => setWebcam(true)}>Usar webcam</button>
       </div>
       {enviando && <p className="sub">Enviando arquivo…</p>}
@@ -105,13 +111,13 @@ export function Evidencias({ devolucaoId, evidencias, exigidas, onEnviada }: Pro
           ))}
         </ul>
       )}
-      {webcam && <Webcam onFechar={() => setWebcam(false)} onCapturar={enviar} enviando={enviando} feito={feito} total={evidencias.length} />}
+      {webcam && <Webcam comVideo={faltaVideo} onFechar={() => setWebcam(false)} onCapturar={enviar} enviando={enviando} feito={feito} total={evidencias.length} />}
     </section>
   );
 }
 
-function Webcam({ onFechar, onCapturar, enviando, feito, total }:
-  { onFechar: () => void; onCapturar: (f: File) => Promise<void>; enviando: boolean; feito: string | null; total: number }) {
+function Webcam({ comVideo, onFechar, onCapturar, enviando, feito, total }:
+  { comVideo: boolean; onFechar: () => void; onCapturar: (f: File) => Promise<void>; enviando: boolean; feito: string | null; total: number }) {
   const video = useRef<HTMLVideoElement>(null);
   const fluxo = useRef<MediaStream | null>(null);
   const gravador = useRef<MediaRecorder | null>(null);
@@ -173,9 +179,11 @@ function Webcam({ onFechar, onCapturar, enviando, feito, total }:
         </p>
         <div className="acoes-evidencia">
           <button type="button" className="botao principal" onClick={foto} disabled={!!erro || gravando || enviando}>{enviando ? "Enviando…" : "Tirar foto"}</button>
-          <button type="button" className={gravando ? "botao alerta" : "botao"} onClick={alternarGravacao} disabled={!!erro}>
-            {gravando ? "Parar e enviar vídeo" : "Gravar vídeo"}
-          </button>
+          {(comVideo || gravando) && (
+            <button type="button" className={gravando ? "botao alerta" : "botao"} onClick={alternarGravacao} disabled={!!erro}>
+              {gravando ? "Parar e enviar vídeo" : "Gravar vídeo"}
+            </button>
+          )}
           <button type="button" className="botao" onClick={onFechar}>Fechar</button>
         </div>
       </div>

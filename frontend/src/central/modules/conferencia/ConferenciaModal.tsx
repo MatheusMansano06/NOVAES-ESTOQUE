@@ -245,7 +245,7 @@ export function ConferenciaModal({ codigo, gravar, onFechar, onMudou }: Props) {
                 {passo === 1 && (
                   <>
                     <Evidencias devolucaoId={tela.devolucao.id} evidencias={tela.evidencias}
-                                exigidas={tela.conferencia?.evidencias_exigidas ?? []} onEnviada={atualizar} />
+                                exigidas={tela.conferencia?.evidencias_exigidas ?? []} chegando={gravacao.envio === "enviando"} onEnviada={atualizar} />
                     <div className="passo-rodape">
                       <button type="button" className="botao" onClick={() => setPasso(0)}>Voltar</button>
                       <button type="button" className="botao principal" onClick={() => setPasso(2)}>Continuar</button>
