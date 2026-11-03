@@ -39,6 +39,7 @@ export interface LinhaOperacao extends Devolucao {
   envio: Envio | null;
   envio_plataforma: string | null;
   mediacao: "em_andamento" | "ganha" | "perdida" | "parcial" | null;
+  evidencias: { id: number; tipo: "foto" | "video"; arquivo: string }[];
 }
 
 export interface Operacao {

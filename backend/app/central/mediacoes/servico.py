@@ -75,8 +75,6 @@ def contestar(devolucao_id: int, motivo: str, texto: str) -> dict:
         s.add(registro)
         s.flush()
         resposta = {c.name: getattr(registro, c.name) for c in Contestacao.__table__.columns}
-    if resposta["ok"]:
-        limpar_evidencias(devolucao_id)  # a plataforma já recebeu as fotos
     return resposta
 
 

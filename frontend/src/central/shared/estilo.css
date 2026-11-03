@@ -477,6 +477,22 @@
 .central-dev .webcam-caixa { background: var(--papel); border-radius: 14px; padding: 1rem; width: min(760px, 100%); }
 .central-dev .webcam video { width: 100%; border-radius: 10px; background: #000; }
 
+.central-dev .gravacao { display: flex; gap: 0.9rem; align-items: flex-start; flex-wrap: wrap; padding: 0.8rem 1rem; border-bottom: 1px solid var(--linha); }
+.central-dev .gravacao video { width: 240px; max-width: 100%; aspect-ratio: 16 / 9; border-radius: 10px; background: #000; }
+.central-dev .gravacao > img { width: 104px; height: 104px; object-fit: cover; border-radius: 10px; border: 1px solid var(--linha); }
+.central-dev .gravacao-info { flex: 1 1 240px; min-width: 0; display: grid; gap: 0.4rem; }
+.central-dev .gravacao-info p { margin: 0; }
+.central-dev .gravacao-info .acoes-evidencia { margin-top: 0; }
+.central-dev .gravacao-rec { display: inline-block; width: 10px; height: 10px; margin-right: 0.4rem; border-radius: 50%; background: #d92d20; }
+.central-dev .gravacao-progresso { height: 6px; border-radius: 3px; background: var(--linha); overflow: hidden; }
+.central-dev .gravacao-progresso span { display: block; height: 100%; background: var(--tinta); }
+.central-dev .provas { padding: 0.4rem 1rem 0.8rem; }
+.central-dev .provas summary { cursor: pointer; font-weight: 600; }
+.central-dev .provas ul { list-style: none; padding: 0; margin: 0.6rem 0 0; display: flex; gap: 0.7rem; flex-wrap: wrap; }
+.central-dev .provas li { display: grid; gap: 0.3rem; justify-items: start; }
+.central-dev .provas video { width: 320px; max-width: 100%; border-radius: 10px; background: #000; }
+.central-dev .provas img { width: 104px; height: 104px; object-fit: cover; border-radius: 10px; border: 1px solid var(--linha); }
+
 .central-dev .veredito { --cor: var(--tinta); display: grid; gap: 1rem; }
 .central-dev .veredito.classe-A { --cor: var(--classe-a); } .central-dev .veredito.classe-B { --cor: var(--classe-b); } .central-dev .veredito.classe-C { --cor: var(--classe-c); }
 .central-dev .veredito-cabeca { display: flex; gap: 1.1rem; align-items: center; }

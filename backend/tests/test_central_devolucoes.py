@@ -88,6 +88,48 @@ def test_limpar_evidencias_apaga_arquivo_e_linha():
     assert cliente.get(f"/api/central/conferencia/evidencias/{up['id']}").status_code == 404
 
 
+def test_prova_so_fica_enquanto_pode_servir():
+    from datetime import timedelta
+    from app.central.conferencia.servico import DIAS_APOS_MEDIACAO, DIAS_GUARDA, vencimento_provas
+    dia = datetime(2026, 11, 1)
+
+    def vence(status="resolvida", mediacao=None, conf=None, marca=False, contestada=False, etapa="entregue"):
+        return vencimento_provas({"status": status, "mediacao": mediacao, "conferencia": conf, "em_mediacao": marca,
+                                  "contestada": contestada, "etapa": etapa, "atualizada_em": dia})
+
+    apos_resultado = dia + timedelta(days=DIAS_APOS_MEDIACAO)
+    assert vence("em_mediacao") is None
+    assert vence(mediacao="em_andamento") is None
+    assert vence("precisa_acao", marca=True) is None  # estoque pendente não esconde a mediação aberta
+    assert vence("precisa_acao", contestada=True) is None  # contestada, resultado ainda não veio
+    assert vence(mediacao="ganha") == datetime.min
+    assert vence(mediacao="perdida") == apos_resultado
+    assert vence(mediacao="parcial") == apos_resultado
+    assert vence("finalizada", contestada=True, etapa="encerrada") == apos_resultado
+    assert vence(conf={"chamado_manual": True, "chamado_aberto_em": dia}) == apos_resultado
+    assert vence(conf={"contestar": True, "conferida_em": dia}) == dia + timedelta(days=DIAS_GUARDA)
+    assert vence(conf={"contestar": False, "chamado_manual": False}) == datetime.min  # sem mediação
+
+
+def test_conferencia_sem_mediacao_apaga_prova_e_varredura_poupa_mediacao_aberta():
+    from app.central.conferencia import servico as conferencia
+    devolucoes.salvar([_registro(id_externo="C20", codigos=["C20"], responsavel="comprador", motivo="arrependimento"),
+                       _registro(id_externo="C21", codigos=["C21"], em_mediacao=True),
+                       _registro(id_externo="C22", codigos=["C22"], resultado_mediacao="ganha")])
+    ids = {d["id_externo"]: d["id"] for d in cliente.get("/api/central/devolucoes").json()}
+    enviar = lambda i: cliente.post(f"/api/central/conferencia/{i}/evidencias", files={"arquivo": ("x.png", b"PNG fake", "image/png")}).json()
+    existe = lambda ev: cliente.get(f"/api/central/conferencia/evidencias/{ev['id']}").status_code == 200
+
+    sem_mediacao = enviar(ids["C20"])
+    decisao = conferencia.registrar(ids["C20"], {"produto_correto": True, "completo": True, "sem_uso": True, "revendavel": True, "erro_nosso": False})
+    assert not decisao["contestar"] and not decisao["chamado_manual"]
+    assert not existe(sem_mediacao)
+
+    aberta, ganha = enviar(ids["C21"]), enviar(ids["C22"])
+    conferencia.varrer_evidencias()
+    assert existe(aberta) and not existe(ganha)
+
+
 def test_envio_a_caminho():
     from app.central.operacao.regras import envio
     ml = lambda st: {"devolucao": {"status": st}}  # noqa: E731

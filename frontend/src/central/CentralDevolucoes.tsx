@@ -30,7 +30,8 @@ export type IdTela = (typeof TELAS)[number]["id"];
 export interface FiltroOperacao { plataforma?: Plataforma; envio?: Envio }
 
 export interface Navegacao {
-  abrir: (codigo: string) => void;
+  /** `gravar`: é o produto chegando na bancada, a câmera filma a conferência. */
+  abrir: (codigo: string, gravar?: boolean) => void;
   irPara: (tela: IdTela, statusFiltro?: string, filtro?: FiltroOperacao) => void;
   /** Muda depois de qualquer ação no modal: as telas recarregam os números. */
   versao: number;
@@ -43,11 +44,12 @@ function Central({ onVoltar }: { onVoltar: () => void }) {
   const [statusInicial, setStatusInicial] = useState<string | undefined>();
   const [filtroInicial, setFiltroInicial] = useState<FiltroOperacao | undefined>();
   const [codigo, setCodigo] = useState<string | null>(null);
+  const [gravar, setGravar] = useState(false);
   const [versao, setVersao] = useState(0);
   const [busca, setBusca] = useState("");
   const campoBusca = useRef<HTMLInputElement>(null);
 
-  const abrir = useCallback((c: string) => setCodigo(c.trim()), []);
+  const abrir = useCallback((c: string, g = false) => { setGravar(g); setCodigo(c.trim()); }, []);
   const irPara = useCallback((t: IdTela, s?: string, f?: FiltroOperacao) => { setStatusInicial(s); setFiltroInicial(f); setTela(t); }, []);
   const fechar = useCallback(() => { setCodigo(null); setVersao((v) => v + 1); }, []);
   const recarregar = useCallback(() => setVersao((v) => v + 1), []);
@@ -73,7 +75,7 @@ function Central({ onVoltar }: { onVoltar: () => void }) {
 
   function buscar(e: FormEvent) {
     e.preventDefault();
-    if (busca.trim()) abrir(busca);
+    if (busca.trim()) abrir(busca, true);
     setBusca("");
   }
 
@@ -113,7 +115,7 @@ function Central({ onVoltar }: { onVoltar: () => void }) {
 
       {codigo && (ehEtiquetaFull(codigo)
         ? <RetiradaFullModal codigo={codigo} onFechar={fechar} />
-        : <ConferenciaModal codigo={codigo} onFechar={fechar} onMudou={() => setVersao((v) => v + 1)} />)}
+        : <ConferenciaModal codigo={codigo} gravar={gravar} onFechar={fechar} onMudou={() => setVersao((v) => v + 1)} />)}
     </div>
   );
 }

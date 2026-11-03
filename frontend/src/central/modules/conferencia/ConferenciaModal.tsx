@@ -7,6 +7,7 @@ import { Icone } from "../../shared/Icone";
 import { LogoPlataforma } from "../../shared/LogoPlataforma";
 import { Checklist, type Constatacao } from "./Checklist";
 import { Evidencias } from "./Evidencias";
+import { PainelGravacao, useGravacao } from "./Gravacao";
 import { CULPA, type Midia, type Tela } from "./tipos";
 import { Veredito } from "./Veredito";
 
@@ -94,18 +95,25 @@ function TriagemFull({ codigo, onEscolher }: { codigo: string; onEscolher: (pedi
 
 interface Props {
   codigo: string;
+  gravar: boolean;
   onFechar: () => void;
   onMudou: () => void;
 }
 
 /** Bipou: identifica a venda e conduz a conferência em passos, sem sair da tela onde o operador estava. */
-export function ConferenciaModal({ codigo, onFechar, onMudou }: Props) {
+export function ConferenciaModal({ codigo, gravar, onFechar, onMudou }: Props) {
   const caixa = useRef<HTMLDivElement>(null);
   const [telas, setTelas] = useState<Tela[] | null>(null);
   const [escolhida, setEscolhida] = useState(0);
   const [passo, setPasso] = useState(0);
   const [erro, setErro] = useState<string | null>(null);
   const [registrando, setRegistrando] = useState(false);
+  const tela = telas?.[escolhida];
+  const conferida = !!tela?.conferencia;
+  const filmando = gravar && !!tela && !conferida;
+  const gravacao = useGravacao(filmando);
+  const perderia = useRef(gravacao.perderia);
+  perderia.current = gravacao.perderia;
 
   const carregar = useCallback(async (inicial = false) => {
     try {
@@ -131,12 +139,17 @@ export function ConferenciaModal({ codigo, onFechar, onMudou }: Props) {
     }
   }
 
+  const fechar = useCallback(() => {
+    if (perderia.current() && !window.confirm("O vídeo e as fotos desta conferência ainda não foram guardados e serão perdidos. Fechar mesmo assim?")) return;
+    onFechar();
+  }, [onFechar]);
+
   useEffect(() => {
     caixa.current?.focus();
-    const esc = (e: KeyboardEvent) => e.key === "Escape" && onFechar();
+    const esc = (e: KeyboardEvent) => e.key === "Escape" && fechar();
     window.addEventListener("keydown", esc);
     return () => window.removeEventListener("keydown", esc);
-  }, [onFechar]);
+  }, [fechar]);
 
   const atualizar = useCallback(() => { void carregar(); onMudou(); }, [carregar, onMudou]);
 
@@ -144,7 +157,9 @@ export function ConferenciaModal({ codigo, onFechar, onMudou }: Props) {
     setErro(null);
     setRegistrando(true);
     try {
-      await api.post(`/conferencia/${tela.devolucao.id}`, c);
+      const r = await api.post<{ contestar: boolean; chamado_manual: boolean }>(`/conferencia/${tela.devolucao.id}`, c);
+      // Antes de recarregar: a tela recarregada já vem conferida e desliga a câmera.
+      void gravacao.encerrar(r.contestar || r.chamado_manual ? tela.devolucao.id : null, atualizar);
       await carregar();
       onMudou();
       setPasso(1);
@@ -155,11 +170,8 @@ export function ConferenciaModal({ codigo, onFechar, onMudou }: Props) {
     }
   }
 
-  const tela = telas?.[escolhida];
-  const conferida = !!tela?.conferencia;
-
   return (
-    <div className="modal-fundo" onMouseDown={(e) => e.target === e.currentTarget && onFechar()}>
+    <div className="modal-fundo" onMouseDown={(e) => e.target === e.currentTarget && fechar()}>
       <div className="modal" role="dialog" aria-modal="true" aria-labelledby="modal-titulo" tabIndex={-1} ref={caixa}>
         <header className="modal-topo">
           <div>
@@ -176,12 +188,13 @@ export function ConferenciaModal({ codigo, onFechar, onMudou }: Props) {
               ))}
             </div>
           )}
-          <button type="button" className="icone-botao" onClick={onFechar} aria-label="Fechar">
+          <button type="button" className="icone-botao" onClick={fechar} aria-label="Fechar">
             <Icone nome="fechar" />
           </button>
         </header>
 
         {erro && <p className="aviso erro" role="alert">{erro}</p>}
+        <PainelGravacao g={gravacao} ativa={filmando} onEnviada={atualizar} />
         {!telas && !erro && <div className="carregando">Buscando a devolução, o pedido na Olist e o custo…</div>}
         {telas?.length === 0 && ETIQUETA_TRIAGEM.test(codigo) && (
           <TriagemFull codigo={codigo} onEscolher={(pedido) => void vincular(pedido)} />

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 
 import type { Navegacao } from "../../CentralDevolucoes";
+import { BASE_API } from "../../shared/api";
 import { MOTIVO, type Plataforma } from "../../shared/devolucao";
 import { prazoRestante } from "../../shared/formato";
 import { Icone } from "../../shared/Icone";
@@ -37,6 +38,35 @@ const SITUACAO: Record<Status, string> = {
   a_caminho: "Ainda não chegou", aguardando_conferencia: "Chegou, falta conferir", precisa_acao: "Falta terminar",
   em_mediacao: "A plataforma está decidindo", com_a_plataforma: "Ficou no CD da plataforma", resolvida: "Resolvida", finalizada: "Finalizada",
 };
+
+/** Vídeo e fotos da conferência. Só carrega ao abrir: arquivo de vídeo na lista inteira gastaria banda à toa. */
+function Provas({ evidencias }: { evidencias: LinhaOperacao["evidencias"] }) {
+  const [aberto, setAberto] = useState(false);
+  if (!evidencias.length) return null;
+  const fotos = evidencias.filter((e) => e.tipo === "foto").length;
+  const videos = evidencias.length - fotos;
+  const resumo = [videos && (videos === 1 ? "1 vídeo" : `${videos} vídeos`), fotos && (fotos === 1 ? "1 foto" : `${fotos} fotos`)].filter(Boolean).join(" e ");
+  return (
+    <details className="provas" onToggle={(e) => setAberto(e.currentTarget.open)}>
+      <summary>Provas da conferência: {resumo}</summary>
+      {aberto && (
+        <ul>
+          {evidencias.map((ev) => {
+            const url = `${BASE_API}/conferencia/evidencias/${ev.id}`;
+            return (
+              <li key={ev.id}>
+                {ev.tipo === "video"
+                  ? <video src={url} controls preload="metadata" />
+                  : <a href={url} target="_blank" rel="noreferrer"><img src={url} alt={`Foto ${ev.id} da conferência`} loading="lazy" /></a>}
+                <a className="botao" href={url} download={ev.arquivo}>Baixar</a>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </details>
+  );
+}
 
 function lerBancada() {
   try { return localStorage.getItem("modoBancada") !== "0"; } catch { return true; }
@@ -90,7 +120,7 @@ export function OperacaoPage({ nav }: { nav: Navegacao }) {
 
   function bipar(e: FormEvent) {
     e.preventDefault();
-    if (codigo.trim()) nav.abrir(codigo);
+    if (codigo.trim()) nav.abrir(codigo, true);
     setCodigo("");
   }
 
@@ -115,7 +145,7 @@ export function OperacaoPage({ nav }: { nav: Navegacao }) {
         </form>
         <ol className="passos">
           <li><span>1</span>Bipe a etiqueta, o QR code ou a nota que veio no pacote</li>
-          <li><span>2</span>Responda as perguntas e tire as fotos do produto</li>
+          <li><span>2</span>A câmera grava sozinha: desembale, segure o produto parado por 3 segundos para a foto e responda as perguntas</li>
           <li><span>3</span>Siga o que o sistema indicar: estoque, contestação ou chamado</li>
         </ol>
       </section>
@@ -168,7 +198,7 @@ export function OperacaoPage({ nav }: { nav: Navegacao }) {
             const skus = l.itens.map((i) => i.sku).filter(Boolean).join(", ");
             return (
               <li key={l.id}>
-                <button type="button" className="linha-operador" onClick={() => nav.abrir(codigoDe(l))}>
+                <button type="button" className="linha-operador" onClick={() => nav.abrir(codigoDe(l), l.status === "aguardando_conferencia")}>
                   {l.imagem ? <img src={l.imagem} alt="" loading="lazy" /> : <span className="foto-vazia" />}
                   <span className="produto-nome">
                     <strong>{l.produto ?? (skus ? `SKU ${skus}` : "Produto sem nome")}</strong>
@@ -182,6 +212,7 @@ export function OperacaoPage({ nav }: { nav: Navegacao }) {
                   </span>
                   <span className={a.principal ? "botao principal" : "botao"}>{a.botao}</span>
                 </button>
+                <Provas evidencias={l.evidencias} />
               </li>
             );
           })}

@@ -4,7 +4,7 @@ from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import select
 
-from app.central.conferencia.modelo import Conferencia
+from app.central.conferencia.modelo import Conferencia, Evidencia
 from app.central.devolucoes.modelo import Devolucao
 from app.central.devolucoes.servico import publico
 from app.central.mediacoes.modelo import Contestacao
@@ -82,7 +82,11 @@ def listar(status_filtro: str | None, plataforma: str | None, motivo: str | None
                    else (1, -l["atualizada_em"].timestamp()))
     pagina_itens = filtradas[(pagina - 1) * por_pagina: pagina * por_pagina]
     fotos = catalogo.imagens(i.get("item_id") for l in pagina_itens if l["plataforma"] == "mercado_livre" for i in l["itens"][:1])
+    with Sessao() as s:
+        evidencias = s.scalars(select(Evidencia).where(Evidencia.devolucao_id.in_([l["id"] for l in pagina_itens]))).all()
+        provas = [(e.devolucao_id, {"id": e.id, "tipo": e.tipo, "arquivo": e.arquivo}) for e in evidencias]
     for l in pagina_itens:
+        l["evidencias"] = [p for dono, p in provas if dono == l["id"]]
         item = (l["itens"] or [{}])[0]
         l["produto"] = item.get("nome") or olist.descricao_em_cache(l["pacote"] or l["pedido"])
         l["imagem"] = item.get("imagem") or fotos.get(item.get("item_id"))

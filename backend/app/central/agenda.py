@@ -115,6 +115,7 @@ TAREFAS = {
     "fatura_ml": fatura_ml.sincronizar,  # tarifas de devolução da fatura do ML (BI mensal)
     "mediacao_origem": mediacao_origem.completar,  # quem abriu cada mediação (BI)
     "mediacao_atuacao": mediacao_origem.completar_atuacao,  # o que a Novaes fez em cada mediação (BI)
+    "provas_vencidas": conferencia_servico.varrer_evidencias,  # vídeo e fotos que já não servem
 }
 estado: dict[str, dict] = {}
 

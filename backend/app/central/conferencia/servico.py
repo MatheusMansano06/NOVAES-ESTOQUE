@@ -14,6 +14,7 @@ from app.central.devolucoes.servico import publico
 from app.central.financeiro.custos import custo_do_sku, custo_na_data
 from app.central.mercado_livre import acoes as ml_acoes
 from app.central.olist import servico as olist
+from app.central.operacao.regras import FINAIS
 from app.central.db import UPLOADS, Sessao
 
 from .etiquetas import extrair
@@ -26,7 +27,8 @@ TIPOS = {  # content-type aceito → (tipo, extensão). Nome do arquivo do usuá
     "video/mp4": ("video", ".mp4"), "video/webm": ("video", ".webm"), "video/quicktime": ("video", ".mov"),
 }
 LIMITE = {"foto": 15 * 2**20, "video": 200 * 2**20}
-DIAS_GUARDA = 30
+DIAS_GUARDA = 30  # conferida para contestar, mas ninguém agiu ainda
+DIAS_APOS_MEDIACAO = 15  # depois do resultado: tempo para mandar a prova ao suporte
 CAMPOS = ("sku_recebido", "produto_correto", "completo", "sem_uso", "revendavel", "erro_nosso", "observacao")
 
 
@@ -249,7 +251,6 @@ def registrar_chamado_aberto(devolucao_id: int, protocolo: str | None, observaca
         if observacao:
             conf.observacao = f"{conf.observacao or ''}\n[chamado] {observacao}".strip()
         resposta = {"chamado_aberto_em": conf.chamado_aberto_em, "chamado_protocolo": protocolo}
-    limpar_evidencias(devolucao_id)  # chamado aberto: as fotos já foram anexadas no painel da plataforma
     return resposta
 
 
@@ -275,6 +276,8 @@ def registrar(devolucao_id: int, dados: dict) -> dict:
         for lanc in decisao["lancamentos"]:
             lanc["deposito_olist"] = olist.deposito_id(lanc["deposito"], d.plataforma)
         plataforma, pedido = d.plataforma, d.pedido
+    if not decisao["contestar"] and not decisao["chamado_manual"]:
+        limpar_evidencias(devolucao_id)  # sem mediação, a prova não serve a ninguém
     return {**decisao, "plataforma": plataforma, "pedido": pedido}
 
 
@@ -384,19 +387,43 @@ def salvar_evidencia(devolucao_id: int, content_type: str, conteudo: BinaryIO) -
         s.add(ev)
         s.flush()
         resposta = _colunas(ev)
-    limpar_evidencias(dias=DIAS_GUARDA)  # varredura barata: devolução parada há mais que isso não vai mais a disputa
     return resposta
 
 
-def limpar_evidencias(devolucao_id: int | None = None, dias: int | None = None) -> int:
-    """Apaga arquivo e linha. A foto só serve até a plataforma receber a prova; depois disso só ocupa disco."""
+def vencimento_provas(l: dict) -> datetime | None:
+    """Até quando guardar vídeo e fotos de uma devolução. None = mediação aberta; datetime.min = apagar já."""
+    conf = l["conferencia"] or {}
+    if l["status"] == "em_mediacao" or l["em_mediacao"] or l["mediacao"] == "em_andamento":
+        return None
+    if l["mediacao"] == "ganha":
+        return datetime.min
+    if l["mediacao"] in ("perdida", "parcial"):
+        return l["atualizada_em"] + timedelta(days=DIAS_APOS_MEDIACAO)  # sem data do resultado: é a última mudança na plataforma
+    if l["contestada"]:  # contestada sem resultado ainda: só o fim da devolução encerra a contagem
+        return l["atualizada_em"] + timedelta(days=DIAS_APOS_MEDIACAO) if l["etapa"] in FINAIS else None
+    if conf.get("chamado_aberto_em"):
+        return conf["chamado_aberto_em"] + timedelta(days=DIAS_APOS_MEDIACAO)
+    if conf.get("contestar") or conf.get("chamado_manual"):
+        return conf["conferida_em"] + timedelta(days=DIAS_GUARDA)
+    return datetime.min  # sem mediação: a prova não serve a ninguém
+
+
+def varrer_evidencias() -> int:
+    """Roda a cada sincronização. Sem nenhuma prova guardada, nem calcula a situação das devoluções."""
+    with Sessao() as s:
+        com_prova = set(s.scalars(select(Evidencia.devolucao_id)))
+    if not com_prova:
+        return 0
+    from app.central.operacao.servico import linhas  # import tardio: operacao.servico depende do modelo daqui
+    agora = _agora()
+    vencidas = [l["id"] for l in linhas() if l["id"] in com_prova and (v := vencimento_provas(l)) and v <= agora]
+    return sum(limpar_evidencias(i) for i in vencidas)
+
+
+def limpar_evidencias(devolucao_id: int) -> int:
+    """Apaga arquivo e linha."""
     with Sessao.begin() as s:
-        q = select(Evidencia)
-        if devolucao_id is not None:
-            q = q.filter_by(devolucao_id=devolucao_id)
-        if dias is not None:
-            q = q.where(Evidencia.enviada_em < _agora() - timedelta(days=dias))
-        evs = s.scalars(q).all()
+        evs = s.scalars(select(Evidencia).filter_by(devolucao_id=devolucao_id)).all()
         for e in evs:
             (PASTA / str(e.devolucao_id) / e.arquivo).unlink(missing_ok=True)
             s.delete(e)
