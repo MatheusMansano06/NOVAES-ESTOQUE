@@ -57,6 +57,8 @@ ou à Olist não trava as outras requisições.
   (guardado com scrypt). O master pode resetar o PIN de um operador.
 - Sessão em cookie `HttpOnly` assinado (HMAC-SHA256); identidade nunca vem de header.
 - 5 PINs errados por IP em 15 minutos bloqueiam o login.
+- `/api/agentes/*` aceita a chave de serviço `AGENTES_API_KEY` no header `x-chave-agentes`:
+  só leitura (GET), só essas rotas e sem dados do comprador. Sem a variável, a chave não funciona.
 
 Variáveis obrigatórias em produção: `SESSION_SECRET`, `MASTER_PIN`, `OPERADOR_PIN`,
 além das credenciais das integrações (veja `backend/.env.example`). Nunca versione `.env`.

@@ -1364,5 +1364,12 @@
    "POST"
   ],
   "handler"
+ ],
+ [
+  "/api/agentes/envios-pendentes",
+  [
+   "GET"
+  ],
+  "envios_pendentes"
  ]
 ]

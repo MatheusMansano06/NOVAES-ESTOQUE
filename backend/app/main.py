@@ -10,7 +10,7 @@ from starlette.staticfiles import StaticFiles
 from app import seguranca
 from app.central.routes import rotas as rotas_central
 from app.jobs import iniciar_scheduler
-from app.rotas import acesso, compras, embalagens, inbound, mercado_livre, notas_fiscais, olist, shopee
+from app.rotas import acesso, agentes, compras, embalagens, inbound, mercado_livre, notas_fiscais, olist, shopee
 
 routes = [
     *acesso.rotas,
@@ -22,6 +22,7 @@ routes = [
     *embalagens.rotas,
     *compras.rotas,
     *rotas_central,  # /api/central/* — Central de Devoluções
+    *agentes.rotas,  # /api/agentes/* — leitura para os agentes do Escritório
 ]
 
 # Frontend compilado servido como SPA na raiz, depois de todas as rotas /api (a API tem prioridade).

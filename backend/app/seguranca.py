@@ -49,6 +49,15 @@ _PUBLICAS_PREFIXO = (
 )
 
 
+# Chave de serviço do Escritório: só lê, e só /api/agentes/*. Sem a variável, ninguém entra (falha fechada).
+CHAVE_AGENTES = os.getenv("AGENTES_API_KEY", "")
+
+
+def chave_de_agente_valida(metodo: str, caminho: str, chave: str) -> bool:
+    return (metodo == "GET" and caminho.startswith("/api/agentes/") and bool(CHAVE_AGENTES)
+            and hmac.compare_digest(chave.encode(), CHAVE_AGENTES.encode()))
+
+
 def rota_publica(metodo: str, caminho: str) -> bool:
     if metodo == "OPTIONS":
         return True
@@ -229,7 +238,8 @@ class ProtecaoApi:
             if sessao and sessao.get("papel") == "operador" and operador_inativo(sessao.get("id")):
                 sessao = None  # operador excluído perde a sessão na hora
             scope["sessao"] = sessao
-            publica = rota_publica(scope["method"], scope["path"])
+            publica = (rota_publica(scope["method"], scope["path"])
+                       or chave_de_agente_valida(scope["method"], scope["path"], headers.get("x-chave-agentes", "")))
             if sessao is None and not publica:
                 await _responder(send, 401, {"erro": "Sessão expirada ou ausente. Entre novamente."})
                 return
