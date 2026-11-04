@@ -9,7 +9,7 @@ from app.main import app
 
 ROTA = "/api/agentes/envios-pendentes"
 CHAVE = "chave-de-teste-dos-agentes"
-CAMPOS_PERMITIDOS = {"plataforma", "pacote_id", "data_venda", "limite_envio", "logistica"}
+CAMPOS_PERMITIDOS = {"plataforma", "pacote_id", "data_venda", "limite_envio", "logistica", "situacao"}
 
 
 @pytest.fixture
@@ -51,11 +51,11 @@ def test_sem_chave_configurada_ninguem_entra(monkeypatch):
 
 
 # --- Mercado Livre -----------------------------------------------------------------
-def _envio(status="ready_to_ship", logistica="cross_docking", **extra):
-    base = {"status": status, "logistic_type": logistica,
+def _envio(status="ready_to_ship", logistica="cross_docking", substatus="printed", **extra):
+    base = {"status": status, "substatus": substatus, "logistic_type": logistica,
             "date_created": "2026-11-03T08:00:00.000-04:00",
             "status_history": {"date_handling": "2026-11-03T09:00:00.000-04:00"},
-            "shipping_option": {"estimated_handling_limit": {"date": "2026-11-05T22:59:00.000-04:00"}},
+            "lead_time": {"estimated_handling_limit": {"date": "2026-11-05T22:59:00.000-04:00"}},
             "receiver_address": {"receiver_name": "Comprador Secreto", "city": {"name": "Campinas"}}}
     return {**base, **extra}
 
@@ -75,6 +75,24 @@ def test_ml_pacote_em_preparacao_entra():
 def test_ml_pacote_que_nao_esta_esperando_envio_fica_fora(status):
     pacotes, erros = agentes.pacotes_ml(["1"], {"1": _envio(status)})
     assert pacotes == [] and erros == []
+
+
+@pytest.mark.parametrize("substatus", ["picked_up", "authorized_by_carrier", "in_hub", "dropped_off"])
+def test_ml_pacote_que_ja_saiu_do_vendedor_fica_fora(substatus):
+    """O Mercado Livre mantém esses pacotes como ready_to_ship, mas eles já foram entregues à transportadora."""
+    pacotes, erros = agentes.pacotes_ml(["1"], {"1": _envio(substatus=substatus)})
+    assert pacotes == [] and erros == []
+
+
+@pytest.mark.parametrize("substatus", ["printed", "ready_to_print", None])
+def test_ml_pacote_ainda_com_o_vendedor_entra_com_a_situacao(substatus):
+    pacotes, _ = agentes.pacotes_ml(["1"], {"1": _envio(substatus=substatus)})
+    assert [p["situacao"] for p in pacotes] == [substatus or "ready_to_ship"]
+
+
+def test_ml_limite_de_envio_vem_do_prazo_do_envio():
+    pacotes, _ = agentes.pacotes_ml(["1"], {"1": _envio()})
+    assert pacotes[0]["limite_envio"] == "2026-11-05T23:59:00-03:00"
 
 
 def test_ml_full_fica_fora():
@@ -134,6 +152,10 @@ def test_shopee_usa_o_pagamento_em_horario_de_brasilia():
     assert agentes.pacotes_shopee([_pedido()])[0]["data_venda"] == "2026-11-03T11:00:00-03:00"
 
 
+def test_shopee_informa_a_situacao_do_pedido():
+    assert agentes.pacotes_shopee([_pedido(order_status="PROCESSED")])[0]["situacao"] == "PROCESSED"
+
+
 def test_shopee_sem_pagamento_usa_a_criacao():
     assert agentes.pacotes_shopee([_pedido(pay_time=0)])[0]["data_venda"] == "2026-11-03T10:00:00-03:00"
 
@@ -141,14 +163,33 @@ def test_shopee_sem_pagamento_usa_a_criacao():
 # --- Resposta completa --------------------------------------------------------------
 def test_falha_em_uma_plataforma_aparece_e_nao_esconde_a_outra(monkeypatch):
     def quebra():
-        raise RuntimeError("https://api?access_token=SEGREDO")
+        raise RuntimeError("Shopee /api/v2/order/get_order_list: error_param invalid cursor")
 
     pacote = {"plataforma": "mercado_livre", "pacote_id": "1", "data_venda": "2026-11-03T10:00:00-03:00"}
     monkeypatch.setattr(agentes, "_coletar_ml", lambda: ([pacote], []))
     monkeypatch.setattr(agentes, "_coletar_shopee", quebra)
     resultado = agentes.listar_envios_pendentes()
     assert resultado["pacotes"] == [pacote]
-    assert resultado["erros"] == ["shopee: falha na consulta (RuntimeError)"]
+    assert resultado["erros"] == ["shopee: Shopee /api/v2/order/get_order_list: error_param invalid cursor"]
+
+
+def test_erro_nunca_expoe_token(monkeypatch):
+    def quebra():
+        raise RuntimeError("falhou https://api?access_token=SEGREDO&sign=ASSINATURA&shop_id=1")
+
+    monkeypatch.setattr(agentes, "_coletar_ml", lambda: ([], []))
+    monkeypatch.setattr(agentes, "_coletar_shopee", quebra)
+    erro = agentes.listar_envios_pendentes()["erros"][0]
+    assert "SEGREDO" not in erro and "ASSINATURA" not in erro
+
+
+def test_erro_de_outro_tipo_mostra_so_o_tipo(monkeypatch):
+    def quebra():
+        raise ValueError("detalhe interno")
+
+    monkeypatch.setattr(agentes, "_coletar_ml", lambda: ([], []))
+    monkeypatch.setattr(agentes, "_coletar_shopee", quebra)
+    assert agentes.listar_envios_pendentes()["erros"] == ["shopee: falha na consulta (ValueError)"]
 
 
 def test_pacotes_vem_do_mais_antigo_para_o_mais_novo(monkeypatch):

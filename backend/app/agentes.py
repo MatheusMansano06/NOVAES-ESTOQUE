@@ -3,6 +3,7 @@
 Só consulta os marketplaces e devolve o mínimo: nada de nome, endereço ou apelido do comprador.
 Se uma consulta falha, o problema vai em `erros`: um número a menos sem aviso seria pior que erro.
 """
+import re
 import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
@@ -19,6 +20,8 @@ from database import SessionLocal
 BRASILIA = timezone(timedelta(hours=-3))
 
 STATUS_ML_PENDENTE = {"handling", "ready_to_ship"}
+# O Mercado Livre mantém esses como ready_to_ship, mas o pacote já saiu das mãos do vendedor.
+SUBSTATUS_ML_JA_SAIU = {"picked_up", "authorized_by_carrier", "in_hub", "dropped_off"}
 STATUS_SHOPEE_PENDENTE = ("READY_TO_SHIP", "PROCESSED", "RETRY_SHIP")
 DIAS_ML = 7  # cada venda recente vira uma consulta ao vivo do envio
 JANELA_SHOPEE = 15 * 86400  # limite de intervalo por consulta na Shopee
@@ -46,16 +49,18 @@ def pacotes_ml(ids_envio: Iterable[str], envios: Dict[str, Optional[dict]]) -> T
         if not envio:
             erros.append(f"mercado_livre: envio {envio_id} sem resposta")
             continue
-        if envio.get("status") not in STATUS_ML_PENDENTE or envio.get("logistic_type") == "fulfillment":
+        if (envio.get("status") not in STATUS_ML_PENDENTE or envio.get("logistic_type") == "fulfillment"
+                or envio.get("substatus") in SUBSTATUS_ML_JA_SAIU):
             continue
         historico = envio.get("status_history") or {}
-        limite = ((envio.get("shipping_option") or {}).get("estimated_handling_limit") or {}).get("date")
+        limite = ((envio.get("lead_time") or {}).get("estimated_handling_limit") or {}).get("date")
         pacotes.append({
             "plataforma": "mercado_livre",
             "pacote_id": str(envio_id),
             "data_venda": _iso_para_brasilia(historico.get("date_handling") or envio.get("date_created")),
             "limite_envio": _iso_para_brasilia(limite),
             "logistica": envio.get("logistic_type"),
+            "situacao": envio.get("substatus") or envio.get("status"),
         })
     return pacotes, erros
 
@@ -74,6 +79,7 @@ def pacotes_shopee(pedidos: Iterable[dict]) -> List[dict]:
                 "data_venda": _unix_para_brasilia(pedido.get("pay_time") or pedido.get("create_time")),
                 "limite_envio": _unix_para_brasilia(pedido.get("ship_by_date")),
                 "logistica": pedido.get("shipping_carrier"),
+                "situacao": pedido.get("order_status"),
             })
     return pacotes
 
@@ -135,6 +141,13 @@ def _coletar_shopee() -> Tuple[List[dict], List[str]]:
     return pacotes_shopee(detalhes), []
 
 
+def _descrever_falha(erro: Exception) -> str:
+    """RuntimeError é a mensagem da própria plataforma. Outros tipos só pelo nome, porque podem trazer a URL com o token."""
+    if isinstance(erro, RuntimeError):
+        return re.sub(r"(access_token|sign|partner_key)=[^&\s]+", r"\1=***", str(erro))[:300]
+    return f"falha na consulta ({type(erro).__name__})"
+
+
 def listar_envios_pendentes() -> Dict[str, Any]:
     pacotes: List[dict] = []
     erros: List[str] = []
@@ -144,8 +157,8 @@ def listar_envios_pendentes() -> Dict[str, Any]:
             pacotes += novos
             erros += problemas
         except Exception as e:  # uma plataforma fora do ar não pode esconder a outra
-            # Só o tipo do erro: a mensagem pode trazer a URL com o token de acesso.
-            print(f"[agentes] {nome}: {type(e).__name__}")
-            erros.append(f"{nome}: falha na consulta ({type(e).__name__})")
+            descricao = _descrever_falha(e)
+            print(f"[agentes] {nome}: {descricao}")
+            erros.append(f"{nome}: {descricao}")
     pacotes.sort(key=lambda p: p.get("data_venda") or "")
     return {"gerado_em": datetime.now(BRASILIA).isoformat(timespec="seconds"), "pacotes": pacotes, "erros": erros}
