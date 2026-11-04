@@ -22,7 +22,7 @@ BRASILIA = timezone(timedelta(hours=-3))
 STATUS_ML_PENDENTE = {"handling", "ready_to_ship"}
 # O Mercado Livre mantém esses como ready_to_ship, mas o pacote já saiu das mãos do vendedor.
 SUBSTATUS_ML_JA_SAIU = {"picked_up", "authorized_by_carrier", "in_hub", "dropped_off"}
-STATUS_SHOPEE_PENDENTE = ("READY_TO_SHIP", "PROCESSED", "RETRY_SHIP")
+STATUS_SHOPEE_PENDENTE = ("READY_TO_SHIP", "PROCESSED")  # a lista recusa RETRY_SHIP como filtro
 DIAS_ML = 7  # cada venda recente vira uma consulta ao vivo do envio
 JANELA_SHOPEE = 15 * 86400  # limite de intervalo por consulta na Shopee
 ENVIOS_EM_PARALELO = 8
@@ -115,6 +115,11 @@ def _coletar_ml() -> Tuple[List[dict], List[str]]:
     ids = [envio_id for (envio_id,) in linhas]
     with ThreadPoolExecutor(max_workers=ENVIOS_EM_PARALELO) as grupo:
         envios = dict(grupo.map(lambda envio_id: _buscar_envio_ml(envio_id, token), ids))
+        # O prazo de despacho fica em outro recurso; só os pendentes precisam dele.
+        pendentes = [i for i, envio in envios.items() if envio and envio.get("status") in STATUS_ML_PENDENTE]
+        prazos = grupo.map(lambda envio_id: ml._get_raw(f"/shipments/{envio_id}/lead_time", None, token), pendentes)
+        for envio_id, prazo in zip(pendentes, prazos):
+            envios[envio_id]["lead_time"] = prazo
     pacotes, problemas = pacotes_ml(ids, envios)
     return pacotes, erros + problemas
 

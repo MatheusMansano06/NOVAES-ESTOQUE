@@ -1,11 +1,13 @@
 """A porta dos agentes só lê, abre com a chave certa e nunca entrega dados do comprador."""
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import pytest
 from starlette.testclient import TestClient
 
 from app import agentes, seguranca
 from app.main import app
+from app.models import MercadoLivreVendaCache
+from database import SessionLocal
 
 ROTA = "/api/agentes/envios-pendentes"
 CHAVE = "chave-de-teste-dos-agentes"
@@ -158,6 +160,51 @@ def test_shopee_informa_a_situacao_do_pedido():
 
 def test_shopee_sem_pagamento_usa_a_criacao():
     assert agentes.pacotes_shopee([_pedido(pay_time=0)])[0]["data_venda"] == "2026-11-03T10:00:00-03:00"
+
+
+def test_shopee_so_filtra_por_status_que_a_lista_aceita(monkeypatch):
+    """A consulta real recusou RETRY_SHIP como filtro e derrubou a leitura inteira da Shopee."""
+    pedidos = []
+    monkeypatch.setattr(agentes.shopee_client, "get",
+                        lambda caminho, params: pedidos.append(params["order_status"]) or {"order_list": [], "more": False})
+    agentes._coletar_shopee()
+    assert pedidos == ["READY_TO_SHIP", "PROCESSED"]
+
+
+# --- Coleta do Mercado Livre -----------------------------------------------------------
+@pytest.fixture
+def venda_paga():
+    db = SessionLocal()
+    venda = MercadoLivreVendaCache(order_id="ordem-teste-agentes", item_id="item", status="paid", shipment_id="envio-teste",
+                                   date_created=datetime.utcnow() - timedelta(hours=2))
+    db.add(venda)
+    db.commit()
+    yield
+    db.delete(venda)
+    db.commit()
+    db.close()
+
+
+def test_ml_busca_o_prazo_do_pacote_pendente(monkeypatch, venda_paga):
+    respostas = {
+        "/shipments/envio-teste": _envio(lead_time=None),
+        "/shipments/envio-teste/lead_time": {"estimated_handling_limit": {"date": "2026-11-06T22:59:00.000-04:00"}},
+    }
+    monkeypatch.setattr(agentes.ml, "sync_vendas", lambda incremental: {})
+    monkeypatch.setattr(agentes.ml, "get_access_token", lambda: "token")
+    monkeypatch.setattr(agentes.ml, "_get_raw", lambda caminho, params, token: respostas.get(caminho))
+    pacotes, erros = agentes._coletar_ml()
+    assert erros == []
+    assert [p["limite_envio"] for p in pacotes if p["pacote_id"] == "envio-teste"] == ["2026-11-06T23:59:00-03:00"]
+
+
+def test_ml_sem_prazo_ainda_conta_o_pacote(monkeypatch, venda_paga):
+    respostas = {"/shipments/envio-teste": _envio(lead_time=None)}
+    monkeypatch.setattr(agentes.ml, "sync_vendas", lambda incremental: {})
+    monkeypatch.setattr(agentes.ml, "get_access_token", lambda: "token")
+    monkeypatch.setattr(agentes.ml, "_get_raw", lambda caminho, params, token: respostas.get(caminho))
+    pacotes, _ = agentes._coletar_ml()
+    assert [p["limite_envio"] for p in pacotes if p["pacote_id"] == "envio-teste"] == [None]
 
 
 # --- Resposta completa --------------------------------------------------------------
