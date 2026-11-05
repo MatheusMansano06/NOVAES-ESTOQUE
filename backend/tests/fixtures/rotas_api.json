@@ -1371,5 +1371,12 @@
    "GET"
   ],
   "envios_pendentes"
+ ],
+ [
+  "/api/agentes/anuncios-sem-promocao",
+  [
+   "GET"
+  ],
+  "anuncios_sem_promocao"
  ]
 ]

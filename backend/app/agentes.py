@@ -13,7 +13,7 @@ from sqlalchemy import or_
 
 from app.central.shopee import client as shopee_client
 from app.integracoes.mercado_livre import ml
-from app.models import MercadoLivreVendaCache
+from app.models import MercadoLivreItemCache, MercadoLivreVendaCache
 from database import SessionLocal
 
 # ponytail: fuso fixo, o Brasil não tem horário de verão desde 2019; se voltar, usar ZoneInfo.
@@ -167,3 +167,59 @@ def listar_envios_pendentes() -> Dict[str, Any]:
             erros.append(f"{nome}: {descricao}")
     pacotes.sort(key=lambda p: p.get("data_venda") or "")
     return {"gerado_em": datetime.now(BRASILIA).isoformat(timespec="seconds"), "pacotes": pacotes, "erros": erros}
+
+
+# --- Anúncios sem promoção ------------------------------------------------------------
+TIPOS_QUE_NAO_SAO_PROMOCAO = {"PRICE_DISCOUNT"}  # o desconto próprio do vendedor não conta como promoção
+STATUS_PROMOCAO_VALIDA = {"started", "pending"}  # candidate é só elegível; finished já acabou
+
+
+def _tem_promocao(resposta: Any) -> bool:
+    promocoes = resposta if isinstance(resposta, list) else (resposta or {}).get("results") or []
+    return any(
+        isinstance(p, dict)
+        and str(p.get("status") or "").lower() in STATUS_PROMOCAO_VALIDA
+        and str(p.get("type") or "").upper() not in TIPOS_QUE_NAO_SAO_PROMOCAO
+        for p in promocoes
+    )
+
+
+def anuncios_sem_promocao(itens: Iterable[Tuple[str, Optional[str]]], respostas: Dict[str, Any]) -> Tuple[List[dict], List[str]]:
+    """Só o SKU e o MLB de quem está sem promoção. Sem resposta não é o mesmo que sem promoção: vira aviso."""
+    anuncios: List[dict] = []
+    sem_resposta = 0
+    for mlb, sku in itens:
+        resposta = respostas.get(mlb)
+        if resposta is None:
+            sem_resposta += 1
+        elif not _tem_promocao(resposta):
+            anuncios.append({"sku": sku, "mlb": mlb})
+    anuncios.sort(key=lambda a: (a["sku"] or "", a["mlb"]))
+    return anuncios, [f"mercado_livre: {sem_resposta} anúncio(s) sem resposta"] if sem_resposta else []
+
+
+def _buscar_promocoes_ml(mlb: str, token: str) -> Tuple[str, Any]:
+    for tentativa in range(2):
+        resposta = ml._get_raw(f"/seller-promotions/items/{mlb}", {"app_version": "v2"}, token)
+        if resposta is not None:
+            return mlb, resposta
+        if tentativa == 0:
+            time.sleep(0.4)
+    return mlb, None
+
+
+def listar_anuncios_sem_promocao() -> Dict[str, Any]:
+    agora = datetime.now(BRASILIA).isoformat(timespec="seconds")
+    token = ml.get_access_token()
+    if not token:
+        return {"gerado_em": agora, "total_ativos": 0, "anuncios": [], "erros": ["mercado_livre: sem autorização"]}
+    db = SessionLocal()
+    try:
+        itens = (db.query(MercadoLivreItemCache.item_id, MercadoLivreItemCache.sku)
+                 .filter(MercadoLivreItemCache.status == "active").all())
+    finally:
+        db.close()
+    with ThreadPoolExecutor(max_workers=ENVIOS_EM_PARALELO) as grupo:
+        respostas = dict(grupo.map(lambda item: _buscar_promocoes_ml(item[0], token), itens))
+    anuncios, erros = anuncios_sem_promocao(itens, respostas)
+    return {"gerado_em": agora, "total_ativos": len(itens), "anuncios": anuncios, "erros": erros}

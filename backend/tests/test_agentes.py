@@ -6,6 +6,8 @@ from starlette.testclient import TestClient
 
 from app import agentes, seguranca
 from app.main import app
+from app.models import MercadoLivreItemCache
+from database import SessionLocal
 from app.models import MercadoLivreVendaCache
 from database import SessionLocal
 
@@ -253,3 +255,102 @@ def test_nenhum_dado_do_comprador_sai():
     for pacote in ml + shopee:
         assert set(pacote) == CAMPOS_PERMITIDOS
         assert "Secreto" not in str(pacote) and "secreto" not in str(pacote)
+
+
+# --- Anúncios sem promoção (Rafael) ---------------------------------------------------
+ROTA_PROMOCOES = "/api/agentes/anuncios-sem-promocao"
+
+
+def _promo(tipo="DEAL", status="started"):
+    return {"id": "P1", "type": tipo, "status": status}
+
+
+def _sem_promocao(promocoes):
+    anuncios, erros = agentes.anuncios_sem_promocao([("MLB1", "SKU-1")], {"MLB1": promocoes})
+    return anuncios, erros
+
+
+def test_anuncio_sem_nenhuma_promocao_entra_na_lista():
+    assert _sem_promocao([]) == ([{"sku": "SKU-1", "mlb": "MLB1"}], [])
+
+
+def test_anuncio_so_com_desconto_proprio_entra_na_lista():
+    assert _sem_promocao([_promo("PRICE_DISCOUNT")])[0] == [{"sku": "SKU-1", "mlb": "MLB1"}]
+
+
+def test_anuncio_com_desconto_e_campanha_nao_entra():
+    assert _sem_promocao([_promo("PRICE_DISCOUNT"), _promo("DEAL")])[0] == []
+
+
+@pytest.mark.parametrize("tipo", ["DEAL", "SMART", "MARKETPLACE_CAMPAIGN", "SELLER_CAMPAIGN", "LIGHTNING", "DOD"])
+def test_campanha_ativa_conta_como_promocao(tipo):
+    assert _sem_promocao([_promo(tipo)])[0] == []
+
+
+def test_campanha_agendada_conta_como_promocao():
+    assert _sem_promocao([_promo(status="pending")])[0] == []
+
+
+@pytest.mark.parametrize("status", ["candidate", "finished"])
+def test_campanha_so_elegivel_ou_encerrada_nao_conta(status):
+    assert len(_sem_promocao([_promo(status=status)])[0]) == 1
+
+
+def test_resposta_no_formato_results_tambem_vale():
+    assert _sem_promocao({"results": [_promo()]})[0] == []
+
+
+def test_anuncio_que_nao_respondeu_vira_aviso_e_nao_entra_na_lista():
+    anuncios, erros = _sem_promocao(None)
+    assert anuncios == []
+    assert erros == ["mercado_livre: 1 anúncio(s) sem resposta"]
+
+
+def test_lista_vem_ordenada_por_sku():
+    itens = [("MLB2", "B"), ("MLB1", "A"), ("MLB3", None)]
+    anuncios, _ = agentes.anuncios_sem_promocao(itens, {"MLB1": [], "MLB2": [], "MLB3": []})
+    assert [a["mlb"] for a in anuncios] == ["MLB3", "MLB1", "MLB2"]
+
+
+@pytest.fixture
+def anuncios_no_cache():
+    db = SessionLocal()
+    linhas = [MercadoLivreItemCache(item_id="MLBAGENTE1", status="active", sku="ATIVO"),
+              MercadoLivreItemCache(item_id="MLBAGENTE2", status="paused", sku="PAUSADO")]
+    db.add_all(linhas)
+    db.commit()
+    yield
+    for linha in linhas:
+        db.delete(linha)
+    db.commit()
+    db.close()
+
+
+def test_so_consulta_anuncios_ativos(monkeypatch, anuncios_no_cache):
+    consultados = []
+
+    def responde(caminho, params, token):
+        consultados.append(caminho)
+        return []
+
+    monkeypatch.setattr(agentes.ml, "get_access_token", lambda: "token")
+    monkeypatch.setattr(agentes.ml, "_get_raw", responde)
+    resultado = agentes.listar_anuncios_sem_promocao()
+    assert "/seller-promotions/items/MLBAGENTE1" in consultados
+    assert "/seller-promotions/items/MLBAGENTE2" not in consultados
+    assert {"sku": "ATIVO", "mlb": "MLBAGENTE1"} in resultado["anuncios"]
+    assert resultado["total_ativos"] >= 1
+
+
+def test_sem_autorizacao_avisa_em_vez_de_dizer_que_esta_tudo_certo(monkeypatch):
+    monkeypatch.setattr(agentes.ml, "get_access_token", lambda: None)
+    resultado = agentes.listar_anuncios_sem_promocao()
+    assert resultado["anuncios"] == []
+    assert resultado["erros"] == ["mercado_livre: sem autorização"]
+
+
+def test_chave_de_agente_le_a_lista_de_promocoes(monkeypatch):
+    monkeypatch.setattr(seguranca, "CHAVE_AGENTES", CHAVE)
+    monkeypatch.setattr(agentes, "listar_anuncios_sem_promocao", lambda: {"anuncios": [], "erros": []})
+    assert _get(ROTA_PROMOCOES).status_code == 401
+    assert _get(ROTA_PROMOCOES, CHAVE).json() == {"anuncios": [], "erros": []}
