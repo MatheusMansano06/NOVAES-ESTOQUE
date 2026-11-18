@@ -174,6 +174,15 @@ async def reserva_inbound_produto(request: Request):
 
 # ==================== ENDPOINTS INBOUND / LISTA DE SEPARAÇÃO ====================
 
+def _tem_progresso(embale) -> bool:
+    """Algum item já foi separado, baixado, balanceado, posto em espera ou excluído."""
+    return any(
+        i.baixa_aplicada == 1 or i.foi_balanceado == 1 or i.em_espera == 1
+        or i.nao_enviar == 1 or (i.quantidade_baixada or 0) > 0
+        for i in embale.itens
+    )
+
+
 async def upload_embale(request: Request):
     """
     POST /api/embaldes/upload
@@ -233,6 +242,14 @@ async def upload_embale(request: Request):
             existente = db.query(EmbaleFU).filter(
                 EmbaleFU.numero_inbound == numero_inbound
             ).first()
+            # ...mas nunca um inbound com trabalho feito: o reenvio apagava baixas,
+            # balanços e itens em espera sem aviso (frete #82413159, 18/11/2026).
+            if existente and _tem_progresso(existente):
+                return JSONResponse({
+                    "erro": f"O inbound #{numero_inbound} ({existente.nome_embalde or 'sem nome'}) já tem "
+                            "separação, baixa ou item em espera. Reenviar o PDF apagaria esse trabalho, "
+                            "então o upload foi recusado."
+                }, status_code=409)
             if existente:
                 substituiu_id = existente.id
                 db.delete(existente)  # cascade remove os itens antigos
