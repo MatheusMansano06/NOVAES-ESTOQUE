@@ -47,9 +47,9 @@ def extrair_items_embale_pdf(caminho_pdf: str) -> dict:
                     if m:
                         numero_inbound = m.group(1)
 
-                m_total = re.search(r'Total de unidades:\s*(\d+)', texto)
+                m_total = re.search(r'Total de unidades:\s*(\d[\d.,]*)', texto)
                 if m_total:
-                    total_unidades = int(m_total.group(1))
+                    total_unidades = _inteiro(m_total.group(1))
 
                 for tabela in page.extract_tables():
                     items_tabela = _parsear_tabela_produtos(tabela)
@@ -72,6 +72,11 @@ def extrair_items_embale_pdf(caminho_pdf: str) -> dict:
             "erro": True,
             "mensagem": f"Erro ao processar PDF: {str(e)}"
         }
+
+
+def _inteiro(texto: str) -> int:
+    """Unidade é sempre inteira: o ML escreve 1200 como "1,200" ou "1.200"."""
+    return int(re.sub(r'[.,]', '', texto))
 
 
 def _eh_pdf_shopee(texto_inicial: str) -> bool:
@@ -356,15 +361,16 @@ def _parsear_tabela_produtos(tabela: List[list]) -> List[dict]:
         codigo_ml = ml_m.group(1).strip() if ml_m else None
 
         # Quantidade (primeiro numero da coluna UNIDADES)
-        uni_m = re.search(r'\d+', celula_unidades)
-        quantidade = float(uni_m.group(0)) if uni_m else 0
+        uni_m = re.search(r'\d[\d.,]*', celula_unidades)
+        quantidade = float(_inteiro(uni_m.group(0))) if uni_m else 0
 
-        # Titulo: linhas que NAO sao de codigo/SKU
+        # Titulo: linhas que NAO sao de codigo/SKU. O SKU pode vir sozinho
+        # na linha de baixo ("SKU:\nRVEOX") e não pode virar parte do título.
         linhas = celula_produto.split("\n")
         titulo_linhas = []
         for linha in linhas:
             ls = linha.strip()
-            if not ls:
+            if not ls or ls == sku:
                 continue
             if "SKU:" in ls or "Código" in ls or "Codigo" in ls:
                 continue
