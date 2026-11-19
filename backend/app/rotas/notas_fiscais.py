@@ -555,13 +555,15 @@ async def conferencia_ncm(request: Request):
 
 async def get_estoque_virtual(request: Request):
     """Get consolidated virtual inventory - sum of all products"""
-    from sqlalchemy.orm import joinedload
     db = SessionLocal()
     try:
-        # ⚡ PERFORMANCE: Usar joinedload para evitar N+1 queries
-        items = db.query(ItemEstoque).options(
-            joinedload(ItemEstoque.nota_fiscal)
-        ).all()
+        # Só as colunas usadas: carregar a NotaFiscal inteira trazia o xml_processado
+        # repetido por item (~125 MB de pico por chamada, que o Python não devolve).
+        items = db.query(
+            ItemEstoque.id, ItemEstoque.descricao, ItemEstoque.codigo_produto,
+            ItemEstoque.quantidade_nf, ItemEstoque.quantidade_confirmada, ItemEstoque.preco_unitario,
+            NotaFiscal.numero_nf, NotaFiscal.serie, NotaFiscal.fornecedor,
+        ).outerjoin(NotaFiscal, ItemEstoque.nf_id == NotaFiscal.id).order_by(ItemEstoque.id).all()
 
         # Consolidate by description
         estoque_consolidado = {}
@@ -582,11 +584,10 @@ async def get_estoque_virtual(request: Request):
             if item.quantidade_confirmada:
                 estoque_consolidado[desc]["quantidade_confirmada"] += item.quantidade_confirmada
 
-            nf = item.nota_fiscal
             estoque_consolidado[desc]["notas_fiscais"].append({
-                "numero_nf": nf.numero_nf,
-                "serie": nf.serie,
-                "fornecedor": nf.fornecedor,
+                "numero_nf": item.numero_nf,
+                "serie": item.serie,
+                "fornecedor": item.fornecedor,
                 "quantidade": item.quantidade_nf
             })
 
