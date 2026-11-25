@@ -71,5 +71,13 @@ def aceitar(claim_id: str) -> dict:
     if not acoes_vendedor(claim_id) & REVISAO_OK:
         raise RuntimeError("O ML não libera o aceite desta reclamação agora: aceite pelo painel.")
     devolucao = client.get(f"/post-purchase/v2/claims/{claim_id}/returns")
-    client.post(f"/post-purchase/v1/returns/{devolucao['id']}/return-review", json={})
+    caminho = f"/post-purchase/v1/returns/{devolucao['id']}/return-review"
+    try:
+        client.post(caminho, json={})  # o que a doc manda
+    except RuntimeError as e:
+        # Em 25/11/2026 o ML passou a recusar o {} ("Required request body is missing or incorrect"):
+        # o endpoint unificado quer lista, como na revisão com falha. 400 não grava nada, então repetir é seguro.
+        if "HTTP 400" not in str(e) or "request body" not in str(e):
+            raise
+        client.post(caminho, json=[])
     return {"caminho": "aceite", "anexos": []}
