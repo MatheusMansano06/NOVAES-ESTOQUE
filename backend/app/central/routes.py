@@ -227,6 +227,19 @@ async def mediacoes_contestar(request: Request):
     return await run_in_threadpool(mediacoes.contestar, _id(request), motivo, texto)
 
 
+async def mediacoes_situacao(request: Request):
+    """ML: situação da reclamação e os botões que o ML libera agora (lidos na hora)."""
+    return await run_in_threadpool(mediacoes.situacao, _id(request))
+
+
+async def mediacoes_acao(request: Request):
+    dados = await _corpo(request)
+    acao, motivo, texto = dados.get("acao"), dados.get("motivo") or "", dados.get("texto") or ""
+    if not all(isinstance(x, str) for x in (acao, motivo, texto)) or not acao or len(texto) > 2000:
+        raise ValueError("acao obrigatória; motivo e texto como texto (até 2000 letras)")
+    return await run_in_threadpool(mediacoes.executar, _id(request), acao, motivo, texto)
+
+
 async def mediacoes_pendentes_revisao(request: Request):
     return await run_in_threadpool(mediacoes.pendentes_revisao, _q(request, "ao_vivo", False, bool),
                                    _q(request, "dias", 30, int, 1, 120))
@@ -472,6 +485,8 @@ rotas = [
     _rota("/shopee/disputa/{return_sn}", shopee_campos_disputa),
     _rota("/mediacoes/{id:int}/contestar", mediacoes_contestar, "POST"),
     _rota("/mediacoes/{id:int}/aceitar", mediacoes_aceitar, "POST"),
+    _rota("/mediacoes/{id:int}/situacao", mediacoes_situacao),
+    _rota("/mediacoes/{id:int}/acao", mediacoes_acao, "POST"),
     _rota("/mediacoes/pendentes-revisao", mediacoes_pendentes_revisao),
     _rota("/mediacoes/{id:int}", mediacoes_historico),
     _rota("/mercado-livre/sincronizar", ml_sincronizar, "POST"),

@@ -13,8 +13,12 @@ class Contestacao(Base):
     motivo = Column(String(20), nullable=False)
     texto = Column(Text, nullable=False)
     ok = Column(Boolean, nullable=False)
-    caminho = Column(String(30))  # revisao_com_falha | mediacao | disputa
+    caminho = Column(String(30))  # aceite | reembolso | revisao_com_falha | mediacao | disputa | mensagem_* (não decide nada)
     anexos = Column(JSON, nullable=False)
     aviso = Column(Text)
     erro = Column(Text)
     enviada_em = Column(DateTime, nullable=False)
+
+
+# Mensagem ao comprador/mediador não decide a devolução: não conta como "contestada" nem trava nada.
+DECISIVA = Contestacao.caminho.is_(None) | Contestacao.caminho.notlike("mensagem%")

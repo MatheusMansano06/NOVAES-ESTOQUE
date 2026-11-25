@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { api } from "../../shared/api";
 import { PLATAFORMA } from "../../shared/devolucao";
 import { prazoRestante, quando, reais } from "../../shared/formato";
+import { PainelML } from "./PainelML";
 import { CLASSE, DEPOSITO, type Contestacao, type Tela } from "./tipos";
 
 interface Props {
@@ -21,6 +22,12 @@ export function Veredito({ tela, onAtualizar, onIrParaProvas, parte }: Props) {
   const temFoto = evidencias.some((e) => e.tipo === "foto");
   const prejuizo = (c.frete_reverso ?? 0) + (c.perda_produto ?? 0);
   const pendente = d.plataforma === "shopee" ? SHOPEE_PENDENTE.includes(d.status_plataforma) : !!d.aguarda_revisao;
+  // Shopee (e ML sem reclamação): aceitar ou contestar como antes. ML com reclamação: painel igual ao do ML.
+  const fluxoAntigo = c.chamado_manual
+    ? <ChamadoManual devolucaoId={d.id} abertoEm={c.chamado_aberto_em} protocolo={c.chamado_protocolo} onFeito={onAtualizar} />
+    : c.contestar
+      ? <Contestar devolucaoId={d.id} textoInicial={c.observacao ?? ""} temFoto={temFoto} podeAceitar={pendente} onMudou={onAtualizar} />
+      : <AceitarSozinho devolucaoId={d.id} plataforma={d.plataforma} pendente={pendente} onMudou={onAtualizar} />;
 
   return (
     <div className={`veredito classe-${c.classe}`}>
@@ -69,11 +76,10 @@ export function Veredito({ tela, onAtualizar, onIrParaProvas, parte }: Props) {
           {(c.contestar || c.chamado_manual) && !temFoto && (
             <button type="button" className="botao" onClick={onIrParaProvas}>Anexar fotos antes</button>
           )}
-          {c.chamado_manual
-            ? <ChamadoManual devolucaoId={d.id} abertoEm={c.chamado_aberto_em} protocolo={c.chamado_protocolo} onFeito={onAtualizar} />
-            : c.contestar
-              ? <Contestar devolucaoId={d.id} textoInicial={c.observacao ?? ""} temFoto={temFoto} podeAceitar={pendente} onMudou={onAtualizar} />
-              : <AceitarSozinho devolucaoId={d.id} plataforma={d.plataforma} pendente={pendente} onMudou={onAtualizar} />}
+          {d.plataforma === "mercado_livre" ? <>
+            {c.chamado_manual && <ChamadoManual devolucaoId={d.id} abertoEm={c.chamado_aberto_em} protocolo={c.chamado_protocolo} onFeito={onAtualizar} />}
+            <PainelML devolucaoId={d.id} temFoto={temFoto} onIrParaProvas={onIrParaProvas} onMudou={onAtualizar} semPainel={fluxoAntigo} />
+          </> : fluxoAntigo}
         </section>}
       </div>
     </div>

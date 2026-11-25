@@ -578,3 +578,14 @@
 .central-dev .sinc-barra { position: absolute; left: 0; right: 0; bottom: -1px; height: 4px; background: rgba(42, 120, 214, 0.12); }
 .central-dev .sinc-barra span { display: block; height: 100%; background: #2a78d6; transition: width 0.6s ease; }
 .central-dev .link-botao { background: none; border: 0; padding: 0; color: #2a78d6; font: inherit; text-decoration: underline; cursor: pointer; }
+
+/* ---------- Painel do ML: situação da reclamação + botões liberados agora ---------- */
+.central-dev .painel-ml { display: grid; gap: 0.6rem; }
+.central-dev .painel-ml-situacao { display: inline-block; justify-self: start; padding: 0.3rem 0.7rem; border-radius: var(--raio);
+  border: 1px solid var(--azul); background: var(--azul-fundo); color: var(--tinta); }
+.central-dev .painel-ml-situacao.situacao-revisar, .central-dev .painel-ml-situacao.situacao-so_reportar { border-color: var(--vermelho); }
+.central-dev .painel-ml-situacao.situacao-encerrada { border-color: var(--linha-forte); background: var(--suave); }
+.central-dev .painel-ml .botao.ativo { outline: 2px solid var(--azul); outline-offset: 1px; }
+.central-dev .painel-ml-historico summary { cursor: pointer; color: var(--fraco); }
+.central-dev .painel-ml-historico li.falhou { color: var(--vermelho); }
+.central-dev .painel-ml-historico li small { display: block; color: var(--fraco); }

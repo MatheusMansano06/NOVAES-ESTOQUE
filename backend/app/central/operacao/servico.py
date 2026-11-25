@@ -7,7 +7,7 @@ from sqlalchemy import select
 from app.central.conferencia.modelo import Conferencia, Evidencia
 from app.central.devolucoes.modelo import Devolucao
 from app.central.devolucoes.servico import publico
-from app.central.mediacoes.modelo import Contestacao
+from app.central.mediacoes.modelo import DECISIVA, Contestacao
 from app.central.mercado_livre import catalogo
 from app.central.olist import servico as olist
 from app.central.db import Sessao
@@ -26,8 +26,8 @@ def linhas(desde: datetime | None = None) -> list[dict]:
             q = q.where(Devolucao.atualizada_em >= desde)
         devs = s.scalars(q).all()
         confs = {c.devolucao_id: {k: getattr(c, k) for k in COLUNAS_CONF} for c in s.scalars(select(Conferencia))}
-        contestadas = set(s.scalars(select(Contestacao.devolucao_id).where(Contestacao.ok.is_(True))))
-        aceitas = set(s.scalars(select(Contestacao.devolucao_id).where(Contestacao.ok.is_(True), Contestacao.caminho == "aceite")))
+        contestadas = set(s.scalars(select(Contestacao.devolucao_id).where(Contestacao.ok.is_(True), DECISIVA)))
+        aceitas = set(s.scalars(select(Contestacao.devolucao_id).where(Contestacao.ok.is_(True), Contestacao.caminho.in_(("aceite", "reembolso")))))
         linhas = []
         for d in devs:
             dev, conf = publico(d), confs.get(d.id)

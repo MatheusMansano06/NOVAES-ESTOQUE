@@ -1170,6 +1170,20 @@
   "handler"
  ],
  [
+  "/api/central/mediacoes/{id:int}/situacao",
+  [
+   "GET"
+  ],
+  "handler"
+ ],
+ [
+  "/api/central/mediacoes/{id:int}/acao",
+  [
+   "POST"
+  ],
+  "handler"
+ ],
+ [
   "/api/central/mediacoes/pendentes-revisao",
   [
    "GET"

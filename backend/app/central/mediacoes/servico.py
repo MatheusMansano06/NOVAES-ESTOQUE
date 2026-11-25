@@ -13,7 +13,7 @@ from app.central.mercado_livre import acoes as mercado_livre
 from app.central.shopee import acoes as shopee
 from app.central.db import Sessao
 
-from .modelo import Contestacao
+from .modelo import DECISIVA, Contestacao
 
 PLATAFORMAS = {"mercado_livre": mercado_livre, "shopee": shopee}
 
@@ -103,6 +103,51 @@ def aceitar(devolucao_id: int) -> dict:
     return resposta
 
 
+def situacao(devolucao_id: int) -> dict | None:
+    """Painel do ML: situação da reclamação e os botões liberados agora. Shopee segue o fluxo antigo (None)."""
+    with Sessao() as s:
+        d = _devolucao(s, devolucao_id)
+        plataforma, id_externo = d.plataforma, d.id_externo
+    if plataforma != "mercado_livre" or id_externo.startswith("envio-"):
+        return None
+    return mercado_livre.situacao(id_externo)
+
+
+def executar(devolucao_id: int, acao: str, motivo: str, texto: str) -> dict:
+    """Um botão do painel do ML. Quem decide o que está liberado é o ML, lido na hora; aqui só se exige o que
+    a ação pede (motivo oficial, texto, foto) e se guarda o histórico, inclusive o que não passou."""
+    nome, pede = mercado_livre.ACOES.get(acao, (acao, []))
+    with Sessao() as s:
+        d = _devolucao(s, devolucao_id)
+        if d.plataforma != "mercado_livre":
+            raise ValueError("Painel de ações só existe para o Mercado Livre.")
+        id_externo = d.id_externo
+        fotos = [PASTA / str(d.id) / e.arquivo
+                 for e in s.scalars(select(Evidencia).filter_by(devolucao_id=d.id, tipo="foto"))] if "fotos" in pede else []
+    if "texto" in pede and not 10 <= len(texto.strip()) <= 2000:
+        raise ValueError("Escreva o que aconteceu (de 10 a 2000 letras): vai para o Mercado Livre.")
+    if "fotos" in pede and not fotos:
+        raise ValueError("Anexe ao menos uma foto do produto e da embalagem antes.")
+    if "motivo" in pede:
+        oficiais = {str(m["id"]) for m in mercado_livre.motivos_contestacao(id_externo, False)}
+        if str(motivo) not in oficiais:
+            raise ValueError("Escolha um dos motivos oficiais do Mercado Livre.")
+
+    registro = Contestacao(devolucao_id=devolucao_id, motivo=(motivo or acao)[:20], texto=texto or nome, anexos=[], enviada_em=_agora())
+    try:
+        r = mercado_livre.executar(id_externo, acao, str(motivo), texto, fotos)
+        registro.ok, registro.caminho, registro.anexos, registro.aviso = True, r["caminho"], r["anexos"], r.get("aviso")
+    except RuntimeError as e:
+        registro.ok, registro.erro = False, str(e)
+    with Sessao.begin() as s:
+        s.add(registro)
+        s.flush()
+        resposta = {c.name: getattr(registro, c.name) for c in Contestacao.__table__.columns}
+    if resposta["ok"] and resposta["caminho"] in ("aceite", "reembolso"):
+        limpar_evidencias(devolucao_id)  # comprador reembolsado: não há mais disputa, a foto não serve a ninguém
+    return resposta
+
+
 def historico(devolucao_id: int) -> list[dict]:
     with Sessao() as s:
         return [{c.name: getattr(x, c.name) for c in Contestacao.__table__.columns}
@@ -114,7 +159,7 @@ def pendentes_revisao(ao_vivo: bool = False, dias: int = 30) -> list[dict]:
     `ao_vivo`: pergunta ao ML reclamação por reclamação, em vez de confiar na última sincronização."""
     desde = _agora() - timedelta(days=dias)
     with Sessao() as s:
-        feitas = set(s.scalars(select(Contestacao.devolucao_id).filter_by(ok=True)))
+        feitas = set(s.scalars(select(Contestacao.devolucao_id).where(Contestacao.ok.is_(True), DECISIVA)))
         linhas = s.execute(select(Devolucao, Conferencia).join(Conferencia, Conferencia.devolucao_id == Devolucao.id)
                            .where(Devolucao.plataforma == "mercado_livre", Conferencia.conferida_em >= desde)).all()
         candidatos = [{"id": d.id, "id_externo": d.id_externo, "pedido": d.pedido, "classe": c.classe,
