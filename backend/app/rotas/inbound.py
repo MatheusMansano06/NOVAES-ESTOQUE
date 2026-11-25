@@ -798,7 +798,7 @@ async def revisar_baixa_embale(request: Request):
             # ponytail: no máximo 10 por abertura, para não deixar a revisão lenta.
             sem_saldo = [i for i in itens if i.olist_produto_id and i.olist_estoque_antes is None and i.baixa_aplicada != 1][:10]
             for i in sem_saldo:
-                saldo = (olist.obter_estoque(str(i.olist_produto_id)) or {}).get("disponivel")
+                saldo = (olist.obter_estoque(str(i.olist_produto_id)) or {}).get("saldo")
                 if saldo is not None:
                     i.olist_estoque_antes = float(saldo)
                     db.add(i)
@@ -859,7 +859,7 @@ async def revisar_baixa_embale(request: Request):
         if ids_para_estoque:
             with concurrent.futures.ThreadPoolExecutor(max_workers=4) as ex:
                 for produto_id, dados in ex.map(_get_estoque, ids_para_estoque):
-                    estoques[produto_id] = (dados or {}).get("disponivel") if dados else None
+                    estoques[produto_id] = (dados or {}).get("saldo") if dados else None
 
         # 3) Montar revisão
         revisao = []
@@ -1040,7 +1040,7 @@ def _aplicar_baixa_item(db, item, embale, qtd_override=None):
     if sucesso:
         if item.olist_estoque_antes is None:
             estoque_antes = olist.obter_estoque(produto_id)
-            item.olist_estoque_antes = float((estoque_antes or {}).get("disponivel") or 0)
+            item.olist_estoque_antes = float((estoque_antes or {}).get("saldo") or 0)
         item.quantidade_baixar = float(qtd_baixar)
         item.quantidade_baixada = qtd_baixar
         item.baixa_aplicada = 1
@@ -1684,7 +1684,7 @@ async def saldo_item_embale(request: Request):
         if not item:
             return JSONResponse({"erro": "Item não encontrado neste inbound"}, status_code=404)
         if item.olist_produto_id and item.baixa_aplicada != 1:
-            saldo = (olist.obter_estoque(str(item.olist_produto_id), usar_cache=False) or {}).get("disponivel")
+            saldo = (olist.obter_estoque(str(item.olist_produto_id), usar_cache=False) or {}).get("saldo")
             if saldo is not None:
                 item.olist_estoque_antes = float(saldo)
                 item.falta = max(0.0, _quantidade_planejada_full(item) - float(saldo))
@@ -2160,7 +2160,7 @@ async def desfazer_item_embale(request: Request):
         item.saldo_disponivel = None
         item.falta = None
         if produto_id:
-            saldo = (olist.obter_estoque(str(produto_id), usar_cache=False) or {}).get("disponivel")
+            saldo = (olist.obter_estoque(str(produto_id), usar_cache=False) or {}).get("saldo")
             item.olist_estoque_antes = float(saldo) if saldo is not None else item.olist_estoque_antes
         if item.em_espera == 1:
             item.em_espera = 0
