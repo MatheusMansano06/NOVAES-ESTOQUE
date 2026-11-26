@@ -195,3 +195,49 @@ def test_401_do_ml_nao_forca_renovacao_do_token(monkeypatch):
     with pytest.raises(RuntimeError, match="HTTP 401"):
         client.get("/post-purchase/v1/claims/1")
     assert all(inv is None for inv in renovacoes), "nenhuma chamada pode pedir renovação forçada"
+
+
+def test_mediacao_perdida_de_produto_quebrado_pede_chamado_com_protocolo():
+    import io
+    from app.central.bi.servico import _recuperado
+    from app.central.conferencia import servico as conferencia
+    from app.central.devolucoes.modelo import Devolucao
+    from app.central.db import Sessao
+    from app.central.operacao.servico import linhas
+    devolucoes.salvar([_registro(id_externo="P1", pedido="3000001", rastreio=None, codigos=["P1"], resultado_mediacao="perdida",
+                                 etapa="encerrada", bruto={"claim": {"resolution": {"date_created": "2026-09-25T10:00:00.000-04:00"}}}),
+                       _registro(id_externo="P2", pedido="3000002", rastreio=None, codigos=["P2"], resultado_mediacao="perdida",
+                                 etapa="encerrada")])
+    with Sessao() as s:
+        ids = {d.id_externo: d.id for d in s.query(Devolucao).filter(Devolucao.id_externo.in_(["P1", "P2"]))}
+    # P1 voltou quebrada (classe B); P2 voltou perfeita (classe A): perdida, mas não há o que recuperar por chamado.
+    assert cliente.post(f"/api/central/conferencia/{ids['P1']}", json={
+        "produto_correto": True, "completo": True, "sem_uso": False, "revendavel": False}).status_code == 200
+    assert cliente.post(f"/api/central/conferencia/{ids['P2']}", json={
+        "produto_correto": True, "completo": True, "sem_uso": True, "revendavel": True}).status_code == 200
+    conferencia.salvar_evidencia(ids["P1"], "video/mp4", io.BytesIO(b"x" * 1000))
+    conferencia.salvar_evidencia(ids["P1"], "image/jpeg", io.BytesIO(b"y" * 10))
+
+    pendentes = cliente.get("/api/central/operacao/chamados-pendentes").json()
+    assert [p["id_externo"] for p in pendentes["abrir"]] == ["P1"] and pendentes["aguardando"] == []
+    assert pendentes["abrir"][0]["perdida_em"].startswith("2026-09-25T14:00")  # data da resolução do ML, em UTC
+    p1 = next(l for l in linhas() if l["id"] == ids["P1"])
+    assert conferencia.vencimento_provas(p1) is None  # o vídeo espera o chamado
+    assert cliente.get("/api/central/operacao?por_pagina=1").json()["armazenamento"] == {"videos": 1, "bytes": 1000}
+
+    url = f"/api/central/conferencia/{ids['P1']}/chamado-manual"
+    assert cliente.post(f"{url}/aberto", json={}).status_code == 422  # sem protocolo não fecha
+    r = cliente.post(f"{url}/aberto", json={"protocolo": "ML-778899"})
+    assert r.status_code == 200 and r.json()["videos_apagados"] == 1
+    assert cliente.get("/api/central/operacao?por_pagina=1").json()["armazenamento"]["videos"] == 0
+    pendentes = cliente.get("/api/central/operacao/chamados-pendentes").json()
+    assert pendentes["abrir"] == [] and [p["id_externo"] for p in pendentes["aguardando"]] == ["P1"]
+
+    assert cliente.post(f"{url}/resultado", json={"recuperado": True, "valor": 150}).status_code == 200
+    assert cliente.get("/api/central/operacao/chamados-pendentes").json()["aguardando"] == []
+    p1 = next(l for l in linhas() if l["id"] == ids["P1"])
+    assert _recuperado(p1) == 150.0  # entra no B.I. como recuperado
+
+    assert cliente.post(f"{url}/resultado", json={"recuperado": False}).status_code == 200
+    p1 = next(l for l in linhas() if l["id"] == ids["P1"])
+    assert _recuperado(p1) == 0.0  # não recebeu: continua perda

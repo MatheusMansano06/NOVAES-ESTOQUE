@@ -2,7 +2,7 @@
 
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from app.central.conferencia.modelo import Conferencia, Evidencia
 from app.central.devolucoes.modelo import Devolucao
@@ -15,7 +15,8 @@ from app.central.db import Sessao
 from .regras import ENVIOS, STATUS, envio, envio_plataforma, pendencias, resultado_mediacao, status
 
 COLUNAS_CONF = ("classe", "lancamentos", "estoque_lancado_em", "contestar", "chamado_manual", "chamado_aberto_em",
-                "chamado_protocolo", "perda_produto", "frete_reverso", "conferida_em", "erro_nosso", "sku_recebido")
+                "chamado_protocolo", "chamado_resultado", "chamado_valor_recuperado", "chamado_resultado_em",
+                "perda_produto", "frete_reverso", "conferida_em", "erro_nosso", "sku_recebido")
 
 
 def linhas(desde: datetime | None = None) -> list[dict]:
@@ -85,18 +86,61 @@ def listar(status_filtro: str | None, plataforma: str | None, motivo: str | None
     agora = datetime.now(timezone.utc).replace(tzinfo=None)
     filtradas.sort(key=lambda l: (0, l["prazo_vendedor"].timestamp()) if l["prazo_vendedor"] and l["prazo_vendedor"] > agora
                    else (1, -l["atualizada_em"].timestamp()))
-    pagina_itens = filtradas[(pagina - 1) * por_pagina: pagina * por_pagina]
-    fotos = catalogo.imagens(i.get("item_id") for l in pagina_itens if l["plataforma"] == "mercado_livre" for i in l["itens"][:1])
+    pagina_itens = _completar(filtradas[(pagina - 1) * por_pagina: pagina * por_pagina])
+    return {"total": len(filtradas), "contagens": contagens, "mediacoes": mediacoes, "a_caminho": a_caminho, "itens": pagina_itens,
+            "armazenamento": armazenamento_videos()}
+
+
+def _completar(itens: list[dict]) -> list[dict]:
+    """Produto, foto, provas e prejuízo: só para as linhas que vão para a tela."""
+    fotos = catalogo.imagens(i.get("item_id") for l in itens if l["plataforma"] == "mercado_livre" for i in l["itens"][:1])
     with Sessao() as s:
-        evidencias = s.scalars(select(Evidencia).where(Evidencia.devolucao_id.in_([l["id"] for l in pagina_itens]))).all()
+        evidencias = s.scalars(select(Evidencia).where(Evidencia.devolucao_id.in_([l["id"] for l in itens]))).all()
         provas = [(e.devolucao_id, {"id": e.id, "tipo": e.tipo, "arquivo": e.arquivo}) for e in evidencias]
-    for l in pagina_itens:
+    for l in itens:
         l["evidencias"] = [p for dono, p in provas if dono == l["id"]]
         item = (l["itens"] or [{}])[0]
         l["produto"] = item.get("nome") or olist.descricao_em_cache(l["pacote"] or l["pedido"])
         l["imagem"] = item.get("imagem") or fotos.get(item.get("item_id"))
         l["prejuizo"] = _prejuizo(l)
-    return {"total": len(filtradas), "contagens": contagens, "mediacoes": mediacoes, "a_caminho": a_caminho, "itens": pagina_itens}
+    return itens
+
+
+def _perdida_em(bruto: dict, atualizada_em: datetime) -> datetime:
+    """Quando a plataforma decidiu contra a Novaes. ML: data da resolução; sem ela, a última mudança na plataforma."""
+    data = (((bruto or {}).get("claim") or {}).get("resolution") or {}).get("date_created")
+    if not data:
+        return atualizada_em
+    d = datetime.fromisoformat(data)
+    return d.astimezone(timezone.utc).replace(tzinfo=None) if d.tzinfo else d
+
+
+def chamados_pendentes() -> list[dict]:
+    """Mediação perdida de produto que a conferência viu quebrado (B) ou diferente do enviado (C), sem ser erro
+    nosso: o valor só volta com chamado manual no suporte. Sai da lista quando o protocolo é registrado.
+    Mais antiga primeiro: é a que está mais perto de perder o prazo do suporte."""
+    todas = linhas()
+    abrir = [l for l in todas
+             if l["mediacao"] in ("perdida", "parcial") and (c := l["conferencia"])
+             and c["classe"] in ("B", "C") and not c["erro_nosso"] and not c["chamado_aberto_em"]]
+    # Protocolo aberto, sem resposta do suporte ainda: falta dizer se o valor voltou.
+    aguardando = [l for l in todas if (c := l["conferencia"]) and c["chamado_aberto_em"] and not c["chamado_resultado"]]
+    with Sessao() as s:
+        ids = [l["id"] for l in abrir + aguardando]
+        brutos = dict(s.execute(select(Devolucao.id, Devolucao.bruto).where(Devolucao.id.in_(ids))).all())
+    for l in abrir + aguardando:
+        l["perdida_em"] = _perdida_em(brutos.get(l["id"]), l["atualizada_em"])
+    abrir.sort(key=lambda l: l["perdida_em"])
+    aguardando.sort(key=lambda l: l["conferencia"]["chamado_aberto_em"])
+    return {"abrir": _completar(abrir), "aguardando": _completar(aguardando)}
+
+
+def armazenamento_videos() -> dict:
+    """Quanto vídeo de conferência está no disco agora (o volume do Railway é pago por GB)."""
+    with Sessao() as s:
+        n, total = s.execute(select(func.count(), func.coalesce(func.sum(Evidencia.tamanho), 0))
+                             .where(Evidencia.tipo == "video")).one()
+    return {"videos": n, "bytes": int(total)}
 
 
 def atencao() -> dict:

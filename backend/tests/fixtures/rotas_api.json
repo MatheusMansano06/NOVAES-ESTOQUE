@@ -1128,6 +1128,13 @@
   "handler"
  ],
  [
+  "/api/central/conferencia/{id:int}/chamado-manual/resultado",
+  [
+   "POST"
+  ],
+  "handler"
+ ],
+ [
   "/api/central/conferencia/{id:int}/evidencias",
   [
    "POST"
@@ -1255,6 +1262,13 @@
  ],
  [
   "/api/central/operacao/ultimas",
+  [
+   "GET"
+  ],
+  "handler"
+ ],
+ [
+  "/api/central/operacao/chamados-pendentes",
   [
    "GET"
   ],

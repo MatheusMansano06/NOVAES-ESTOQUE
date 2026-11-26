@@ -68,6 +68,8 @@ function Provas({ evidencias }: { evidencias: LinhaOperacao["evidencias"] }) {
   );
 }
 
+const tamanho = (b: number) => (b >= 1e9 ? `${(b / 1e9).toFixed(2).replace(".", ",")} GB` : `${Math.round(b / 1e6)} MB`);
+
 function lerBancada() {
   try { return localStorage.getItem("modoBancada") !== "0"; } catch { return true; }
 }
@@ -185,6 +187,12 @@ export function OperacaoPage({ nav }: { nav: Navegacao }) {
               <button type="button" aria-pressed={envio === "aguardando_postagem"} onClick={() => setEnvio("aguardando_postagem")}>Não postou</button>
               <button type="button" aria-pressed={envio === "postado"} onClick={() => setEnvio("postado")}>Postado</button>
             </div>
+          )}
+          {(aba === "mediacoes" || aba === "em_mediacao") && todas?.armazenamento && (
+            <span className="armazenamento" title="Vídeo só fica guardado enquanto pode servir de prova: mediação ganha ou protocolo registrado apaga">
+              Vídeos guardados: <strong>{tamanho(todas.armazenamento.bytes)}</strong>
+              {" "}({todas.armazenamento.videos === 1 ? "1 vídeo" : `${todas.armazenamento.videos} vídeos`})
+            </span>
           )}
           {aba === "mediacoes" && (
             <div className="segmentos" role="group" aria-label="Resultado da mediação">

@@ -29,6 +29,10 @@ class Conferencia(Base):
     chamado_manual = Column(Boolean, default=False, nullable=False)
     chamado_aberto_em = Column(DateTime)
     chamado_protocolo = Column(String(60))
+    # Resposta do suporte ao chamado: None = aguardando · recuperado (entra no B.I. como recuperado) · nao_recuperado.
+    chamado_resultado = Column(String(20))
+    chamado_valor_recuperado = Column(Float)
+    chamado_resultado_em = Column(DateTime)
     # Preenchido quando o operador clica em lançar: trava o segundo clique (estoque em dobro).
     estoque_lancado_em = Column(DateTime)
     estoque_resultado = Column(JSON)

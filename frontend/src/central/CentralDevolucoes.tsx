@@ -1,6 +1,7 @@
 import { Component, useCallback, useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 
 import { BiPage } from "./modules/bi/BiPage";
+import { AlertaChamados, ChamadosPendentesModal } from "./modules/operacao/ChamadosPendentes";
 import { ConferenciaModal } from "./modules/conferencia/ConferenciaModal";
 import { HistoricoPage } from "./modules/historico/HistoricoPage";
 import { OperacaoPage } from "./modules/operacao/OperacaoPage";
@@ -47,6 +48,7 @@ function Central({ onVoltar }: { onVoltar: () => void }) {
   const [gravar, setGravar] = useState(false);
   const [versao, setVersao] = useState(0);
   const [busca, setBusca] = useState("");
+  const [chamados, setChamados] = useState(false);
   const campoBusca = useRef<HTMLInputElement>(null);
 
   const abrir = useCallback((c: string, g = false) => { setGravar(g); setCodigo(c.trim()); }, []);
@@ -57,10 +59,10 @@ function Central({ onVoltar }: { onVoltar: () => void }) {
   // Painel vivo: a sincronização roda no servidor a cada 10 min; a tela busca os números a cada minuto.
   // Com o modal aberto não recarrega, para não mexer na conferência em andamento.
   useEffect(() => {
-    if (codigo) return;
+    if (codigo || chamados) return;
     const t = setInterval(() => { if (!document.hidden) setVersao((v) => v + 1); }, 60_000);
     return () => clearInterval(t);
-  }, [codigo]);
+  }, [codigo, chamados]);
 
   useEffect(() => {
     function atalho(e: KeyboardEvent) {
@@ -103,6 +105,8 @@ function Central({ onVoltar }: { onVoltar: () => void }) {
         <BarraSincronizacao onTerminou={recarregar} />
       </header>
 
+      <AlertaChamados versao={versao} onAbrir={() => setChamados(true)} />
+
       <main className="conteudo">
         {tela === "resumo" && <ResumoPage nav={nav} />}
         {tela === "operacao" && <OperacaoPage nav={nav} />}
@@ -113,6 +117,10 @@ function Central({ onVoltar }: { onVoltar: () => void }) {
         {tela === "operadores" && <OperadoresPage nav={nav} />}
       </main>
 
+      {chamados && !codigo && (
+        <ChamadosPendentesModal versao={versao} onFechar={() => { setChamados(false); recarregar(); }} onMudou={recarregar}
+                                onVer={(c) => abrir(c)} />
+      )}
       {codigo && (ehEtiquetaFull(codigo)
         ? <RetiradaFullModal codigo={codigo} onFechar={fechar} />
         : <ConferenciaModal codigo={codigo} gravar={gravar} onFechar={fechar} onMudou={() => setVersao((v) => v + 1)} />)}

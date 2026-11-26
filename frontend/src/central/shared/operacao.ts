@@ -50,6 +50,8 @@ export interface Operacao {
   /** A caminho por plataforma e situação do envio (sempre as duas plataformas). */
   a_caminho: Record<Plataforma, Record<Envio, number>>;
   itens: LinhaOperacao[];
+  /** Vídeos de conferência guardados no disco agora. */
+  armazenamento: { videos: number; bytes: number };
 }
 
 /** O código que abre o modal: o rastreio é o que o leitor bipa; sem ele, o id da reclamação. */

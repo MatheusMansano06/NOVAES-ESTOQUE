@@ -143,7 +143,11 @@ def quebrados_lista(dias: int = 30, fatura: str | None = None) -> dict:
 
 
 def _recuperado(linha: dict) -> float:
-    """Estimado: mediação ganha tira a cobrança do frete; com cobertura, o ML também paga o produto."""
+    """Estimado: mediação ganha tira a cobrança do frete; com cobertura, o ML também paga o produto.
+    Mediação perdida que virou chamado manual: o valor que o suporte devolveu (informado pelo operador)."""
+    conf = linha.get("conferencia") or {}
+    if conf.get("chamado_resultado") == "recuperado":
+        return round(conf.get("chamado_valor_recuperado") or 0, 2)
     if linha.get("resultado_mediacao") != "ganha":
         return 0.0
     valor = linha["custo_plataforma"] or 0

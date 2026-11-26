@@ -245,13 +245,36 @@ def enviar_para_chamado_manual(devolucao_id: int) -> None:
 def registrar_chamado_aberto(devolucao_id: int, protocolo: str | None, observacao: str | None) -> dict:
     with Sessao.begin() as s:
         conf = s.scalar(select(Conferencia).filter_by(devolucao_id=devolucao_id))
-        if not conf or not conf.chamado_manual:
+        # Mediação perdida de produto quebrado/diferente também vira chamado; aí o protocolo é obrigatório.
+        perdida_recuperavel = conf is not None and conf.classe in ("B", "C") and not conf.erro_nosso
+        if not conf or not (conf.chamado_manual or perdida_recuperavel):
             raise LookupError(f"Devolução {devolucao_id} não tem chamado manual pendente")
+        if not conf.chamado_manual and not protocolo:
+            raise ValueError("Informe o número do protocolo do chamado")
+        conf.chamado_manual = True
         conf.chamado_aberto_em, conf.chamado_protocolo = _agora(), protocolo
         if observacao:
             conf.observacao = f"{conf.observacao or ''}\n[chamado] {observacao}".strip()
         resposta = {"chamado_aberto_em": conf.chamado_aberto_em, "chamado_protocolo": protocolo}
+    # Com o protocolo aberto o vídeo já cumpriu o papel: sai do disco (as fotos, pequenas, seguem a regra normal).
+    resposta["videos_apagados"] = limpar_evidencias(devolucao_id, tipo="video")
     return resposta
+
+
+def registrar_resultado_chamado(devolucao_id: int, recuperado: bool, valor: float | None) -> dict:
+    """Resposta do suporte. Recuperado sem valor informado = o prejuízo registrado na conferência inteiro."""
+    with Sessao.begin() as s:
+        conf = s.scalar(select(Conferencia).filter_by(devolucao_id=devolucao_id))
+        if not conf or not conf.chamado_aberto_em:
+            raise LookupError(f"Devolução {devolucao_id} não tem chamado aberto")
+        if valor is not None and valor < 0:
+            raise ValueError("Valor recuperado não pode ser negativo")
+        if recuperado and valor is None:
+            valor = round((conf.perda_produto or 0) + (conf.frete_reverso or 0), 2)
+        conf.chamado_resultado = "recuperado" if recuperado else "nao_recuperado"
+        conf.chamado_valor_recuperado = valor if recuperado else None
+        conf.chamado_resultado_em = _agora()
+        return {"chamado_resultado": conf.chamado_resultado, "chamado_valor_recuperado": conf.chamado_valor_recuperado}
 
 
 def registrar(devolucao_id: int, dados: dict) -> dict:
@@ -397,6 +420,9 @@ def vencimento_provas(l: dict) -> datetime | None:
         return None
     if l["mediacao"] == "ganha":
         return datetime.min
+    if l["mediacao"] in ("perdida", "parcial") and conf.get("classe") in ("B", "C") and not conf.get("erro_nosso") \
+            and not conf.get("chamado_aberto_em"):
+        return None  # vai virar chamado manual: a prova fica até registrarem o protocolo
     if l["mediacao"] in ("perdida", "parcial"):
         return l["atualizada_em"] + timedelta(days=DIAS_APOS_MEDIACAO)  # sem data do resultado: é a última mudança na plataforma
     if l["contestada"]:  # contestada sem resultado ainda: só o fim da devolução encerra a contagem
@@ -420,10 +446,11 @@ def varrer_evidencias() -> int:
     return sum(limpar_evidencias(i) for i in vencidas)
 
 
-def limpar_evidencias(devolucao_id: int) -> int:
-    """Apaga arquivo e linha."""
+def limpar_evidencias(devolucao_id: int, tipo: str | None = None) -> int:
+    """Apaga arquivo e linha. Com `tipo`, só esse (foto | video)."""
     with Sessao.begin() as s:
-        evs = s.scalars(select(Evidencia).filter_by(devolucao_id=devolucao_id)).all()
+        q = select(Evidencia).filter_by(devolucao_id=devolucao_id)
+        evs = s.scalars(q.filter_by(tipo=tipo) if tipo else q).all()
         for e in evs:
             (PASTA / str(e.devolucao_id) / e.arquivo).unlink(missing_ok=True)
             s.delete(e)

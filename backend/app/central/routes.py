@@ -8,7 +8,7 @@ import re
 from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import select
+from sqlalchemy import inspect, select
 from starlette.concurrency import run_in_threadpool
 from starlette.requests import Request
 from starlette.responses import FileResponse, Response
@@ -32,6 +32,14 @@ from app.central.shopee.sincronizar import sincronizar_falha_entrega
 
 # ponytail: create_all só cria tabela nova; coluna nova em tabela existente exige migração à mão.
 Base.metadata.create_all(engine)
+_COLUNAS_NOVAS = {"conferencias": (("chamado_resultado", "VARCHAR(20)"), ("chamado_valor_recuperado", "FLOAT"),
+                                   ("chamado_resultado_em", "TIMESTAMP"))}
+with engine.begin() as _conn:
+    for _tabela, _novas in _COLUNAS_NOVAS.items():
+        _existentes = {c["name"] for c in inspect(_conn).get_columns(_tabela)}
+        for _nome, _tipo in _novas:
+            if _nome not in _existentes:
+                _conn.exec_driver_sql(f"ALTER TABLE {_tabela} ADD COLUMN {_nome} {_tipo}")
 
 
 def _serializar(o):
@@ -183,6 +191,14 @@ async def conferencia_chamado_aberto(request: Request):
                                    _texto_opcional(dados, "protocolo"), _texto_opcional(dados, "observacao"))
 
 
+async def conferencia_chamado_resultado(request: Request):
+    """Resposta do suporte: recebemos o valor (recuperado, entra no B.I.) ou não (continua perda)."""
+    dados = await _corpo(request)
+    valor = dados.get("valor")
+    return await run_in_threadpool(conferencia.registrar_resultado_chamado, _id(request), bool(dados.get("recuperado")),
+                                   None if valor in (None, "") else float(valor))
+
+
 async def conferencia_evidencia(request: Request):
     form = await request.form()
     arquivo = form.get("arquivo")
@@ -287,6 +303,10 @@ async def operacao_listar(request: Request):
 
 async def operacao_atencao(request: Request):
     return await run_in_threadpool(operacao.atencao)
+
+
+async def operacao_chamados_pendentes(request: Request):
+    return await run_in_threadpool(operacao.chamados_pendentes)
 
 
 async def operacao_ultimas(request: Request):
@@ -479,6 +499,7 @@ rotas = [
     _rota("/conferencia/{id:int}/lancar-estoque", conferencia_lancar_estoque, "POST"),
     _rota("/conferencia/{id:int}/chamado-manual", conferencia_chamado_manual, "POST"),
     _rota("/conferencia/{id:int}/chamado-manual/aberto", conferencia_chamado_aberto, "POST"),
+    _rota("/conferencia/{id:int}/chamado-manual/resultado", conferencia_chamado_resultado, "POST"),
     _rota("/conferencia/{id:int}/evidencias", conferencia_evidencia, "POST"),
     _rota("/conferencia/evidencias/{id:int}", conferencia_excluir_evidencia, "DELETE"),
     _rota("/mediacoes/{id:int}/motivos", mediacoes_motivos),
@@ -498,6 +519,7 @@ rotas = [
     _rota("/operacao", operacao_listar),
     _rota("/operacao/atencao", operacao_atencao),
     _rota("/operacao/ultimas", operacao_ultimas),
+    _rota("/operacao/chamados-pendentes", operacao_chamados_pendentes),
     _rota("/operadores/atividade", operadores_atividade),
     _rota("/produtos-quebrados", produtos_quebrados),
     _rota("/bi/quebrados", quebrados_lista),
