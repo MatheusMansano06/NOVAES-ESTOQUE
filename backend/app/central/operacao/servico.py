@@ -115,14 +115,18 @@ def _perdida_em(bruto: dict, atualizada_em: datetime) -> datetime:
     return d.astimezone(timezone.utc).replace(tzinfo=None) if d.tzinfo else d
 
 
-def chamados_pendentes() -> list[dict]:
+def pede_chamado(l: dict) -> bool:
+    c = l["conferencia"]
+    return (l["mediacao"] in ("perdida", "parcial") and bool(c) and c["classe"] in ("B", "C")
+            and not c["erro_nosso"] and not c["chamado_aberto_em"])
+
+
+def chamados_pendentes() -> dict:
     """Mediação perdida de produto que a conferência viu quebrado (B) ou diferente do enviado (C), sem ser erro
     nosso: o valor só volta com chamado manual no suporte. Sai da lista quando o protocolo é registrado.
     Mais antiga primeiro: é a que está mais perto de perder o prazo do suporte."""
     todas = linhas()
-    abrir = [l for l in todas
-             if l["mediacao"] in ("perdida", "parcial") and (c := l["conferencia"])
-             and c["classe"] in ("B", "C") and not c["erro_nosso"] and not c["chamado_aberto_em"]]
+    abrir = [l for l in todas if pede_chamado(l)]
     # Protocolo aberto, sem resposta do suporte ainda: falta dizer se o valor voltou.
     aguardando = [l for l in todas if (c := l["conferencia"]) and c["chamado_aberto_em"] and not c["chamado_resultado"]]
     with Sessao() as s:
@@ -146,10 +150,12 @@ def armazenamento_videos() -> dict:
 def atencao() -> dict:
     """O que precisa de mão agora — alimenta o quadro de alertas do resumo."""
     agora = datetime.now(timezone.utc).replace(tzinfo=None)
-    abertas = [l for l in linhas() if l["status"] not in ("finalizada", "com_a_plataforma")]
+    todas = linhas()
+    abertas = [l for l in todas if l["status"] not in ("finalizada", "com_a_plataforma")]
     return {
         "contestar": sum("contestar" in l["pendencias"] for l in abertas),
-        "chamados_manuais": sum("chamado_manual" in l["pendencias"] for l in abertas),
+        # Mediação perdida já vem finalizada pela plataforma, mas ainda pede chamado: conta igual ao alerta vermelho.
+        "chamados_manuais": sum(1 for l in todas if "chamado_manual" in l["pendencias"] or pede_chamado(l)),
         "lancar_estoque": sum("lancar_estoque" in l["pendencias"] for l in abertas),
         "aguardando_conferencia": sum(l["status"] == "aguardando_conferencia" for l in abertas),
         "prazo_em_24h": sum(1 for l in abertas if l["prazo_vendedor"] and agora <= l["prazo_vendedor"] <= agora + timedelta(hours=24)),

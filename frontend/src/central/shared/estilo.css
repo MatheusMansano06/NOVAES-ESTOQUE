@@ -592,7 +592,7 @@
 .central-dev .painel-ml-historico li small { display: block; color: var(--fraco); }
 
 /* Alerta de chamados manuais: faixa vermelha pulsando no topo enquanto houver mediação perdida para recuperar. */
-.central-dev .alerta-chamados { display: flex; align-items: center; gap: 0.9rem; width: calc(100% - 2rem); margin: 0.75rem 1rem 0; padding: 0.75rem 1rem;
+.central-dev .alerta-chamados { position: sticky; top: 0; z-index: 5; display: flex; align-items: center; gap: 0.9rem; width: 100%; margin: 0 0 1rem; padding: 0.8rem 1rem;
   border: 2px solid #b42318; border-radius: var(--raio); background: #d92d20; color: #fff; text-align: left; font: inherit; cursor: pointer;
   animation: alerta-pulsa 1.2s ease-in-out infinite; }
 .central-dev .alerta-chamados strong { display: block; font-size: 1rem; }

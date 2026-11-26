@@ -105,9 +105,8 @@ function Central({ onVoltar }: { onVoltar: () => void }) {
         <BarraSincronizacao onTerminou={recarregar} />
       </header>
 
-      <AlertaChamados versao={versao} onAbrir={() => setChamados(true)} />
-
       <main className="conteudo">
+        <AlertaChamados versao={versao} onAbrir={() => setChamados(true)} />
         {tela === "resumo" && <ResumoPage nav={nav} />}
         {tela === "operacao" && <OperacaoPage nav={nav} />}
         {tela === "bi" && <BiPage nav={nav} />}

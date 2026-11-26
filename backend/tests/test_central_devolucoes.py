@@ -223,6 +223,7 @@ def test_mediacao_perdida_de_produto_quebrado_pede_chamado_com_protocolo():
     assert pendentes["abrir"][0]["perdida_em"].startswith("2026-09-25T14:00")  # data da resolução do ML, em UTC
     p1 = next(l for l in linhas() if l["id"] == ids["P1"])
     assert conferencia.vencimento_provas(p1) is None  # o vídeo espera o chamado
+    assert cliente.get("/api/central/operacao/atencao").json()["chamados_manuais"] == 1  # o resumo conta igual ao alerta
     assert cliente.get("/api/central/operacao?por_pagina=1").json()["armazenamento"] == {"videos": 1, "bytes": 1000}
 
     url = f"/api/central/conferencia/{ids['P1']}/chamado-manual"
