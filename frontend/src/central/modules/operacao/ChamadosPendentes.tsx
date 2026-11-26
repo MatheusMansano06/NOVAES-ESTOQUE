@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type FormEvent } from "react";
 
 import { api } from "../../shared/api";
 import { PLATAFORMA } from "../../shared/devolucao";
-import { quando, reais } from "../../shared/formato";
+import { reais } from "../../shared/formato";
 import { Icone } from "../../shared/Icone";
 import { LogoPlataforma } from "../../shared/LogoPlataforma";
 import type { LinhaOperacao } from "../../shared/operacao";
@@ -15,17 +15,21 @@ export interface ChamadoPendente extends LinhaOperacao {
 }
 interface Chamados { abrir: ChamadoPendente[]; aguardando: ChamadoPendente[] }
 
-const PROBLEMA = { A: "Voltou em bom estado", B: "Chegou quebrado / avariado", C: "Diferente do que enviamos" } as const;
+const PROBLEMA = { A: "Voltou perfeito, comprador culpou a Novaes", B: "Chegou quebrado / avariado", C: "Diferente do que enviamos" } as const;
+
+/** Igual ao backend (operacao/servico.PRAZO_CHAMADO_DIAS): passou disso, sai da lista e fica como perda. */
+const PRAZO_DIAS = 30;
 
 const FAIXAS = [
   { id: "todas", nome: "Todas", cabe: () => true },
-  { id: "7", nome: "Até 7 dias", cabe: (d: number) => d <= 7 },
-  { id: "30", nome: "8 a 30 dias", cabe: (d: number) => d > 7 && d <= 30 },
-  { id: "mais", nome: "Mais de 30 dias", cabe: (d: number) => d > 30 },
+  { id: "vencendo", nome: "Vencendo (até 7 dias)", cabe: (d: number) => PRAZO_DIAS - d <= 7 },
+  { id: "8a20", nome: "8 a 20 dias", cabe: (d: number) => PRAZO_DIAS - d > 7 && PRAZO_DIAS - d <= 20 },
+  { id: "folga", nome: "Mais de 20 dias", cabe: (d: number) => PRAZO_DIAS - d > 20 },
 ] as const;
 
 const diasDesde = (iso: string) => Math.max(0, Math.floor((Date.now() - new Date(`${iso}Z`).getTime()) / 864e5));
 const ha = (d: number) => (d === 0 ? "hoje" : d === 1 ? "há 1 dia" : `há ${d} dias`);
+const faltam = (d: number) => { const f = Math.max(0, PRAZO_DIAS - d); return f <= 1 ? "último dia" : `faltam ${f} dias`; };
 
 /** Faixa vermelha no topo da Central enquanto houver chamado a abrir. Some sozinha quando a lista zera. */
 export function AlertaChamados({ versao, onAbrir }: { versao: number; onAbrir: () => void }) {
@@ -40,7 +44,7 @@ export function AlertaChamados({ versao, onAbrir }: { versao: number; onAbrir: (
       <span>
         <strong>{n === 1 ? "1 mediação perdida precisa de chamado" : `${n} mediações perdidas precisam de chamado`}</strong>
         <span className="alerta-chamados-sub">
-          Produto voltou quebrado ou diferente do enviado. Abra o chamado no suporte para receber
+          A bancada contradiz o comprador (voltou quebrado, diferente ou perfeito). Abra o chamado no suporte para receber
           {valor > 0 ? ` ${reais(valor)}` : " o valor"}.
         </span>
       </span>
@@ -100,6 +104,9 @@ function LinhaAguardando({ c, onFeito, onVer }: { c: ChamadoPendente; onFeito: (
         <span>
           <span className="sub">Chamado aberto</span>
           <strong>{ha(diasDesde(c.conferencia.chamado_aberto_em!))}</strong>
+          <span className={PRAZO_DIAS - diasDesde(c.conferencia.chamado_aberto_em!) <= 7 ? "ruim" : "sub"}>
+            {faltam(diasDesde(c.conferencia.chamado_aberto_em!))}
+          </span>
         </span>
         <span>
           <span className="sub">Em jogo</span>
@@ -160,8 +167,8 @@ function LinhaAbrir({ c, onFeito, onVer }: { c: ChamadoPendente; onFeito: () => 
         </span>
         <span>
           <span className="sub">Perdeu a mediação</span>
-          <strong className={dias > 30 ? "ruim" : ""}>{ha(dias)}</strong>
-          <span className="sub">{quando(c.perdida_em)}</span>
+          <strong>{ha(dias)}</strong>
+          <span className={PRAZO_DIAS - dias <= 7 ? "ruim" : "sub"}>{faltam(dias)}</span>
         </span>
         <span>
           <span className="sub">A receber</span>
@@ -217,9 +224,11 @@ export function ChamadosPendentesModal({ versao, onFechar, onMudou, onVer }:
           <div>
             <h2 id="chamados-titulo">Chamados a abrir: mediações perdidas</h2>
             <p className="sub">
-              A conferência viu o produto quebrado ou diferente do enviado, mas a plataforma deu ganho ao comprador.
+              A conferência contradiz o comprador (voltou quebrado, diferente do enviado, ou perfeito quando ele alegou
+              defeito), mas a plataforma deu ganho a ele.
               Abra o chamado no suporte e registre o protocolo: só assim sai da lista (e o vídeo é apagado). Depois,
               em "Aguardando resposta", diga se o valor voltou: recebido entra no B.I. como recuperado.
+              Prazo de {PRAZO_DIAS} dias em cada etapa: passou, sai daqui, o vídeo é apagado e fica como perda.
             </p>
           </div>
           <button type="button" className="icone-botao" onClick={onFechar} aria-label="Fechar">

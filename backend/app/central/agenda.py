@@ -116,6 +116,7 @@ TAREFAS = {
     "mediacao_origem": mediacao_origem.completar,  # quem abriu cada mediação (BI)
     "mediacao_atuacao": mediacao_origem.completar_atuacao,  # o que a Novaes fez em cada mediação (BI)
     "provas_vencidas": conferencia_servico.varrer_evidencias,  # vídeo e fotos que já não servem
+    "chamados_expirados": conferencia_servico.expirar_chamados,  # protocolo sem resposta no prazo vira perda
 }
 estado: dict[str, dict] = {}
 

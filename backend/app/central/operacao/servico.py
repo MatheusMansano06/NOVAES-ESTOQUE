@@ -39,6 +39,7 @@ def linhas(desde: datetime | None = None) -> list[dict]:
                      "envio": envio(d.plataforma, d.bruto) if st == "a_caminho" else None,
                      "envio_plataforma": envio_plataforma(d.plataforma, d.bruto) if st == "a_caminho" else None}
             linha["mediacao"] = resultado_mediacao(linha)
+            linha["perdida_em"] = _perdida_em(d.bruto, d.atualizada_em) if linha["mediacao"] in ("perdida", "parcial") else None
             linhas.append(linha)
     return linhas
 
@@ -115,25 +116,43 @@ def _perdida_em(bruto: dict, atualizada_em: datetime) -> datetime:
     return d.astimezone(timezone.utc).replace(tzinfo=None) if d.tzinfo else d
 
 
-def pede_chamado(l: dict) -> bool:
+# Prazo para abrir o chamado depois de perder a mediação, e para o suporte responder depois do protocolo.
+# Passou: não tem mais o que fazer — sai do alerta, o vídeo é apagado e o valor fica como perda no B.I.
+PRAZO_CHAMADO_DIAS = 30
+
+
+def _limite_chamado() -> datetime:
+    return datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=PRAZO_CHAMADO_DIAS)
+
+
+# Motivos em que o comprador põe a culpa na Novaes (o arrependimento não entra).
+MOTIVOS_CULPA_VENDEDOR = ("defeito", "diferente", "danificado", "incompleto")
+
+
+def vale_chamado(l: dict) -> bool:
+    """Mediação perdida que a bancada contradiz: voltou quebrado/diferente (B/C), ou voltou perfeito (A) mas o
+    comprador culpou a Novaes. Erro nosso nunca vale."""
     c = l["conferencia"]
-    return (l["mediacao"] in ("perdida", "parcial") and bool(c) and c["classe"] in ("B", "C")
-            and not c["erro_nosso"] and not c["chamado_aberto_em"])
+    if l["mediacao"] not in ("perdida", "parcial") or not c or c["erro_nosso"]:
+        return False
+    if c["classe"] in ("B", "C"):
+        return True
+    return l["motivo"] in MOTIVOS_CULPA_VENDEDOR or l["responsavel"] == "vendedor"
+
+
+def pede_chamado(l: dict) -> bool:
+    return vale_chamado(l) and not l["conferencia"]["chamado_aberto_em"] and l["perdida_em"] >= _limite_chamado()
 
 
 def chamados_pendentes() -> dict:
-    """Mediação perdida de produto que a conferência viu quebrado (B) ou diferente do enviado (C), sem ser erro
-    nosso: o valor só volta com chamado manual no suporte. Sai da lista quando o protocolo é registrado.
+    """Mediação perdida que a conferência contradiz (vale_chamado): o valor só volta com chamado manual no suporte.
+    Sai da lista quando o protocolo é registrado.
     Mais antiga primeiro: é a que está mais perto de perder o prazo do suporte."""
     todas = linhas()
     abrir = [l for l in todas if pede_chamado(l)]
     # Protocolo aberto, sem resposta do suporte ainda: falta dizer se o valor voltou.
-    aguardando = [l for l in todas if (c := l["conferencia"]) and c["chamado_aberto_em"] and not c["chamado_resultado"]]
-    with Sessao() as s:
-        ids = [l["id"] for l in abrir + aguardando]
-        brutos = dict(s.execute(select(Devolucao.id, Devolucao.bruto).where(Devolucao.id.in_(ids))).all())
-    for l in abrir + aguardando:
-        l["perdida_em"] = _perdida_em(brutos.get(l["id"]), l["atualizada_em"])
+    aguardando = [l for l in todas if (c := l["conferencia"]) and c["chamado_aberto_em"] and not c["chamado_resultado"]
+                  and c["chamado_aberto_em"] >= _limite_chamado()]
     abrir.sort(key=lambda l: l["perdida_em"])
     aguardando.sort(key=lambda l: l["conferencia"]["chamado_aberto_em"])
     return {"abrir": _completar(abrir), "aguardando": _completar(aguardando)}

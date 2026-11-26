@@ -245,8 +245,8 @@ def enviar_para_chamado_manual(devolucao_id: int) -> None:
 def registrar_chamado_aberto(devolucao_id: int, protocolo: str | None, observacao: str | None) -> dict:
     with Sessao.begin() as s:
         conf = s.scalar(select(Conferencia).filter_by(devolucao_id=devolucao_id))
-        # Mediação perdida de produto quebrado/diferente também vira chamado; aí o protocolo é obrigatório.
-        perdida_recuperavel = conf is not None and conf.classe in ("B", "C") and not conf.erro_nosso
+        # Mediação perdida que a conferência contradiz também vira chamado; aí o protocolo é obrigatório.
+        perdida_recuperavel = conf is not None and not conf.erro_nosso
         if not conf or not (conf.chamado_manual or perdida_recuperavel):
             raise LookupError(f"Devolução {devolucao_id} não tem chamado manual pendente")
         if not conf.chamado_manual and not protocolo:
@@ -259,6 +259,19 @@ def registrar_chamado_aberto(devolucao_id: int, protocolo: str | None, observaca
     # Com o protocolo aberto o vídeo já cumpriu o papel: sai do disco (as fotos, pequenas, seguem a regra normal).
     resposta["videos_apagados"] = limpar_evidencias(devolucao_id, tipo="video")
     return resposta
+
+
+def expirar_chamados() -> int:
+    """Protocolo aberto sem resposta do suporte no prazo: dá como não recuperado (segue como perda no B.I.)."""
+    from app.central.operacao.servico import PRAZO_CHAMADO_DIAS
+    limite = _agora() - timedelta(days=PRAZO_CHAMADO_DIAS)
+    with Sessao.begin() as s:
+        vencidos = s.scalars(select(Conferencia).where(
+            Conferencia.chamado_aberto_em.is_not(None), Conferencia.chamado_aberto_em < limite,
+            Conferencia.chamado_resultado.is_(None))).all()
+        for c in vencidos:
+            c.chamado_resultado, c.chamado_resultado_em = "nao_recuperado", _agora()
+        return len(vencidos)
 
 
 def registrar_resultado_chamado(devolucao_id: int, recuperado: bool, valor: float | None) -> dict:
@@ -420,9 +433,10 @@ def vencimento_provas(l: dict) -> datetime | None:
         return None
     if l["mediacao"] == "ganha":
         return datetime.min
-    if l["mediacao"] in ("perdida", "parcial") and conf.get("classe") in ("B", "C") and not conf.get("erro_nosso") \
-            and not conf.get("chamado_aberto_em"):
-        return None  # vai virar chamado manual: a prova fica até registrarem o protocolo
+    from app.central.operacao.servico import PRAZO_CHAMADO_DIAS, vale_chamado
+    if vale_chamado(l) and not conf.get("chamado_aberto_em"):
+        # Vai virar chamado manual: a prova fica até o protocolo ou até acabar o prazo de abrir o chamado.
+        return (l.get("perdida_em") or l["atualizada_em"]) + timedelta(days=PRAZO_CHAMADO_DIAS)
     if l["mediacao"] in ("perdida", "parcial"):
         return l["atualizada_em"] + timedelta(days=DIAS_APOS_MEDIACAO)  # sem data do resultado: é a última mudança na plataforma
     if l["contestada"]:  # contestada sem resultado ainda: só o fim da devolução encerra a contagem

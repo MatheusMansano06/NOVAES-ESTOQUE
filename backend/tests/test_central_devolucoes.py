@@ -204,8 +204,10 @@ def test_mediacao_perdida_de_produto_quebrado_pede_chamado_com_protocolo():
     from app.central.devolucoes.modelo import Devolucao
     from app.central.db import Sessao
     from app.central.operacao.servico import linhas
+    from datetime import timedelta, timezone
+    perdeu = (datetime.now(timezone.utc) - timedelta(days=2)).replace(microsecond=0)
     devolucoes.salvar([_registro(id_externo="P1", pedido="3000001", rastreio=None, codigos=["P1"], resultado_mediacao="perdida",
-                                 etapa="encerrada", bruto={"claim": {"resolution": {"date_created": "2026-09-25T10:00:00.000-04:00"}}}),
+                                 etapa="encerrada", bruto={"claim": {"resolution": {"date_created": perdeu.isoformat()}}}),
                        _registro(id_externo="P2", pedido="3000002", rastreio=None, codigos=["P2"], resultado_mediacao="perdida",
                                  etapa="encerrada")])
     with Sessao() as s:
@@ -220,9 +222,9 @@ def test_mediacao_perdida_de_produto_quebrado_pede_chamado_com_protocolo():
 
     pendentes = cliente.get("/api/central/operacao/chamados-pendentes").json()
     assert [p["id_externo"] for p in pendentes["abrir"]] == ["P1"] and pendentes["aguardando"] == []
-    assert pendentes["abrir"][0]["perdida_em"].startswith("2026-09-25T14:00")  # data da resolução do ML, em UTC
+    assert pendentes["abrir"][0]["perdida_em"] == perdeu.replace(tzinfo=None).isoformat()  # data da resolução do ML, em UTC
     p1 = next(l for l in linhas() if l["id"] == ids["P1"])
-    assert conferencia.vencimento_provas(p1) is None  # o vídeo espera o chamado
+    assert conferencia.vencimento_provas(p1) == p1["perdida_em"] + timedelta(days=30)  # o vídeo espera o chamado, até o prazo
     assert cliente.get("/api/central/operacao/atencao").json()["chamados_manuais"] == 1  # o resumo conta igual ao alerta
     assert cliente.get("/api/central/operacao?por_pagina=1").json()["armazenamento"] == {"videos": 1, "bytes": 1000}
 
@@ -242,3 +244,53 @@ def test_mediacao_perdida_de_produto_quebrado_pede_chamado_com_protocolo():
     assert cliente.post(f"{url}/resultado", json={"recuperado": False}).status_code == 200
     p1 = next(l for l in linhas() if l["id"] == ids["P1"])
     assert _recuperado(p1) == 0.0  # não recebeu: continua perda
+
+
+def test_chamado_expira_em_30_dias():
+    from datetime import timedelta, timezone
+    from app.central.conferencia import servico as conferencia
+    from app.central.conferencia.modelo import Conferencia
+    from app.central.devolucoes.modelo import Devolucao
+    from app.central.db import Sessao
+    from app.central.operacao.servico import linhas
+    perdeu = datetime.now(timezone.utc) - timedelta(days=31)
+    devolucoes.salvar([_registro(id_externo="V1", pedido="4000001", rastreio=None, codigos=["V1"], resultado_mediacao="perdida",
+                                 etapa="encerrada", bruto={"claim": {"resolution": {"date_created": perdeu.isoformat()}}})])
+    with Sessao() as s:
+        dev_id = s.query(Devolucao).filter_by(id_externo="V1").one().id
+    assert cliente.post(f"/api/central/conferencia/{dev_id}", json={
+        "produto_correto": False, "completo": True, "sem_uso": True, "revendavel": True}).status_code == 200
+    # Perdeu há 31 dias: fora do alerta e a prova já venceu.
+    assert dev_id not in [p["id"] for p in cliente.get("/api/central/operacao/chamados-pendentes").json()["abrir"]]
+    v1 = next(l for l in linhas() if l["id"] == dev_id)
+    assert conferencia.vencimento_provas(v1) < datetime.now(timezone.utc).replace(tzinfo=None)
+
+    # Protocolo aberto há 31 dias sem resposta: a varredura dá como não recuperado.
+    with Sessao.begin() as s:
+        c = s.query(Conferencia).filter_by(devolucao_id=dev_id).one()
+        c.chamado_manual, c.chamado_protocolo = True, "VELHO"
+        c.chamado_aberto_em = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=31)
+    assert dev_id not in [p["id"] for p in cliente.get("/api/central/operacao/chamados-pendentes").json()["aguardando"]]
+    assert conferencia.expirar_chamados() >= 1
+    with Sessao() as s:
+        assert s.query(Conferencia).filter_by(devolucao_id=dev_id).one().chamado_resultado == "nao_recuperado"
+
+
+def test_voltou_perfeito_com_comprador_culpando_a_novaes_pede_chamado():
+    from datetime import timedelta, timezone
+    from app.central.devolucoes.modelo import Devolucao
+    from app.central.db import Sessao
+    perdeu = (datetime.now(timezone.utc) - timedelta(days=1)).isoformat()
+    devolucoes.salvar([
+        _registro(id_externo="A1", pedido="5000001", rastreio=None, codigos=["A1"], resultado_mediacao="perdida", etapa="encerrada",
+                  motivo="diferente", responsavel="vendedor", bruto={"claim": {"resolution": {"date_created": perdeu}}}),
+        _registro(id_externo="A2", pedido="5000002", rastreio=None, codigos=["A2"], resultado_mediacao="perdida", etapa="encerrada",
+                  motivo="arrependimento", responsavel="comprador", bruto={"claim": {"resolution": {"date_created": perdeu}}})])
+    with Sessao() as s:
+        ids = {d.id_externo: d.id for d in s.query(Devolucao).filter(Devolucao.id_externo.in_(["A1", "A2"]))}
+    perfeito = {"produto_correto": True, "completo": True, "sem_uso": True, "revendavel": True}
+    for i in ids.values():
+        assert cliente.post(f"/api/central/conferencia/{i}", json=perfeito).status_code == 200
+    abrir = [p["id_externo"] for p in cliente.get("/api/central/operacao/chamados-pendentes").json()["abrir"]]
+    assert "A1" in abrir  # alegou diferente, voltou perfeito: vale chamado
+    assert "A2" not in abrir  # arrependimento: o comprador não culpou a Novaes
