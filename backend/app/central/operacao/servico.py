@@ -59,7 +59,8 @@ def a_caminho_por_plataforma(ls: list[dict]) -> dict:
 
 
 def listar(status_filtro: str | None, plataforma: str | None, motivo: str | None, destino: str | None,
-           pagina: int, por_pagina: int, envio_filtro: str | None = None, mediacao_filtro: str | None = None) -> dict:
+           pagina: int, por_pagina: int, envio_filtro: str | None = None, mediacao_filtro: str | None = None,
+           busca: str | None = None) -> dict:
     por_motivo = [l for l in linhas() if not motivo or l["motivo"] == motivo]
     todas = [l for l in por_motivo if not plataforma or l["plataforma"] == plataforma]
     # Mediação encerrada conta qualquer destino: perdida com o produto que nem voltou também vira chamado manual.
@@ -76,6 +77,10 @@ def listar(status_filtro: str | None, plataforma: str | None, motivo: str | None
         filtradas = [l for l in filtradas if l["status"] in status_filtro.split(",")]
     if envio_filtro:
         filtradas = [l for l in filtradas if l["envio"] == envio_filtro]
+    if busca and (termo := busca.strip().lower()):
+        # Pedido, carrinho, id da reclamação/mediação ou rastreio: pedaço do número basta (ex.: os últimos dígitos).
+        filtradas = [l for l in filtradas
+                     if any(termo in str(l.get(c) or "").lower() for c in ("pedido", "pacote", "id_externo", "rastreio"))]
     # Prazo que ainda dá para cumprir, o mais apertado primeiro; o resto (vencido ou sem prazo), mais recente primeiro.
     agora = datetime.now(timezone.utc).replace(tzinfo=None)
     filtradas.sort(key=lambda l: (0, l["prazo_vendedor"].timestamp()) if l["prazo_vendedor"] and l["prazo_vendedor"] > agora

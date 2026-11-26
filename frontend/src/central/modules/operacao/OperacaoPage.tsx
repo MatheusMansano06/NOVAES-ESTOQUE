@@ -91,12 +91,20 @@ export function OperacaoPage({ nav }: { nav: Navegacao }) {
   const [envio, setEnvio] = useState<Envio | "">(nav.filtroInicial?.envio ?? "");
   const [resultado, setResultado] = useState<Resultado>("");
   const [pagina, setPagina] = useState(1);
+  const [busca, setBusca] = useState("");
+  const [buscaAtiva, setBuscaAtiva] = useState("");
+  // Espera parar de digitar: cada letra não vira uma consulta.
+  useEffect(() => {
+    const t = setTimeout(() => setBuscaAtiva(busca.trim()), 300);
+    return () => clearTimeout(t);
+  }, [busca]);
 
   const atual = ABAS.find((a) => a.id === aba)!;
   const filtro = new URLSearchParams({ pagina: String(pagina), por_pagina: String(POR_PAGINA), destino: "vendedor", status: atual.status.join(",") });
   if (plataforma) filtro.set("plataforma", plataforma);
   if (aba === "a_caminho" && envio) filtro.set("envio", envio);
   if (aba === "mediacoes") filtro.set("mediacao", FILTRO_RESULTADO[resultado]);
+  if (buscaAtiva) filtro.set("busca", buscaAtiva);
   const { dados, erro } = usarDados<Operacao>(`/operacao?${filtro}`, nav.versao);
   // Contagens de todas as abas, sem filtro de status (a resposta já traz a contagem por status).
   const { dados: todas } = usarDados<Operacao>(`/operacao?por_pagina=1&destino=vendedor${plataforma ? `&plataforma=${plataforma}` : ""}`, nav.versao);
@@ -104,7 +112,7 @@ export function OperacaoPage({ nav }: { nav: Navegacao }) {
   const m = todas?.mediacoes;
   const contarAba = (a: (typeof ABAS)[number]) => (a.id === "mediacoes" ? (m ? m.ganha + m.perdida + m.parcial : null) : contar(a.status));
 
-  useEffect(() => { setPagina(1); }, [aba, plataforma, envio, resultado]);
+  useEffect(() => { setPagina(1); }, [aba, plataforma, envio, resultado, buscaAtiva]);
 
   // Modo bancada: o foco volta sozinho para o campo, o leitor pode bipar a qualquer momento.
   useEffect(() => {
@@ -112,7 +120,10 @@ export function OperacaoPage({ nav }: { nav: Navegacao }) {
     if (!bancada) return;
     campo.current?.focus();
     const voltar = () => setTimeout(() => {
-      if (!document.querySelector(".modal") && document.activeElement?.tagName !== "SELECT") campo.current?.focus();
+      // Não rouba o foco de quem está digitando em outro campo (ex.: busca por pedido).
+      const ativo = document.activeElement;
+      const digitando = ativo !== campo.current && ["INPUT", "SELECT", "TEXTAREA"].includes(ativo?.tagName ?? "");
+      if (!document.querySelector(".modal") && !digitando) campo.current?.focus();
     }, 50);
     window.addEventListener("click", voltar);
     return () => window.removeEventListener("click", voltar);
@@ -166,6 +177,8 @@ export function OperacaoPage({ nav }: { nav: Navegacao }) {
       <section className="cartao lista">
         <div className="lista-topo">
           <p className="sub">{atual.explica}</p>
+          <input type="search" className="busca-lista" value={busca} onChange={(e) => setBusca(e.target.value)}
+                 placeholder="Buscar pedido, mediação ou rastreio" aria-label="Buscar nesta aba pelo pedido" />
           {aba === "a_caminho" && (
             <div className="segmentos" role="group" aria-label="Situação do envio">
               <button type="button" aria-pressed={!envio} onClick={() => setEnvio("")}>Todos</button>
@@ -217,7 +230,8 @@ export function OperacaoPage({ nav }: { nav: Navegacao }) {
             );
           })}
         </ul>
-        {dados && dados.itens.length === 0 && <p className="vazio">Nada aqui agora. {aba === "aguardando_conferencia" ? "Quando um pacote chegar, bipe a etiqueta no campo acima." : ""}</p>}
+        {dados && dados.itens.length === 0 && buscaAtiva && <p className="vazio">Nada com "{buscaAtiva}" em {atual.nome}. Confira o número ou tente outra aba.</p>}
+        {dados && dados.itens.length === 0 && !buscaAtiva && <p className="vazio">Nada aqui agora. {aba === "aguardando_conferencia" ? "Quando um pacote chegar, bipe a etiqueta no campo acima." : ""}</p>}
         {!dados && !erro && <p className="vazio">Carregando…</p>}
         <nav className="paginacao" aria-label="Páginas">
           <span className="sub">{dados?.total ?? 0} devoluções</span>

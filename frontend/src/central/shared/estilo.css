@@ -200,6 +200,7 @@
 .central-dev .contagem { font-size: 0.8rem; font-weight: 700; background: var(--fundo); color: var(--tinta); border-radius: 999px; padding: 0.05rem 0.55rem; }
 .central-dev .abas-operador button[aria-selected="true"] .contagem { background: var(--azul); color: #fff; }
 .central-dev .lista-topo { display: flex; align-items: center; justify-content: space-between; gap: 1rem; margin-bottom: 0.3rem; }
+.central-dev .busca-lista { flex: 0 1 280px; min-width: 180px; margin-left: auto; padding: 0.45rem 0.75rem; border: 1px solid var(--linha); border-radius: 8px; background: var(--fundo); font: inherit; }
 .central-dev .segmentos { display: flex; gap: 0.3rem; }
 .central-dev .segmentos button { border: 1px solid var(--linha-forte); background: var(--papel); border-radius: 8px; padding: 0.3rem 0.65rem;
   font-weight: 500; font-size: 0.82rem; display: inline-flex; align-items: center; }

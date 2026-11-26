@@ -147,6 +147,16 @@ def test_envio_a_caminho():
     assert r["a_caminho"]["mercado_livre"]["postado"] == 1 and [l["id_externo"] for l in r["itens"]] == ["C2"]
 
 
+def test_busca_por_pedido():
+    devolucoes.salvar([_registro(id_externo="C3", pedido="2000015866105565", rastreio=None, codigos=[]),
+                       _registro(id_externo="C4", pedido="261101752WQJ5W", rastreio=None, codigos=[], plataforma="shopee")])
+    ids = lambda q: [l["id_externo"] for l in cliente.get(f"/api/central/operacao?destino=&busca={q}&por_pagina=50").json()["itens"]]  # noqa: E731
+    assert ids("105565") == ["C3"]  # últimos dígitos bastam
+    assert ids("wqj5w") == ["C4"]  # sem diferenciar maiúscula
+    assert ids("C3") == ["C3"]  # id da reclamação/mediação também acha
+    assert ids("nada-disso") == []
+
+
 def test_mercadoria_quebrada_bancada_e_motivo():
     """Duas origens: bancada (conferiu e não vende) e motivo (já veio como danificado/defeito).
     Revisão do ML não conta; conferência que diz 'voltou bom' derruba o motivo."""
