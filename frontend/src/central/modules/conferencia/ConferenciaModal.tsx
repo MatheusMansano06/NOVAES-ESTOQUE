@@ -7,7 +7,7 @@ import { Icone } from "../../shared/Icone";
 import { LogoPlataforma } from "../../shared/LogoPlataforma";
 import { Checklist, type Constatacao } from "./Checklist";
 import { Evidencias } from "./Evidencias";
-import { PainelGravacao, useGravacao } from "./Gravacao";
+import { EnvioGravacao, EtapaFilmagem, useGravacao } from "./Gravacao";
 import { CULPA, type Midia, type Tela } from "./tipos";
 import { Veredito } from "./Veredito";
 
@@ -110,7 +110,9 @@ export function ConferenciaModal({ codigo, gravar, onFechar, onMudou }: Props) {
   const [registrando, setRegistrando] = useState(false);
   const tela = telas?.[escolhida];
   const conferida = !!tela?.conferencia;
-  const filmando = gravar && !!tela && !conferida;
+  // Bipou uma devolução ainda não conferida: primeiro filma a abertura, depois mostra o resto.
+  const [filmado, setFilmado] = useState(false);
+  const filmando = gravar && !!tela && !conferida && !filmado;
   const gravacao = useGravacao(filmando);
   const perderia = useRef(gravacao.perderia);
   perderia.current = gravacao.perderia;
@@ -140,7 +142,7 @@ export function ConferenciaModal({ codigo, gravar, onFechar, onMudou }: Props) {
   }
 
   const fechar = useCallback(() => {
-    if (perderia.current() && !window.confirm("O vídeo e as fotos desta conferência ainda não foram guardados e serão perdidos. Fechar mesmo assim?")) return;
+    if (perderia.current() && !window.confirm("O vídeo desta conferência ainda não foi guardado e será perdido. Fechar mesmo assim?")) return;
     onFechar();
   }, [onFechar]);
 
@@ -158,7 +160,6 @@ export function ConferenciaModal({ codigo, gravar, onFechar, onMudou }: Props) {
     setRegistrando(true);
     try {
       const r = await api.post<{ contestar: boolean; chamado_manual: boolean }>(`/conferencia/${tela.devolucao.id}`, c);
-      // Antes de recarregar: a tela recarregada já vem conferida e desliga a câmera.
       void gravacao.encerrar(r.contestar || r.chamado_manual ? tela.devolucao.id : null, atualizar);
       await carregar();
       onMudou();
@@ -194,7 +195,7 @@ export function ConferenciaModal({ codigo, gravar, onFechar, onMudou }: Props) {
         </header>
 
         {erro && <p className="aviso erro" role="alert">{erro}</p>}
-        <PainelGravacao g={gravacao} ativa={filmando} onEnviada={atualizar} />
+        <EnvioGravacao g={gravacao} onEnviada={atualizar} />
         {!telas && !erro && <div className="carregando">Buscando a devolução, o pedido na Olist e o custo…</div>}
         {telas?.length === 0 && ETIQUETA_TRIAGEM.test(codigo) && (
           <TriagemFull codigo={codigo} onEscolher={(pedido) => void vincular(pedido)} />
@@ -222,7 +223,8 @@ export function ConferenciaModal({ codigo, gravar, onFechar, onMudou }: Props) {
           </form>
         )}
 
-        {tela && (
+        {tela && filmando && <EtapaFilmagem g={gravacao} onTerminar={() => setFilmado(true)} />}
+        {tela && !filmando && (
           <div className="modal-corpo" key={tela.devolucao.id}>
             <Ficha tela={tela} />
             <section className="modal-passos">

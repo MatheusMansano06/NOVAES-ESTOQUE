@@ -145,7 +145,7 @@ export function OperacaoPage({ nav }: { nav: Navegacao }) {
         </form>
         <ol className="passos">
           <li><span>1</span>Bipe a etiqueta, o QR code ou a nota que veio no pacote</li>
-          <li><span>2</span>A câmera grava sozinha: desembale, pare de mexer no produto por 3 segundos para a foto e responda as perguntas</li>
+          <li><span>2</span>A câmera abre em tela cheia: filme a abertura do pacote, clique em terminar e responda as perguntas</li>
           <li><span>3</span>Siga o que o sistema indicar: estoque, contestação ou chamado</li>
         </ol>
       </section>
